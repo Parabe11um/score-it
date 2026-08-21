@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% load static %}
 
-{% block title %}{{ voting_session.name }} — Score It{% endblock %}
+{% block title %}{{ voting_session.name }} — score it{% endblock %}
 
 {% block content %}
 <nav class="breadcrumbs"><a href="{{ voting_session.project.get_absolute_url }}">{{ voting_session.project.name }}</a><span>›</span><span>{{ voting_session.name }}</span></nav>
