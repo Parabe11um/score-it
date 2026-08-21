@@ -10,18 +10,35 @@
     <div>
         <span class="eyebrow">КОМНАТА ГОЛОСОВАНИЯ</span>
         <h1>{{ voting_session.name }}</h1>
-        <p><span class="status-dot status-dot--active"></span>{{ voting_session.get_status_display }}</p>
+        <p><span class="status-dot {% if voting_session.status == 'active' %}status-dot--active{% endif %}"></span>{{ voting_session.get_status_display }}{% if voting_session.archived_at %} · В архиве{% endif %}</p>
         <div class="session-meta">
             <span>Минимум голосов: <strong>{{ voting_session.minimum_participants }}</strong></span>
             <span>Оценено: <strong>{{ queue.completed }} из {{ queue.total }}</strong></span>
         </div>
     </div>
-    {% if voting_session.status != "finished" %}
-        <form method="post" action="{% url 'poker:session_finish' voting_session.pk %}" onsubmit="return confirm('Завершить сессию?');">
-            {% csrf_token %}<button class="button button--danger-soft" type="submit">Завершить сессию</button>
+    <div class="page-heading__actions">
+        {% if voting_session.status != "finished" %}
+            <form method="post" action="{% url 'poker:session_finish' voting_session.pk %}" onsubmit="return confirm('Завершить сессию? Незакрытые раунды будут отменены.');">
+                {% csrf_token %}<button class="button button--danger-soft" type="submit">Завершить сессию</button>
+            </form>
+        {% elif voting_session.archived_at %}
+            <form method="post" action="{% url 'poker:session_restore' voting_session.pk %}">
+                {% csrf_token %}<button class="button button--secondary" type="submit">Восстановить из архива</button>
+            </form>
+        {% else %}
+            <form method="post" action="{% url 'poker:session_archive' voting_session.pk %}">
+                {% csrf_token %}<button class="button button--secondary" type="submit">В архив</button>
+            </form>
+        {% endif %}
+        <form method="post" action="{% url 'poker:session_delete' voting_session.pk %}" onsubmit="return confirm('Удалить комнату «{{ voting_session.name|escapejs }}»? Будут удалены участники, голоса и вся история оценки этой комнаты.');">
+            {% csrf_token %}<button class="button button--danger-soft" type="submit">Удалить</button>
         </form>
-    {% endif %}
+    </div>
 </div>
+
+{% if voting_session.archived_at %}
+    <div class="archive-notice">Комната находится в архиве с {{ voting_session.archived_at|date:"d.m.Y H:i" }}.</div>
+{% endif %}
 
 <section class="card invite-card">
     <div><span class="eyebrow">ССЫЛКА ДЛЯ УЧАСТНИКОВ</span><p>Регистрация не требуется — участнику достаточно указать имя.</p></div>

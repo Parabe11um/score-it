@@ -54,6 +54,7 @@ class Task(models.Model):
     estimate_count = models.PositiveIntegerField(
         "Количество голосов", null=True, blank=True
     )
+    completed_at = models.DateTimeField("Завершена", null=True, blank=True)
     created_at = models.DateTimeField("Создана", auto_now_add=True)
     updated_at = models.DateTimeField("Изменена", auto_now=True)
 
@@ -131,6 +132,7 @@ class VotingSession(models.Model):
     )
     created_at = models.DateTimeField("Создана", auto_now_add=True)
     finished_at = models.DateTimeField("Завершена", null=True, blank=True)
+    archived_at = models.DateTimeField("В архиве", null=True, blank=True)
 
     class Meta:
         ordering = ("-created_at",)
@@ -337,6 +339,11 @@ class Vote(models.Model):
 
 
 class Sprint(models.Model):
+    class Status(models.TextChoices):
+        PLANNING = "planning", "Планируется"
+        ACTIVE = "active", "Активен"
+        COMPLETED = "completed", "Завершён"
+
     project = models.ForeignKey(
         Project,
         on_delete=models.CASCADE,
@@ -344,6 +351,9 @@ class Sprint(models.Model):
         verbose_name="Проект",
     )
     name = models.CharField("Название", max_length=160)
+    status = models.CharField(
+        "Статус", max_length=20, choices=Status.choices, default=Status.PLANNING
+    )
     goal = models.CharField("Цель спринта", max_length=500, blank=True)
     start_date = models.DateField("Дата начала", null=True, blank=True)
     end_date = models.DateField("Дата завершения", null=True, blank=True)
@@ -352,6 +362,7 @@ class Sprint(models.Model):
     )
     tasks = models.ManyToManyField(Task, through="SprintTask", related_name="sprints")
     created_at = models.DateTimeField("Создан", auto_now_add=True)
+    archived_at = models.DateTimeField("В архиве", null=True, blank=True)
 
     class Meta:
         ordering = ("-created_at",)

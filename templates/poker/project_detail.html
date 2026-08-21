@@ -10,8 +10,13 @@
     <div>
         <span class="eyebrow">ПРОЕКТ</span>
         <h1>{{ project.name }}</h1>
-        <p>{{ tasks|length }} задач · {{ sessions|length }} комнат · {{ sprints|length }} спринтов</p>
+        <p>{{ task_total }} задач · {{ session_total }} комнат · {{ sprint_total }} спринтов</p>
     </div>
+    {% if show_archived %}
+        <a class="button button--secondary" href="{{ project.get_absolute_url }}">← Вернуться к активным</a>
+    {% elif archived_total %}
+        <a class="button button--secondary" href="?archive=1">Архив · {{ archived_total }}</a>
+    {% endif %}
 </div>
 
 <div class="three-column-actions">
@@ -94,25 +99,52 @@
 
 <section class="card section-card">
     <div class="section-heading">
-        <div><h2>Бэклог</h2><p>Все задачи проекта и их итоговые оценки.</p></div>
+        <div><h2>Бэклог</h2><p>Новые задачи ещё не добавлялись ни в одну комнату.</p></div>
         <span class="pill">{{ tasks|length }}</span>
     </div>
+    <nav class="filter-bar" aria-label="Фильтры задач">
+        {% for filter in task_filters %}
+            <a class="filter-chip {% if task_filter == filter.value %}filter-chip--active{% endif %}"
+               href="?tasks={{ filter.value }}{% if show_archived %}&amp;archive=1{% endif %}">
+                {{ filter.label }} <span>{{ filter.count }}</span>
+            </a>
+        {% endfor %}
+    </nav>
     <div class="table-wrap">
         <table>
-            <thead><tr><th>Номер</th><th>Название</th><th>Статус</th><th class="align-right">Оценка</th></tr></thead>
+            <thead><tr><th>Номер</th><th>Название</th><th>Статус</th><th class="align-right">Оценка</th><th class="align-right">Действия</th></tr></thead>
             <tbody>
             {% for task in tasks %}
                 <tr>
                     <td><span class="task-number">{{ task.number }}</span></td>
                     <td>{{ task.title }}</td>
                     <td>
-                        {% if task.status == "estimated" %}<span class="badge badge--success">Оценена</span>
+                        {% if task.completed_at %}<span class="badge badge--success">Завершена</span>
+                        {% elif task.in_sprint %}<span class="badge badge--active">В спринте</span>
+                        {% elif not task.has_voting_history and task.status == "unestimated" %}<span class="badge badge--new">Новая</span>
+                        {% elif task.status == "estimated" %}<span class="badge badge--success">Оценена</span>
                         {% else %}<span class="badge">Не оценена</span>{% endif %}
                     </td>
                     <td class="align-right"><strong class="estimate-value">{{ task.estimate_display }}</strong></td>
+                    <td class="align-right">
+                        <div class="table-actions">
+                            {% if task.completed_at %}
+                                <form method="post" action="{% url 'poker:task_reopen' project.pk task.pk %}">
+                                    {% csrf_token %}<button class="button button--ghost button--small" type="submit">Вернуть</button>
+                                </form>
+                            {% else %}
+                                <form method="post" action="{% url 'poker:task_complete' project.pk task.pk %}">
+                                    {% csrf_token %}<button class="button button--ghost button--small" type="submit">Завершить</button>
+                                </form>
+                            {% endif %}
+                            <form method="post" action="{% url 'poker:task_delete' project.pk task.pk %}" onsubmit="return confirm('Удалить задачу {{ task.number|escapejs }}? Она исчезнет из комнат, спринта и истории голосования.');">
+                                {% csrf_token %}<button class="icon-button" type="submit" title="Удалить задачу" aria-label="Удалить задачу {{ task.number }}">×</button>
+                            </form>
+                        </div>
+                    </td>
                 </tr>
             {% empty %}
-                <tr><td colspan="4" class="table-empty">Добавьте задачи списком в блоке выше.</td></tr>
+                <tr><td colspan="5" class="table-empty">По выбранному фильтру задач нет.</td></tr>
             {% endfor %}
             </tbody>
         </table>
@@ -121,25 +153,25 @@
 
 <div class="split-grid">
     <section class="card section-card">
-        <div class="section-heading"><div><h2>Комнаты</h2><p>Сессии Planning Poker.</p></div></div>
+        <div class="section-heading"><div><h2>{% if show_archived %}Архивные комнаты{% else %}Комнаты{% endif %}</h2><p>Сессии Planning Poker.</p></div></div>
         <div class="item-list">
             {% for item in sessions %}
                 <a class="list-item" href="{{ item.get_absolute_url }}">
-                    <div><strong>{{ item.name }}</strong><small>{{ item.get_status_display }} · {{ item.created_at|date:"d.m.Y H:i" }}</small></div>
+                    <div><strong>{{ item.name }}</strong><small>{% if item.archived_at %}Архив · {% endif %}{{ item.get_status_display }} · {{ item.created_at|date:"d.m.Y H:i" }}</small></div>
                     <span>→</span>
                 </a>
-            {% empty %}<div class="compact-empty">Комнат пока нет.</div>{% endfor %}
+            {% empty %}<div class="compact-empty">{% if show_archived %}В архиве комнат нет.{% else %}Комнат пока нет.{% endif %}</div>{% endfor %}
         </div>
     </section>
     <section class="card section-card">
-        <div class="section-heading"><div><h2>Спринты</h2><p>Планы из оценённых задач.</p></div></div>
+        <div class="section-heading"><div><h2>{% if show_archived %}Архивные спринты{% else %}Спринты{% endif %}</h2><p>Планы из оценённых задач.</p></div></div>
         <div class="item-list">
             {% for sprint in sprints %}
                 <a class="list-item" href="{{ sprint.get_absolute_url }}">
-                    <div><strong>{{ sprint.name }}</strong><small>{{ sprint.tasks.count }} задач · {{ sprint.total_estimate_display }} points</small></div>
+                    <div><strong>{{ sprint.name }}</strong><small>{% if sprint.archived_at %}Архив · {% endif %}{{ sprint.get_status_display }} · {{ sprint.tasks.count }} задач · {{ sprint.total_estimate_display }} points</small></div>
                     <span>→</span>
                 </a>
-            {% empty %}<div class="compact-empty">Спринтов пока нет.</div>{% endfor %}
+            {% empty %}<div class="compact-empty">{% if show_archived %}В архиве спринтов нет.{% else %}Спринтов пока нет.{% endif %}</div>{% endfor %}
         </div>
     </section>
 </div>

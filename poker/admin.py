@@ -21,8 +21,15 @@ class ProjectAdmin(admin.ModelAdmin):
 
 @admin.register(Task)
 class TaskAdmin(admin.ModelAdmin):
-    list_display = ("number", "title", "project", "status", "estimate_display")
-    list_filter = ("status", "project")
+    list_display = (
+        "number",
+        "title",
+        "project",
+        "status",
+        "estimate_display",
+        "completed_at",
+    )
+    list_filter = ("status", "project", "completed_at")
     search_fields = ("number", "title")
 
 
@@ -39,9 +46,10 @@ class VotingSessionAdmin(admin.ModelAdmin):
         "status",
         "minimum_participants",
         "current_task",
+        "archived_at",
         "created_at",
     )
-    list_filter = ("status",)
+    list_filter = ("status", "archived_at")
     inlines = (VotingSessionTaskInline,)
 
 
@@ -75,5 +83,14 @@ class SprintTaskInline(admin.TabularInline):
 
 @admin.register(Sprint)
 class SprintAdmin(admin.ModelAdmin):
-    list_display = ("name", "project", "start_date", "end_date", "capacity")
+    list_display = (
+        "name",
+        "project",
+        "status",
+        "start_date",
+        "end_date",
+        "capacity",
+        "archived_at",
+    )
+    list_filter = ("status", "archived_at")
     inlines = (SprintTaskInline,)

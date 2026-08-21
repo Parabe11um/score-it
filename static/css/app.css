@@ -71,6 +71,7 @@ p { color: var(--muted); line-height: 1.55; }
 .page-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; margin-bottom: 30px; }
 .page-heading p { margin-bottom: 0; }
 .page-heading--compact h1 { font-size: clamp(28px, 4vw, 40px); }
+.page-heading__actions { display: flex; align-items: center; justify-content: flex-end; gap: 9px; flex-wrap: wrap; }
 .breadcrumbs { display: flex; align-items: center; gap: 9px; margin-bottom: 24px; color: var(--muted); font-size: 14px; }
 .breadcrumbs a:hover { color: var(--primary); }
 
@@ -139,6 +140,11 @@ input:focus, textarea:focus, select:focus { border-color: var(--primary); box-sh
 .section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 19px; }
 .section-heading h2 { margin-bottom: 4px; }
 .section-heading p { margin: 0; font-size: 13px; }
+.filter-bar { display: flex; gap: 8px; margin: -3px 0 19px; padding-bottom: 3px; overflow-x: auto; }
+.filter-chip { display: inline-flex; align-items: center; gap: 7px; flex: 0 0 auto; min-height: 36px; padding: 0 12px; color: var(--muted); background: var(--surface-soft); border: 1px solid var(--line); border-radius: 999px; font-size: 12px; font-weight: 750; }
+.filter-chip span { display: grid; place-items: center; min-width: 21px; height: 21px; padding-inline: 5px; color: var(--muted); background: white; border-radius: 999px; font-size: 11px; }
+.filter-chip--active { color: white; background: var(--primary); border-color: var(--primary); }
+.filter-chip--active span { color: var(--primary); }
 .table-wrap { overflow-x: auto; margin-inline: -24px; }
 table { width: 100%; border-collapse: collapse; }
 th, td { padding: 14px 24px; border-top: 1px solid #e7edf3; text-align: left; vertical-align: middle; }
@@ -248,11 +254,20 @@ td { font-size: 14px; }
 .queue-row__votes { color: var(--muted); font-size: 12px; white-space: nowrap; }
 .queue-row__votes--ready { color: var(--success); font-weight: 800; }
 .badge--active { color: var(--primary); background: var(--primary-soft); }
+.badge--new { color: #8a5b18; background: #fff4d7; }
+.table-actions { display: flex; align-items: center; justify-content: flex-end; gap: 5px; }
+.table-actions form { flex: 0 0 auto; }
+.archive-notice { margin: -10px 0 22px; padding: 13px 16px; color: #72551b; background: #fff8e7; border: 1px solid #f0dda9; border-radius: 11px; font-size: 13px; }
 .add-queue-card summary { margin-bottom: 0; cursor: pointer; list-style: none; }
 .add-queue-card summary::-webkit-details-marker { display: none; }
 .add-queue-card[open] summary { margin-bottom: 16px; }
 
 .sprint-metrics { display: grid; grid-template-columns: repeat(3,1fr); gap: 15px; margin-bottom: 22px; }
+.status-panel { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 22px; padding: 18px 22px; }
+.status-panel strong, .status-panel small { display: block; }
+.status-panel small { margin-top: 4px; color: var(--muted); }
+.status-switcher { display: flex; align-items: center; justify-content: flex-end; gap: 7px; flex-wrap: wrap; }
+.status-switcher .button--primary:disabled { cursor: default; opacity: 1; }
 .metric-card { display: flex; align-items: baseline; gap: 8px; padding: 20px 22px; background: white; border: 1px solid var(--line); border-radius: 15px; box-shadow: var(--shadow); }
 .metric-card span { margin-right: auto; color: var(--muted); font-size: 13px; }
 .metric-card strong { font-size: 27px; }
@@ -287,6 +302,9 @@ td { font-size: 14px; }
     .auth-layout, .join-layout { grid-template-columns: 1fr; gap: 30px; padding-block: 22px; }
     .auth-intro { order: 2; }
     .page-heading, .room-header { align-items: flex-start; flex-direction: column; }
+    .page-heading__actions { width: 100%; justify-content: flex-start; }
+    .status-panel { align-items: flex-start; flex-direction: column; }
+    .status-switcher { width: 100%; justify-content: flex-start; }
     .invite-card { grid-template-columns: 1fr; }
     .copy-control { grid-template-columns: 1fr; }
     .picker-tools { grid-template-columns: 1fr; }

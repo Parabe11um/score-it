@@ -101,7 +101,7 @@ class VotingSessionForm(BootstrapFormMixin, forms.ModelForm):
         self.project = project
         if project is None:
             return
-        tasks = project.tasks.all()
+        tasks = project.tasks.filter(completed_at__isnull=True)
         self.fields["task_ids"].queryset = tasks
         if not self.is_bound:
             self.initial["task_ids"] = tasks.filter(status=Task.Status.UNESTIMATED)

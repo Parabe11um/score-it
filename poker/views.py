@@ -3,7 +3,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db import transaction
-from django.db.models import Count, Max, Q
+from django.db.models import Count, Exists, Max, OuterRef, Q
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
@@ -52,6 +52,15 @@ def _session_for_user(user, pk):
 def _sprint_for_user(user, pk):
     return get_object_or_404(
         Sprint.objects.select_related("project"), pk=pk, project__owner=user
+    )
+
+
+def _task_for_user(user, project_pk, task_pk):
+    return get_object_or_404(
+        Task,
+        pk=task_pk,
+        project_id=project_pk,
+        project__owner=user,
     )
 
 
@@ -271,6 +280,89 @@ def _participant_queue_summary(voting_session, participant, queue_item):
     return summary
 
 
+def _project_detail_context(
+    project,
+    *,
+    task_filter="all",
+    show_archived=False,
+    task_import_form=None,
+    session_form=None,
+    sprint_form=None,
+):
+    task_filter_labels = (
+        ("all", "Все"),
+        ("new", "Новые"),
+        ("unestimated", "Не оценены"),
+        ("estimated", "Оценены"),
+        ("sprint", "В спринте"),
+        ("completed", "Завершены"),
+    )
+    valid_filters = {value for value, _label in task_filter_labels}
+    if task_filter not in valid_filters:
+        task_filter = "all"
+
+    tasks = project.tasks.annotate(
+        in_sprint=Exists(
+            SprintTask.objects.filter(task_id=OuterRef("pk"))
+        ),
+        has_voting_history=Exists(
+            VotingSessionTask.objects.filter(task_id=OuterRef("pk"))
+        ),
+    )
+    task_queries = {
+        "all": Q(),
+        "new": Q(
+            completed_at__isnull=True,
+            status=Task.Status.UNESTIMATED,
+            has_voting_history=False,
+        ),
+        "unestimated": Q(
+            completed_at__isnull=True,
+            status=Task.Status.UNESTIMATED,
+        ),
+        "estimated": Q(
+            completed_at__isnull=True,
+            status=Task.Status.ESTIMATED,
+        ),
+        "sprint": Q(completed_at__isnull=True, in_sprint=True),
+        "completed": Q(completed_at__isnull=False),
+    }
+    filter_counts = {
+        value: tasks.filter(task_queries[value]).count()
+        for value, _label in task_filter_labels
+    }
+    filtered_tasks = tasks.filter(task_queries[task_filter])
+
+    sessions = project.voting_sessions.select_related("current_task").filter(
+        archived_at__isnull=not show_archived
+    )
+    sprints = project.sprints.filter(
+        archived_at__isnull=not show_archived
+    )
+    return {
+        "project": project,
+        "tasks": filtered_tasks,
+        "task_total": project.tasks.count(),
+        "task_filter": task_filter,
+        "task_filters": [
+            {"value": value, "label": label, "count": filter_counts[value]}
+            for value, label in task_filter_labels
+        ],
+        "sessions": sessions,
+        "session_total": project.voting_sessions.count(),
+        "sprints": sprints,
+        "sprint_total": project.sprints.count(),
+        "show_archived": show_archived,
+        "archived_total": (
+            project.voting_sessions.filter(archived_at__isnull=False).count()
+            + project.sprints.filter(archived_at__isnull=False).count()
+        ),
+        "task_import_form": task_import_form or BulkTaskImportForm(),
+        "session_form": session_form or VotingSessionForm(project=project),
+        "sprint_form": sprint_form or SprintForm(),
+    }
+
+
 @login_required
 def dashboard(request):
     projects = (
@@ -308,21 +400,14 @@ def project_create(request):
 @login_required
 def project_detail(request, pk):
     project = _project_for_user(request.user, pk)
-    tasks = project.tasks.all()
-    sessions = project.voting_sessions.select_related("current_task")
-    sprints = project.sprints.all()
     return render(
         request,
         "poker/project_detail.html",
-        {
-            "project": project,
-            "tasks": tasks,
-            "sessions": sessions,
-            "sprints": sprints,
-            "task_import_form": BulkTaskImportForm(),
-            "session_form": VotingSessionForm(project=project),
-            "sprint_form": SprintForm(),
-        },
+        _project_detail_context(
+            project,
+            task_filter=request.GET.get("tasks", "all"),
+            show_archived=request.GET.get("archive") == "1",
+        ),
     )
 
 
@@ -336,15 +421,7 @@ def task_import(request, pk):
         return render(
             request,
             "poker/project_detail.html",
-            {
-                "project": project,
-                "tasks": project.tasks.all(),
-                "sessions": project.voting_sessions.all(),
-                "sprints": project.sprints.all(),
-                "task_import_form": form,
-                "session_form": VotingSessionForm(project=project),
-                "sprint_form": SprintForm(),
-            },
+            _project_detail_context(project, task_import_form=form),
             status=400,
         )
 
@@ -371,6 +448,41 @@ def task_import(request, pk):
 
 @login_required
 @require_POST
+def task_complete(request, pk, task_pk):
+    project = _project_for_user(request.user, pk)
+    task = _task_for_user(request.user, project.pk, task_pk)
+    if task.completed_at is None:
+        task.completed_at = timezone.now()
+        task.save(update_fields=("completed_at", "updated_at"))
+        messages.success(request, f"Задача {task.number} отмечена завершённой.")
+    return redirect(project)
+
+
+@login_required
+@require_POST
+def task_reopen(request, pk, task_pk):
+    project = _project_for_user(request.user, pk)
+    task = _task_for_user(request.user, project.pk, task_pk)
+    if task.completed_at is not None:
+        task.completed_at = None
+        task.save(update_fields=("completed_at", "updated_at"))
+        messages.info(request, f"Задача {task.number} возвращена в работу.")
+    return redirect(project)
+
+
+@login_required
+@require_POST
+def task_delete(request, pk, task_pk):
+    project = _project_for_user(request.user, pk)
+    task = _task_for_user(request.user, project.pk, task_pk)
+    task_number = task.number
+    task.delete()
+    messages.success(request, f"Задача {task_number} удалена.")
+    return redirect(project)
+
+
+@login_required
+@require_POST
 def session_create(request, pk):
     project = _project_for_user(request.user, pk)
     form = VotingSessionForm(request.POST, project=project)
@@ -392,15 +504,7 @@ def session_create(request, pk):
     return render(
         request,
         "poker/project_detail.html",
-        {
-            "project": project,
-            "tasks": project.tasks.all(),
-            "sessions": project.voting_sessions.select_related("current_task"),
-            "sprints": project.sprints.all(),
-            "task_import_form": BulkTaskImportForm(),
-            "session_form": form,
-            "sprint_form": SprintForm(),
-        },
+        _project_detail_context(project, session_form=form),
         status=400,
     )
 
@@ -411,7 +515,9 @@ def session_manage(request, pk):
     current_round = voting_session.current_round
     queue = _queue_context(voting_session)
     queued_task_ids = [item.task_id for item in queue["items"]]
-    available_tasks = voting_session.project.tasks.exclude(pk__in=queued_task_ids)
+    available_tasks = voting_session.project.tasks.filter(
+        completed_at__isnull=True
+    ).exclude(pk__in=queued_task_ids)
     public_url = request.build_absolute_uri(voting_session.get_public_url())
     summary = current_round.summary() if current_round else None
     return render(
@@ -440,7 +546,9 @@ def session_queue_add(request, pk):
         return redirect(voting_session)
 
     task_ids = request.POST.getlist("task_ids")
-    tasks = voting_session.project.tasks.filter(pk__in=task_ids)
+    tasks = voting_session.project.tasks.filter(
+        pk__in=task_ids, completed_at__isnull=True
+    )
     with transaction.atomic():
         created_items = _add_tasks_to_queue(voting_session, tasks)
         if voting_session.status == VotingSession.Status.ACTIVE:
@@ -651,6 +759,42 @@ def session_finish(request, pk):
         )
     messages.success(request, "Сессия голосования завершена.")
     return redirect(voting_session)
+
+
+@login_required
+@require_POST
+def session_archive(request, pk):
+    voting_session = _session_for_user(request.user, pk)
+    if voting_session.status != VotingSession.Status.FINISHED:
+        messages.error(request, "В архив можно переместить только завершённую комнату.")
+        return redirect(voting_session)
+    if voting_session.archived_at is None:
+        voting_session.archived_at = timezone.now()
+        voting_session.save(update_fields=("archived_at",))
+        messages.success(request, f"Комната «{voting_session.name}» перемещена в архив.")
+    return redirect(voting_session.project)
+
+
+@login_required
+@require_POST
+def session_restore(request, pk):
+    voting_session = _session_for_user(request.user, pk)
+    if voting_session.archived_at is not None:
+        voting_session.archived_at = None
+        voting_session.save(update_fields=("archived_at",))
+        messages.success(request, f"Комната «{voting_session.name}» восстановлена.")
+    return redirect(voting_session)
+
+
+@login_required
+@require_POST
+def session_delete(request, pk):
+    voting_session = _session_for_user(request.user, pk)
+    project = voting_session.project
+    session_name = voting_session.name
+    voting_session.delete()
+    messages.success(request, f"Комната «{session_name}» удалена.")
+    return redirect(project)
 
 
 @login_required
@@ -971,7 +1115,9 @@ def sprint_detail(request, pk):
     sprint = _sprint_for_user(request.user, pk)
     sprint_items = sprint.sprint_tasks.select_related("task")
     available_tasks = sprint.project.tasks.filter(
-        status=Task.Status.ESTIMATED, sprint_items__isnull=True
+        status=Task.Status.ESTIMATED,
+        completed_at__isnull=True,
+        sprint_items__isnull=True,
     )
     return render(
         request,
@@ -988,9 +1134,18 @@ def sprint_detail(request, pk):
 @require_POST
 def sprint_add_tasks(request, pk):
     sprint = _sprint_for_user(request.user, pk)
+    if sprint.archived_at is not None or sprint.status == Sprint.Status.COMPLETED:
+        messages.error(
+            request,
+            "Нельзя менять состав завершённого или архивного спринта.",
+        )
+        return redirect(sprint)
     task_ids = request.POST.getlist("task_ids")
     tasks = sprint.project.tasks.filter(
-        pk__in=task_ids, status=Task.Status.ESTIMATED, sprint_items__isnull=True
+        pk__in=task_ids,
+        status=Task.Status.ESTIMATED,
+        completed_at__isnull=True,
+        sprint_items__isnull=True,
     )
     position = (
         sprint.sprint_tasks.aggregate(value=Max("position"))["value"] or 0
@@ -1009,10 +1164,75 @@ def sprint_add_tasks(request, pk):
 @require_POST
 def sprint_remove_task(request, pk, task_pk):
     sprint = _sprint_for_user(request.user, pk)
+    if sprint.archived_at is not None or sprint.status == Sprint.Status.COMPLETED:
+        messages.error(
+            request,
+            "Нельзя менять состав завершённого или архивного спринта.",
+        )
+        return redirect(sprint)
     item = get_object_or_404(SprintTask, sprint=sprint, task_id=task_pk)
     item.delete()
     messages.info(request, "Задача удалена из спринта.")
     return redirect(sprint)
+
+
+@login_required
+@require_POST
+def sprint_set_status(request, pk):
+    sprint = _sprint_for_user(request.user, pk)
+    if sprint.archived_at is not None:
+        messages.error(request, "Сначала восстановите спринт из архива.")
+        return redirect(sprint)
+
+    status = request.POST.get("status")
+    valid_statuses = {value for value, _label in Sprint.Status.choices}
+    if status not in valid_statuses:
+        messages.error(request, "Неизвестный статус спринта.")
+        return redirect(sprint)
+
+    sprint.status = status
+    sprint.save(update_fields=("status",))
+    messages.success(
+        request,
+        f"Статус спринта изменён: {sprint.get_status_display()}.",
+    )
+    return redirect(sprint)
+
+
+@login_required
+@require_POST
+def sprint_archive(request, pk):
+    sprint = _sprint_for_user(request.user, pk)
+    if sprint.status != Sprint.Status.COMPLETED:
+        messages.error(request, "В архив можно переместить только завершённый спринт.")
+        return redirect(sprint)
+    if sprint.archived_at is None:
+        sprint.archived_at = timezone.now()
+        sprint.save(update_fields=("archived_at",))
+        messages.success(request, f"Спринт «{sprint.name}» перемещён в архив.")
+    return redirect(sprint.project)
+
+
+@login_required
+@require_POST
+def sprint_restore(request, pk):
+    sprint = _sprint_for_user(request.user, pk)
+    if sprint.archived_at is not None:
+        sprint.archived_at = None
+        sprint.save(update_fields=("archived_at",))
+        messages.success(request, f"Спринт «{sprint.name}» восстановлен.")
+    return redirect(sprint)
+
+
+@login_required
+@require_POST
+def sprint_delete(request, pk):
+    sprint = _sprint_for_user(request.user, pk)
+    project = sprint.project
+    sprint_name = sprint.name
+    sprint.delete()
+    messages.success(request, f"Спринт «{sprint_name}» удалён.")
+    return redirect(project)
 
 
 @login_required

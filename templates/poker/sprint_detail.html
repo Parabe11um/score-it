@@ -5,9 +5,39 @@
 {% block content %}
 <nav class="breadcrumbs"><a href="{{ sprint.project.get_absolute_url }}">{{ sprint.project.name }}</a><span>›</span><span>{{ sprint.name }}</span></nav>
 <div class="page-heading page-heading--compact">
-    <div><span class="eyebrow">ПЛАНИРОВАНИЕ СПРИНТА</span><h1>{{ sprint.name }}</h1><p>{% if sprint.start_date %}{{ sprint.start_date|date:"d.m.Y" }}{% endif %}{% if sprint.end_date %} — {{ sprint.end_date|date:"d.m.Y" }}{% endif %}{% if sprint.goal %} · {{ sprint.goal }}{% endif %}</p></div>
-    <a class="button button--secondary" href="{% url 'poker:sprint_export' sprint.pk %}">Выгрузить Excel</a>
+    <div><span class="eyebrow">ПЛАНИРОВАНИЕ СПРИНТА</span><h1>{{ sprint.name }}</h1><p>{{ sprint.get_status_display }}{% if sprint.archived_at %} · В архиве{% endif %}{% if sprint.start_date %} · {{ sprint.start_date|date:"d.m.Y" }}{% endif %}{% if sprint.end_date %} — {{ sprint.end_date|date:"d.m.Y" }}{% endif %}{% if sprint.goal %} · {{ sprint.goal }}{% endif %}</p></div>
+    <div class="page-heading__actions">
+        <a class="button button--secondary" href="{% url 'poker:sprint_export' sprint.pk %}">Выгрузить Excel</a>
+        {% if sprint.archived_at %}
+            <form method="post" action="{% url 'poker:sprint_restore' sprint.pk %}">
+                {% csrf_token %}<button class="button button--secondary" type="submit">Восстановить</button>
+            </form>
+        {% elif sprint.status == "completed" %}
+            <form method="post" action="{% url 'poker:sprint_archive' sprint.pk %}">
+                {% csrf_token %}<button class="button button--secondary" type="submit">В архив</button>
+            </form>
+        {% endif %}
+        <form method="post" action="{% url 'poker:sprint_delete' sprint.pk %}" onsubmit="return confirm('Удалить спринт «{{ sprint.name|escapejs }}»? Задачи останутся в проекте, но состав спринта будет удалён.');">
+            {% csrf_token %}<button class="button button--danger-soft" type="submit">Удалить</button>
+        </form>
+    </div>
 </div>
+
+{% if sprint.archived_at %}
+    <div class="archive-notice">Спринт находится в архиве с {{ sprint.archived_at|date:"d.m.Y H:i" }}.</div>
+{% else %}
+    <section class="card status-panel">
+        <div><strong>Статус спринта</strong><small>Завершённый спринт нельзя редактировать, но можно снова открыть.</small></div>
+        <div class="status-switcher">
+            {% for value, label in sprint.Status.choices %}
+                <form method="post" action="{% url 'poker:sprint_set_status' sprint.pk %}">
+                    {% csrf_token %}<input type="hidden" name="status" value="{{ value }}">
+                    <button class="button button--small {% if sprint.status == value %}button--primary{% else %}button--secondary{% endif %}" type="submit" {% if sprint.status == value %}disabled{% endif %}>{{ label }}</button>
+                </form>
+            {% endfor %}
+        </div>
+    </section>
+{% endif %}
 
 <div class="sprint-metrics">
     <div class="metric-card"><span>Задач</span><strong>{{ sprint_items|length }}</strong></div>
@@ -22,13 +52,14 @@
             <thead><tr><th>№</th><th>Задача</th><th class="align-right">Оценка</th><th></th></tr></thead>
             <tbody>
             {% for item in sprint_items %}
-                <tr><td>{{ forloop.counter }}</td><td><span class="task-number">{{ item.task.number }}</span><div class="task-title-secondary">{{ item.task.title }}</div></td><td class="align-right"><strong class="estimate-value">{{ item.task.estimate_display }}</strong></td><td class="align-right"><form method="post" action="{% url 'poker:sprint_remove_task' sprint.pk item.task.pk %}">{% csrf_token %}<button class="icon-button" type="submit" title="Убрать из спринта">×</button></form></td></tr>
+                <tr><td>{{ forloop.counter }}</td><td><span class="task-number">{{ item.task.number }}</span><div class="task-title-secondary">{{ item.task.title }}</div></td><td class="align-right"><strong class="estimate-value">{{ item.task.estimate_display }}</strong></td><td class="align-right">{% if not sprint.archived_at and sprint.status != "completed" %}<form method="post" action="{% url 'poker:sprint_remove_task' sprint.pk item.task.pk %}" onsubmit="return confirm('Убрать задачу {{ item.task.number|escapejs }} из спринта?');">{% csrf_token %}<button class="icon-button" type="submit" title="Убрать из спринта">×</button></form>{% endif %}</td></tr>
             {% empty %}<tr><td colspan="4" class="table-empty">Добавьте оценённые задачи из списка ниже.</td></tr>{% endfor %}
             </tbody>
         </table>
     </div>
 </section>
 
+{% if not sprint.archived_at and sprint.status != "completed" %}
 <section class="card section-card">
     <div class="section-heading"><div><h2>Доступные задачи</h2><p>Показаны оценённые задачи, ещё не добавленные в другие спринты.</p></div><span class="pill">{{ available_tasks|length }}</span></div>
     <form method="post" action="{% url 'poker:sprint_add_tasks' sprint.pk %}">
@@ -41,5 +72,5 @@
         {% if available_tasks %}<div class="section-footer"><button class="button button--primary" type="submit">Добавить выбранные</button></div>{% endif %}
     </form>
 </section>
+{% endif %}
 {% endblock %}
-
