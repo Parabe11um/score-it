@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+
+{% block title %}Войти в {{ voting_session.name }} — Score It{% endblock %}
+
+{% block content %}
+<div class="join-layout">
+    <section class="join-hero">
+        <span class="eyebrow">ВАС ПРИГЛАСИЛИ В КОМНАТУ</span>
+        <h1>{{ voting_session.name }}</h1>
+        <p>{{ voting_session.project.name }}</p>
+        <div class="scale-preview scale-preview--large"><span>0</span><span>2</span><span>4</span><span>8</span><span>12</span><span>20</span><span>32</span><span>52</span></div>
+    </section>
+    <section class="card join-card">
+        {% if voting_session.status == "finished" %}
+            <div class="empty-state"><div class="empty-state__icon">✓</div><h2>Голосование завершено</h2><p>Организатор уже закрыл эту сессию.</p></div>
+        {% else %}
+            <h2>Как вас представить?</h2>
+            <p class="muted">Учётная запись не нужна.</p>
+            <form method="post" action="{% url 'poker:room_join' voting_session.public_token %}" class="stack-form">
+                {% csrf_token %}
+                <div class="field"><label for="{{ join_form.name.id_for_label }}">{{ join_form.name.label }}</label>{{ join_form.name }}{% for error in join_form.name.errors %}<div class="form-error">{{ error }}</div>{% endfor %}</div>
+                <button class="button button--primary button--wide" type="submit">Присоединиться</button>
+            </form>
+        {% endif %}
+    </section>
+</div>
+{% endblock %}
+

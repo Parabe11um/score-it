@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+
+{% block title %}{{ project.name }} — Score It{% endblock %}
+
+{% block content %}
+<nav class="breadcrumbs"><a href="{% url 'poker:dashboard' %}">Проекты</a><span>›</span><span>{{ project.name }}</span></nav>
+
+<div class="page-heading page-heading--compact">
+    <div>
+        <span class="eyebrow">ПРОЕКТ</span>
+        <h1>{{ project.name }}</h1>
+        <p>{{ tasks|length }} задач · {{ sessions|length }} комнат · {{ sprints|length }} спринтов</p>
+    </div>
+</div>
+
+<div class="three-column-actions">
+    <details class="card action-card" open>
+        <summary>
+            <span class="action-card__number">1</span>
+            <span><strong>Добавить задачи</strong><small>Вставьте список целиком</small></span>
+        </summary>
+        <form method="post" action="{% url 'poker:task_import' project.pk %}" class="stack-form details-form">
+            {% csrf_token %}
+            {{ task_import_form.tasks_text }}
+            {% for error in task_import_form.tasks_text.errors %}<div class="form-error">{{ error }}</div>{% endfor %}
+            <div class="help-text">{{ task_import_form.tasks_text.help_text }}</div>
+            <button class="button button--primary" type="submit">Импортировать задачи</button>
+        </form>
+    </details>
+
+    <details class="card action-card">
+        <summary>
+            <span class="action-card__number">2</span>
+            <span><strong>Создать голосование</strong><small>Получить ссылку для команды</small></span>
+        </summary>
+        <form method="post" action="{% url 'poker:session_create' project.pk %}" class="stack-form details-form">
+            {% csrf_token %}
+            <div class="field">{{ session_form.name }}</div>
+            <button class="button button--primary" type="submit">Создать комнату</button>
+        </form>
+    </details>
+
+    <details class="card action-card">
+        <summary>
+            <span class="action-card__number">3</span>
+            <span><strong>Создать спринт</strong><small>Собрать оценённые задачи</small></span>
+        </summary>
+        <form method="post" action="{% url 'poker:sprint_create' project.pk %}" class="stack-form details-form">
+            {% csrf_token %}
+            {% for field in sprint_form %}
+                <div class="field field--compact">
+                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}
+                </div>
+            {% endfor %}
+            <button class="button button--primary" type="submit">Создать спринт</button>
+        </form>
+    </details>
+</div>
+
+<section class="card section-card">
+    <div class="section-heading">
+        <div><h2>Бэклог</h2><p>Все задачи проекта и их итоговые оценки.</p></div>
+        <span class="pill">{{ tasks|length }}</span>
+    </div>
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>Номер</th><th>Название</th><th>Статус</th><th class="align-right">Оценка</th></tr></thead>
+            <tbody>
+            {% for task in tasks %}
+                <tr>
+                    <td><span class="task-number">{{ task.number }}</span></td>
+                    <td>{{ task.title }}</td>
+                    <td>
+                        {% if task.status == "estimated" %}<span class="badge badge--success">Оценена</span>
+                        {% else %}<span class="badge">Не оценена</span>{% endif %}
+                    </td>
+                    <td class="align-right"><strong class="estimate-value">{{ task.estimate_display }}</strong></td>
+                </tr>
+            {% empty %}
+                <tr><td colspan="4" class="table-empty">Добавьте задачи списком в блоке выше.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<div class="split-grid">
+    <section class="card section-card">
+        <div class="section-heading"><div><h2>Комнаты</h2><p>Сессии Planning Poker.</p></div></div>
+        <div class="item-list">
+            {% for item in sessions %}
+                <a class="list-item" href="{{ item.get_absolute_url }}">
+                    <div><strong>{{ item.name }}</strong><small>{{ item.get_status_display }} · {{ item.created_at|date:"d.m.Y H:i" }}</small></div>
+                    <span>→</span>
+                </a>
+            {% empty %}<div class="compact-empty">Комнат пока нет.</div>{% endfor %}
+        </div>
+    </section>
+    <section class="card section-card">
+        <div class="section-heading"><div><h2>Спринты</h2><p>Планы из оценённых задач.</p></div></div>
+        <div class="item-list">
+            {% for sprint in sprints %}
+                <a class="list-item" href="{{ sprint.get_absolute_url }}">
+                    <div><strong>{{ sprint.name }}</strong><small>{{ sprint.tasks.count }} задач · {{ sprint.total_estimate_display }} points</small></div>
+                    <span>→</span>
+                </a>
+            {% empty %}<div class="compact-empty">Спринтов пока нет.</div>{% endfor %}
+        </div>
+    </section>
+</div>
+{% endblock %}
+

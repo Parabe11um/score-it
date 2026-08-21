@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+
+{% block title %}Вход — Score It{% endblock %}
+
+{% block content %}
+<div class="auth-layout">
+    <section class="auth-intro">
+        <span class="eyebrow">PLANNING POKER</span>
+        <h1>Оценивайте задачи вместе, планируйте спринт увереннее</h1>
+        <p>Организатор управляет сессией, а участники подключаются без регистрации по ссылке.</p>
+        <div class="scale-preview" aria-label="Шкала оценок">
+            <span>0</span><span>2</span><span>4</span><span>8</span><span>12</span><span>20</span><span>32</span><span>52</span>
+        </div>
+    </section>
+    <section class="card auth-card">
+        <h2>Вход организатора</h2>
+        <p class="muted">Введите данные своей учётной записи.</p>
+        <form method="post" class="stack-form">
+            {% csrf_token %}
+            {% if form.non_field_errors %}
+                <div class="form-error">Неверный логин или пароль.</div>
+            {% endif %}
+            <div class="field">
+                <label for="{{ form.username.id_for_label }}">Логин</label>
+                {{ form.username }}
+            </div>
+            <div class="field">
+                <label for="{{ form.password.id_for_label }}">Пароль</label>
+                {{ form.password }}
+            </div>
+            {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
+            <button class="button button--primary button--wide" type="submit">Войти</button>
+        </form>
+    </section>
+</div>
+{% endblock %}
+

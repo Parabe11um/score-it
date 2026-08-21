@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+
+{% block title %}Проекты — Score It{% endblock %}
+
+{% block content %}
+<div class="page-heading">
+    <div>
+        <span class="eyebrow">РАБОЧЕЕ ПРОСТРАНСТВО</span>
+        <h1>Проекты</h1>
+        <p>Соберите задачи, проведите оценку и сформируйте спринт.</p>
+    </div>
+</div>
+
+<div class="dashboard-grid">
+    <section class="card">
+        <div class="section-heading">
+            <div>
+                <h2>Новый проект</h2>
+                <p>Проект объединяет задачи, комнаты и спринты.</p>
+            </div>
+        </div>
+        <form method="post" action="{% url 'poker:project_create' %}" class="stack-form">
+            {% csrf_token %}
+            {% for field in project_form %}
+                <div class="field">
+                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                    {{ field }}
+                    {% for error in field.errors %}<div class="form-error">{{ error }}</div>{% endfor %}
+                </div>
+            {% endfor %}
+            <button class="button button--primary" type="submit">Создать проект</button>
+        </form>
+    </section>
+
+    <section class="project-list">
+        {% for project in projects %}
+            <a class="card project-card" href="{{ project.get_absolute_url }}">
+                <div>
+                    <span class="status-dot status-dot--active"></span>
+                    <h2>{{ project.name }}</h2>
+                    <p>Изменён {{ project.updated_at|date:"d.m.Y H:i" }}</p>
+                </div>
+                <div class="metric-row">
+                    <span><strong>{{ project.tasks.count }}</strong> задач</span>
+                    <span><strong>{{ project.voting_sessions.count }}</strong> комнат</span>
+                    <span><strong>{{ project.sprints.count }}</strong> спринтов</span>
+                </div>
+                <span class="project-card__arrow">→</span>
+            </a>
+        {% empty %}
+            <div class="empty-state card">
+                <div class="empty-state__icon">＋</div>
+                <h2>Пока нет проектов</h2>
+                <p>Создайте первый проект, чтобы загрузить задачи.</p>
+            </div>
+        {% endfor %}
+    </section>
+</div>
+{% endblock %}
+

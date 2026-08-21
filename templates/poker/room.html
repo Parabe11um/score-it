@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}{{ voting_session.name }} — Score It{% endblock %}
+
+{% block content %}
+<div class="room-header">
+    <div><span class="eyebrow">КОМНАТА</span><h1>{{ voting_session.name }}</h1><p>Вы вошли как <strong>{{ participant.name }}</strong></p></div>
+    <span class="connection-state" id="connection-state"><span></span> Подключено</span>
+</div>
+
+<section class="card participant-stage" id="room-app"
+         data-state-url="{% url 'poker:room_state' voting_session.public_token %}"
+         data-vote-url="{% url 'poker:room_vote' voting_session.public_token %}">
+    <form id="csrf-form" hidden>{% csrf_token %}</form>
+
+    <div id="waiting-state" class="empty-state empty-state--stage">
+        <div class="waiting-visual"><span></span><span></span><span></span></div>
+        <h2>Ждём следующую задачу</h2>
+        <p>Организатор скоро запустит голосование.</p>
+    </div>
+
+    <div id="voting-state" hidden>
+        <div class="task-focus task-focus--participant">
+            <span class="task-number" id="room-task-number"></span>
+            <h2 id="room-task-title"></h2>
+            <p id="room-progress"></p>
+        </div>
+        <div class="vote-prompt">Выберите оценку</div>
+        <div class="card-grid" id="vote-cards">
+            {% for value in estimation_values %}<button type="button" class="poker-card" data-value="{{ value }}"><span>{{ value }}</span></button>{% endfor %}
+        </div>
+        <p class="vote-feedback" id="vote-feedback">Можно изменить выбор до раскрытия.</p>
+    </div>
+
+    <div id="revealed-state" hidden>
+        <div class="task-focus task-focus--participant"><span class="task-number" id="result-task-number"></span><h2 id="result-task-title"></h2></div>
+        <div class="average-panel average-panel--large"><span>Средняя оценка команды</span><strong id="room-average"></strong></div>
+        <div class="revealed-votes revealed-votes--grid" id="room-votes"></div>
+        <p class="centered muted">Организатор может сохранить оценку или начать новый раунд.</p>
+    </div>
+
+    <div id="finished-state" class="empty-state empty-state--stage" hidden><div class="empty-state__icon">✓</div><h2>Сессия завершена</h2><p>Спасибо за участие.</p></div>
+</section>
+{% endblock %}
+
+{% block scripts %}<script src="{% static 'js/room.js' %}" defer></script>{% endblock %}
+

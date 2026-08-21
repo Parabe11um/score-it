@@ -1,0 +1,637 @@
+from decimal import Decimal, ROUND_HALF_UP
+
+from django.contrib import messages
+from django.contrib.auth.decorators import login_required
+from django.db import transaction
+from django.db.models import Max
+from django.http import HttpResponse, JsonResponse
+from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
+from django.views.decorators.http import require_GET, require_POST
+
+from .forms import (
+    BulkTaskImportForm,
+    JoinRoomForm,
+    ProjectForm,
+    SprintForm,
+    VotingSessionForm,
+)
+from .models import (
+    ESTIMATION_VALUES,
+    Participant,
+    Project,
+    Sprint,
+    SprintTask,
+    Task,
+    Vote,
+    VotingRound,
+    VotingSession,
+)
+
+
+def _format_decimal(value):
+    if value is None:
+        return None
+    rounded = value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return format(rounded.normalize(), "f")
+
+
+def _project_for_user(user, pk):
+    return get_object_or_404(Project, pk=pk, owner=user)
+
+
+def _session_for_user(user, pk):
+    return get_object_or_404(
+        VotingSession.objects.select_related("project", "current_task"),
+        pk=pk,
+        project__owner=user,
+    )
+
+
+def _sprint_for_user(user, pk):
+    return get_object_or_404(
+        Sprint.objects.select_related("project"), pk=pk, project__owner=user
+    )
+
+
+def _participant_session_key(voting_session):
+    return f"score_it_participant_{voting_session.pk}"
+
+
+def _participant_from_request(request, voting_session):
+    token = request.session.get(_participant_session_key(voting_session))
+    if not token:
+        return None
+    return Participant.objects.filter(
+        session=voting_session, client_token=token
+    ).first()
+
+
+@login_required
+def dashboard(request):
+    projects = (
+        Project.objects.filter(owner=request.user)
+        .prefetch_related("tasks", "voting_sessions", "sprints")
+        .order_by("-updated_at")
+    )
+    return render(
+        request,
+        "poker/dashboard.html",
+        {"projects": projects, "project_form": ProjectForm()},
+    )
+
+
+@login_required
+@require_POST
+def project_create(request):
+    form = ProjectForm(request.POST)
+    if form.is_valid():
+        project = form.save(commit=False)
+        project.owner = request.user
+        project.save()
+        messages.success(request, f"Проект «{project.name}» создан.")
+        return redirect(project)
+
+    projects = Project.objects.filter(owner=request.user)
+    return render(
+        request,
+        "poker/dashboard.html",
+        {"projects": projects, "project_form": form},
+        status=400,
+    )
+
+
+@login_required
+def project_detail(request, pk):
+    project = _project_for_user(request.user, pk)
+    tasks = project.tasks.all()
+    sessions = project.voting_sessions.select_related("current_task")
+    sprints = project.sprints.all()
+    return render(
+        request,
+        "poker/project_detail.html",
+        {
+            "project": project,
+            "tasks": tasks,
+            "sessions": sessions,
+            "sprints": sprints,
+            "task_import_form": BulkTaskImportForm(),
+            "session_form": VotingSessionForm(),
+            "sprint_form": SprintForm(),
+        },
+    )
+
+
+@login_required
+@require_POST
+def task_import(request, pk):
+    project = _project_for_user(request.user, pk)
+    form = BulkTaskImportForm(request.POST)
+    if not form.is_valid():
+        messages.error(request, "Проверьте формат списка задач.")
+        return render(
+            request,
+            "poker/project_detail.html",
+            {
+                "project": project,
+                "tasks": project.tasks.all(),
+                "sessions": project.voting_sessions.all(),
+                "sprints": project.sprints.all(),
+                "task_import_form": form,
+                "session_form": VotingSessionForm(),
+                "sprint_form": SprintForm(),
+            },
+            status=400,
+        )
+
+    created_count = 0
+    updated_count = 0
+    with transaction.atomic():
+        for number, title in form.parsed_tasks:
+            task, created = Task.objects.get_or_create(
+                project=project, number=number, defaults={"title": title}
+            )
+            if created:
+                created_count += 1
+            elif task.title != title:
+                task.title = title
+                task.save(update_fields=("title", "updated_at"))
+                updated_count += 1
+
+    messages.success(
+        request,
+        f"Импорт завершён: добавлено {created_count}, обновлено {updated_count}.",
+    )
+    return redirect(project)
+
+
+@login_required
+@require_POST
+def session_create(request, pk):
+    project = _project_for_user(request.user, pk)
+    form = VotingSessionForm(request.POST)
+    if form.is_valid():
+        voting_session = form.save(commit=False)
+        voting_session.project = project
+        voting_session.save()
+        messages.success(request, "Комната голосования создана.")
+        return redirect(voting_session)
+    messages.error(request, "Не удалось создать комнату: проверьте название.")
+    return redirect(project)
+
+
+@login_required
+def session_manage(request, pk):
+    voting_session = _session_for_user(request.user, pk)
+    current_round = voting_session.current_round
+    tasks = voting_session.project.tasks.all()
+    public_url = request.build_absolute_uri(voting_session.get_public_url())
+    summary = current_round.summary() if current_round else None
+    return render(
+        request,
+        "poker/session_manage.html",
+        {
+            "voting_session": voting_session,
+            "tasks": tasks,
+            "current_round": current_round,
+            "summary": summary,
+            "average_display": _format_decimal(summary["average"])
+            if summary
+            else None,
+            "public_url": public_url,
+        },
+    )
+
+
+@login_required
+@require_POST
+def session_start_task(request, pk, task_pk):
+    voting_session = _session_for_user(request.user, pk)
+    task = get_object_or_404(Task, pk=task_pk, project=voting_session.project)
+
+    if voting_session.status == VotingSession.Status.FINISHED:
+        messages.error(request, "Завершённую сессию нельзя продолжить.")
+        return redirect(voting_session)
+    if voting_session.current_round:
+        messages.error(request, "Сначала завершите текущий раунд.")
+        return redirect(voting_session)
+
+    with transaction.atomic():
+        last_number = (
+            VotingRound.objects.filter(session=voting_session, task=task).aggregate(
+                value=Max("number")
+            )["value"]
+            or 0
+        )
+        VotingRound.objects.create(
+            session=voting_session, task=task, number=last_number + 1
+        )
+        voting_session.current_task = task
+        voting_session.status = VotingSession.Status.ACTIVE
+        voting_session.save(update_fields=("current_task", "status"))
+
+    messages.success(request, f"Открыто голосование по задаче {task.number}.")
+    return redirect(voting_session)
+
+
+@login_required
+@require_POST
+def session_reveal(request, pk):
+    voting_session = _session_for_user(request.user, pk)
+    voting_round = voting_session.current_round
+    if not voting_round or voting_round.status != VotingRound.Status.VOTING:
+        messages.error(request, "Нет активного голосования для раскрытия.")
+        return redirect(voting_session)
+    if not voting_round.votes.exists():
+        messages.error(request, "Пока никто не проголосовал.")
+        return redirect(voting_session)
+
+    voting_round.status = VotingRound.Status.REVEALED
+    voting_round.revealed_at = timezone.now()
+    voting_round.save(update_fields=("status", "revealed_at"))
+    return redirect(voting_session)
+
+
+@login_required
+@require_POST
+def session_revote(request, pk):
+    voting_session = _session_for_user(request.user, pk)
+    voting_round = voting_session.current_round
+    if not voting_round or voting_round.status != VotingRound.Status.REVEALED:
+        messages.error(request, "Повторное голосование сейчас недоступно.")
+        return redirect(voting_session)
+
+    with transaction.atomic():
+        voting_round.status = VotingRound.Status.CANCELLED
+        voting_round.save(update_fields=("status",))
+        VotingRound.objects.create(
+            session=voting_session,
+            task=voting_round.task,
+            number=voting_round.number + 1,
+        )
+    messages.info(request, "Начат новый раунд. Предыдущие голоса сохранены в истории.")
+    return redirect(voting_session)
+
+
+@login_required
+@require_POST
+def session_accept(request, pk):
+    voting_session = _session_for_user(request.user, pk)
+    voting_round = voting_session.current_round
+    if not voting_round or voting_round.status != VotingRound.Status.REVEALED:
+        messages.error(request, "Сначала раскройте голоса.")
+        return redirect(voting_session)
+
+    try:
+        with transaction.atomic():
+            voting_round.task.capture_estimate(voting_round)
+            voting_round.status = VotingRound.Status.CLOSED
+            voting_round.closed_at = timezone.now()
+            voting_round.save(update_fields=("status", "closed_at"))
+            voting_session.current_task = None
+            voting_session.save(update_fields=("current_task",))
+    except ValueError as exc:
+        messages.error(request, str(exc))
+        return redirect(voting_session)
+
+    messages.success(
+        request,
+        f"Оценка задачи {voting_round.task.number} сохранена: "
+        f"{voting_round.task.estimate_display}.",
+    )
+    return redirect(voting_session)
+
+
+@login_required
+@require_POST
+def session_finish(request, pk):
+    voting_session = _session_for_user(request.user, pk)
+    voting_round = voting_session.current_round
+    with transaction.atomic():
+        if voting_round:
+            voting_round.status = VotingRound.Status.CANCELLED
+            voting_round.save(update_fields=("status",))
+        voting_session.current_task = None
+        voting_session.status = VotingSession.Status.FINISHED
+        voting_session.finished_at = timezone.now()
+        voting_session.save(
+            update_fields=("current_task", "status", "finished_at")
+        )
+    messages.success(request, "Сессия голосования завершена.")
+    return redirect(voting_session)
+
+
+@login_required
+@require_GET
+def session_state(request, pk):
+    voting_session = _session_for_user(request.user, pk)
+    voting_round = voting_session.current_round
+    voted_ids = set()
+    votes = []
+    summary = None
+
+    if voting_round:
+        round_votes = list(
+            voting_round.votes.select_related("participant").order_by(
+                "participant__joined_at"
+            )
+        )
+        voted_ids = {vote.participant_id for vote in round_votes}
+        if voting_round.status == VotingRound.Status.REVEALED:
+            votes = [
+                {"name": vote.participant.name, "value": vote.value}
+                for vote in round_votes
+            ]
+            round_summary = voting_round.summary()
+            summary = {
+                "count": round_summary["count"],
+                "sum": round_summary["sum"],
+                "average": _format_decimal(round_summary["average"]),
+            }
+
+    participants = [
+        {"name": participant.name, "voted": participant.pk in voted_ids}
+        for participant in voting_session.participants.all()
+    ]
+    return JsonResponse(
+        {
+            "session_status": voting_session.status,
+            "current_task": {
+                "number": voting_session.current_task.number,
+                "title": voting_session.current_task.title,
+            }
+            if voting_session.current_task
+            else None,
+            "round_status": voting_round.status if voting_round else None,
+            "participants": participants,
+            "voted_count": len(voted_ids),
+            "participant_count": len(participants),
+            "votes": votes,
+            "summary": summary,
+        }
+    )
+
+
+def room(request, token):
+    voting_session = get_object_or_404(
+        VotingSession.objects.select_related("project", "current_task"),
+        public_token=token,
+    )
+    participant = _participant_from_request(request, voting_session)
+    if not participant:
+        return render(
+            request,
+            "poker/room_join.html",
+            {"voting_session": voting_session, "join_form": JoinRoomForm()},
+        )
+    return render(
+        request,
+        "poker/room.html",
+        {
+            "voting_session": voting_session,
+            "participant": participant,
+            "estimation_values": ESTIMATION_VALUES,
+        },
+    )
+
+
+@require_POST
+def room_join(request, token):
+    voting_session = get_object_or_404(VotingSession, public_token=token)
+    if voting_session.status == VotingSession.Status.FINISHED:
+        messages.error(request, "Эта сессия уже завершена.")
+        return redirect("poker:room", token=token)
+
+    form = JoinRoomForm(request.POST)
+    if form.is_valid():
+        name = form.cleaned_data["name"].strip()
+        existing_names = voting_session.participants.values_list("name", flat=True)
+        if any(existing.casefold() == name.casefold() for existing in existing_names):
+            form.add_error("name", "Это имя уже используется в комнате.")
+        else:
+            participant = Participant.objects.create(
+                session=voting_session, name=name
+            )
+            request.session[_participant_session_key(voting_session)] = str(
+                participant.client_token
+            )
+            request.session.modified = True
+            return redirect("poker:room", token=token)
+
+    return render(
+        request,
+        "poker/room_join.html",
+        {"voting_session": voting_session, "join_form": form},
+        status=400,
+    )
+
+
+@require_GET
+def room_state(request, token):
+    voting_session = get_object_or_404(
+        VotingSession.objects.select_related("current_task"), public_token=token
+    )
+    participant = _participant_from_request(request, voting_session)
+    if not participant:
+        return JsonResponse({"error": "participant_required"}, status=403)
+
+    Participant.objects.filter(pk=participant.pk).update(last_seen_at=timezone.now())
+    voting_round = voting_session.current_round
+    response = {
+        "session_status": voting_session.status,
+        "session_name": voting_session.name,
+        "current_task": None,
+        "round": None,
+    }
+    if not voting_round or not voting_session.current_task:
+        return JsonResponse(response)
+
+    vote = voting_round.votes.filter(participant=participant).first()
+    round_data = {
+        "status": voting_round.status,
+        "number": voting_round.number,
+        "has_voted": vote is not None,
+        "my_vote": vote.value if vote else None,
+        "voted_count": voting_round.votes.count(),
+        "participant_count": voting_session.participants.count(),
+        "votes": [],
+        "average": None,
+    }
+    if voting_round.status == VotingRound.Status.REVEALED:
+        revealed_votes = voting_round.votes.select_related("participant").order_by(
+            "participant__joined_at"
+        )
+        round_data["votes"] = [
+            {"name": item.participant.name, "value": item.value}
+            for item in revealed_votes
+        ]
+        round_data["average"] = _format_decimal(
+            voting_round.summary()["average"]
+        )
+
+    response["current_task"] = {
+        "id": voting_session.current_task_id,
+        "number": voting_session.current_task.number,
+        "title": voting_session.current_task.title,
+    }
+    response["round"] = round_data
+    return JsonResponse(response)
+
+
+@require_POST
+def room_vote(request, token):
+    voting_session = get_object_or_404(VotingSession, public_token=token)
+    participant = _participant_from_request(request, voting_session)
+    if not participant:
+        return JsonResponse({"error": "participant_required"}, status=403)
+    voting_round = voting_session.current_round
+    if not voting_round or voting_round.status != VotingRound.Status.VOTING:
+        return JsonResponse({"error": "voting_closed"}, status=409)
+
+    try:
+        value = int(request.POST.get("value", ""))
+    except (TypeError, ValueError):
+        return JsonResponse({"error": "invalid_value"}, status=400)
+    if value not in ESTIMATION_VALUES:
+        return JsonResponse({"error": "invalid_value"}, status=400)
+
+    Vote.objects.update_or_create(
+        voting_round=voting_round,
+        participant=participant,
+        defaults={"value": value},
+    )
+    return JsonResponse({"ok": True, "value": value})
+
+
+@login_required
+@require_POST
+def sprint_create(request, pk):
+    project = _project_for_user(request.user, pk)
+    form = SprintForm(request.POST)
+    if form.is_valid():
+        sprint = form.save(commit=False)
+        sprint.project = project
+        sprint.save()
+        messages.success(request, f"Спринт «{sprint.name}» создан.")
+        return redirect(sprint)
+    messages.error(request, "Не удалось создать спринт: проверьте параметры.")
+    return redirect(project)
+
+
+@login_required
+def sprint_detail(request, pk):
+    sprint = _sprint_for_user(request.user, pk)
+    sprint_items = sprint.sprint_tasks.select_related("task")
+    available_tasks = sprint.project.tasks.filter(
+        status=Task.Status.ESTIMATED, sprint_items__isnull=True
+    )
+    return render(
+        request,
+        "poker/sprint_detail.html",
+        {
+            "sprint": sprint,
+            "sprint_items": sprint_items,
+            "available_tasks": available_tasks,
+        },
+    )
+
+
+@login_required
+@require_POST
+def sprint_add_tasks(request, pk):
+    sprint = _sprint_for_user(request.user, pk)
+    task_ids = request.POST.getlist("task_ids")
+    tasks = sprint.project.tasks.filter(
+        pk__in=task_ids, status=Task.Status.ESTIMATED, sprint_items__isnull=True
+    )
+    position = (
+        sprint.sprint_tasks.aggregate(value=Max("position"))["value"] or 0
+    )
+    created = 0
+    with transaction.atomic():
+        for task in tasks:
+            position += 1
+            SprintTask.objects.create(sprint=sprint, task=task, position=position)
+            created += 1
+    messages.success(request, f"В спринт добавлено задач: {created}.")
+    return redirect(sprint)
+
+
+@login_required
+@require_POST
+def sprint_remove_task(request, pk, task_pk):
+    sprint = _sprint_for_user(request.user, pk)
+    item = get_object_or_404(SprintTask, sprint=sprint, task_id=task_pk)
+    item.delete()
+    messages.info(request, "Задача удалена из спринта.")
+    return redirect(sprint)
+
+
+@login_required
+def sprint_export(request, pk):
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.utils import get_column_letter
+
+    sprint = _sprint_for_user(request.user, pk)
+    items = list(sprint.sprint_tasks.select_related("task"))
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Задачи спринта"
+    headers = (
+        "№",
+        "Номер задачи",
+        "Название",
+        "Средняя оценка",
+        "Сумма голосов",
+        "Количество голосов",
+    )
+    sheet.append(headers)
+
+    header_fill = PatternFill("solid", fgColor="243B53")
+    for cell in sheet[1]:
+        cell.font = Font(color="FFFFFF", bold=True)
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="center")
+
+    for row_number, item in enumerate(items, start=2):
+        task = item.task
+        sheet.append(
+            (
+                row_number - 1,
+                task.number,
+                task.title,
+                f"=E{row_number}/F{row_number}" if task.estimate_count else None,
+                task.estimate_sum,
+                task.estimate_count,
+            )
+        )
+        sheet.cell(row=row_number, column=4).number_format = "0.00"
+
+    if items:
+        total_row = len(items) + 2
+        sheet.cell(row=total_row, column=3, value="Итого")
+        sheet.cell(row=total_row, column=3).font = Font(bold=True)
+        sheet.cell(row=total_row, column=4, value=f"=SUM(D2:D{total_row - 1})")
+        sheet.cell(row=total_row, column=4).font = Font(bold=True)
+        sheet.cell(row=total_row, column=4).number_format = "0.00"
+
+    widths = (6, 20, 70, 20, 18, 22)
+    for index, width in enumerate(widths, start=1):
+        sheet.column_dimensions[get_column_letter(index)].width = width
+    sheet.freeze_panes = "A2"
+    sheet.auto_filter.ref = f"A1:F{max(1, len(items) + 1)}"
+
+    response = HttpResponse(
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    safe_name = "".join(
+        character if character.isalnum() or character in "-_" else "_"
+        for character in sprint.name
+    )
+    response["Content-Disposition"] = (
+        f'attachment; filename="sprint_{safe_name or sprint.pk}.xlsx"'
+    )
+    workbook.save(response)
+    return response

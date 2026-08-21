@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}{{ voting_session.name }} — Score It{% endblock %}
+
+{% block content %}
+<nav class="breadcrumbs"><a href="{{ voting_session.project.get_absolute_url }}">{{ voting_session.project.name }}</a><span>›</span><span>{{ voting_session.name }}</span></nav>
+
+<div class="page-heading page-heading--compact">
+    <div>
+        <span class="eyebrow">КОМНАТА ГОЛОСОВАНИЯ</span>
+        <h1>{{ voting_session.name }}</h1>
+        <p><span class="status-dot status-dot--active"></span>{{ voting_session.get_status_display }}</p>
+    </div>
+    {% if voting_session.status != "finished" %}
+        <form method="post" action="{% url 'poker:session_finish' voting_session.pk %}" onsubmit="return confirm('Завершить сессию?');">
+            {% csrf_token %}<button class="button button--danger-soft" type="submit">Завершить сессию</button>
+        </form>
+    {% endif %}
+</div>
+
+<section class="card invite-card">
+    <div><span class="eyebrow">ССЫЛКА ДЛЯ УЧАСТНИКОВ</span><p>Регистрация не требуется — участнику достаточно указать имя.</p></div>
+    <div class="copy-control">
+        <input id="public-url" type="text" readonly value="{{ public_url }}">
+        <button class="button button--secondary" id="copy-link" type="button">Копировать</button>
+    </div>
+</section>
+
+<div class="voting-layout" id="organizer-state" data-state-url="{% url 'poker:session_state' voting_session.pk %}">
+    <section class="card voting-stage">
+        {% if current_round %}
+            <div class="task-focus">
+                <span class="task-number">{{ voting_session.current_task.number }}</span>
+                <h2>{{ voting_session.current_task.title }}</h2>
+                <p>Раунд {{ current_round.number }}</p>
+            </div>
+
+            {% if current_round.status == "voting" %}
+                <div class="waiting-visual"><span></span><span></span><span></span></div>
+                <h3 class="centered">Команда выбирает оценки</h3>
+                <p class="centered muted"><strong id="voted-count">{{ current_round.votes.count }}</strong> из <strong id="participant-count">{{ voting_session.participants.count }}</strong> проголосовали</p>
+                <form method="post" action="{% url 'poker:session_reveal' voting_session.pk %}" class="centered-actions">
+                    {% csrf_token %}<button class="button button--primary button--large" type="submit">Раскрыть голоса</button>
+                </form>
+            {% elif current_round.status == "revealed" %}
+                <div class="average-panel">
+                    <span>Средняя оценка</span>
+                    <strong id="average-value">{{ average_display }}</strong>
+                    <small>{{ summary.sum }} / {{ summary.count }} голосов</small>
+                </div>
+                <div class="revealed-votes" id="revealed-votes">
+                    {% for vote in current_round.votes.all %}<div><span>{{ vote.participant.name }}</span><strong>{{ vote.value }}</strong></div>{% endfor %}
+                </div>
+                <div class="button-row button-row--center">
+                    <form method="post" action="{% url 'poker:session_accept' voting_session.pk %}">{% csrf_token %}<button class="button button--primary" type="submit">Сохранить среднюю</button></form>
+                    <form method="post" action="{% url 'poker:session_revote' voting_session.pk %}">{% csrf_token %}<button class="button button--secondary" type="submit">Переголосовать</button></form>
+                </div>
+            {% endif %}
+        {% elif voting_session.status == "finished" %}
+            <div class="empty-state empty-state--stage"><div class="empty-state__icon">✓</div><h2>Сессия завершена</h2><p>Все принятые оценки сохранены в бэклоге.</p></div>
+        {% else %}
+            <div class="empty-state empty-state--stage"><div class="empty-state__icon">▶</div><h2>Выберите следующую задачу</h2><p>После запуска она автоматически появится у всех участников.</p></div>
+        {% endif %}
+    </section>
+
+    <aside class="card participants-card">
+        <div class="section-heading"><div><h2>Участники</h2><p>Статус текущего голоса</p></div><span class="pill" id="participant-pill">{{ voting_session.participants.count }}</span></div>
+        <div class="participant-list" id="participant-list">
+            {% for participant in voting_session.participants.all %}<div class="participant"><span class="avatar">{{ participant.name|first|upper }}</span><strong>{{ participant.name }}</strong><span class="participant__state">В комнате</span></div>{% empty %}<div class="compact-empty">Ждём участников по ссылке.</div>{% endfor %}
+        </div>
+    </aside>
+</div>
+
+{% if voting_session.status != "finished" and not current_round %}
+<section class="card section-card">
+    <div class="section-heading"><div><h2>Задачи для оценки</h2><p>Можно повторно оценить уже завершённую задачу.</p></div><span class="pill">{{ tasks|length }}</span></div>
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>Номер</th><th>Название</th><th>Текущая оценка</th><th></th></tr></thead>
+            <tbody>
+            {% for task in tasks %}
+                <tr><td><span class="task-number">{{ task.number }}</span></td><td>{{ task.title }}</td><td>{{ task.estimate_display }}</td><td class="align-right"><form method="post" action="{% url 'poker:session_start_task' voting_session.pk task.pk %}">{% csrf_token %}<button class="button button--secondary button--small" type="submit">Оценивать</button></form></td></tr>
+            {% empty %}<tr><td colspan="4" class="table-empty">Сначала добавьте задачи в проект.</td></tr>{% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}<script src="{% static 'js/organizer.js' %}" defer></script>{% endblock %}
+
