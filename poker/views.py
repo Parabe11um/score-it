@@ -88,68 +88,128 @@ def _add_tasks_to_queue(voting_session, tasks):
             )
         )
     VotingSessionTask.objects.bulk_create(queue_items)
-    return len(queue_items)
+    return queue_items
 
 
-def _start_queue_item(voting_session, queue_item):
+def _create_round_for_item(voting_session, queue_item):
     last_number = (
         VotingRound.objects.filter(
             session=voting_session, task=queue_item.task
         ).aggregate(value=Max("number"))["value"]
         or 0
     )
-    VotingSessionTask.objects.filter(
-        session=voting_session, status=VotingSessionTask.Status.ACTIVE
-    ).exclude(pk=queue_item.pk).update(status=VotingSessionTask.Status.PENDING)
-    queue_item.status = VotingSessionTask.Status.ACTIVE
-    queue_item.completed_at = None
-    queue_item.save(update_fields=("status", "completed_at"))
-    VotingRound.objects.create(
+    voting_round = VotingRound.objects.create(
         session=voting_session,
         task=queue_item.task,
         number=last_number + 1,
     )
-    voting_session.current_task = queue_item.task
-    voting_session.status = VotingSession.Status.ACTIVE
-    voting_session.save(update_fields=("current_task", "status"))
-    return queue_item
+    queue_item.status = VotingSessionTask.Status.ACTIVE
+    queue_item.completed_at = None
+    queue_item.current_round = voting_round
+    queue_item.save(
+        update_fields=("status", "completed_at", "current_round")
+    )
+    return voting_round
 
 
-def _start_next_queue_item(voting_session):
-    queue_item = (
+def _open_pending_queue_items(voting_session):
+    queue_items = list(
+        voting_session.queue_items.select_related("task").filter(
+            status__in=(
+                VotingSessionTask.Status.PENDING,
+                VotingSessionTask.Status.SKIPPED,
+            )
+        )
+    )
+    for queue_item in queue_items:
+        _create_round_for_item(voting_session, queue_item)
+
+    first_item = voting_session.queue_items.select_related("task").filter(
+        status=VotingSessionTask.Status.ACTIVE
+    ).first()
+    if first_item:
+        current_is_open = voting_session.queue_items.filter(
+            task_id=voting_session.current_task_id,
+            status=VotingSessionTask.Status.ACTIVE,
+        ).exists()
+        if not current_is_open:
+            voting_session.current_task = first_item.task
+        voting_session.status = VotingSession.Status.ACTIVE
+        voting_session.save(update_fields=("current_task", "status"))
+    return queue_items
+
+
+def _focus_next_open_item(voting_session, current_position):
+    next_item = (
         voting_session.queue_items.select_related("task")
-        .filter(status=VotingSessionTask.Status.PENDING)
+        .filter(
+            position__gt=current_position,
+            status=VotingSessionTask.Status.ACTIVE,
+        )
         .first()
     )
-    if queue_item is None:
-        return None
-    return _start_queue_item(voting_session, queue_item)
+    if next_item is None:
+        next_item = (
+            voting_session.queue_items.select_related("task")
+            .filter(status=VotingSessionTask.Status.ACTIVE)
+            .first()
+        )
+    voting_session.current_task = next_item.task if next_item else None
+    voting_session.save(update_fields=("current_task",))
+    return next_item
 
 
 def _queue_context(voting_session):
-    queue_items = list(voting_session.queue_items.select_related("task"))
+    queue_items = list(
+        voting_session.queue_items.select_related("task", "current_round").annotate(
+            vote_count=Count("current_round__votes")
+        )
+    )
     completed = sum(
         item.status == VotingSessionTask.Status.COMPLETED for item in queue_items
     )
     pending = sum(
         item.status == VotingSessionTask.Status.PENDING for item in queue_items
     )
+    active = sum(
+        item.status == VotingSessionTask.Status.ACTIVE for item in queue_items
+    )
+    skipped = sum(
+        item.status == VotingSessionTask.Status.SKIPPED for item in queue_items
+    )
     current_position = next(
         (
             index
             for index, item in enumerate(queue_items, start=1)
-            if item.status == VotingSessionTask.Status.ACTIVE
+            if item.task_id == voting_session.current_task_id
         ),
         None,
     )
     for index, item in enumerate(queue_items, start=1):
         item.display_position = index
+        item.is_current = item.task_id == voting_session.current_task_id
+    focusable_items = [
+        item for item in queue_items if item.status == VotingSessionTask.Status.ACTIVE
+    ]
+    focus_index = next(
+        (
+            index
+            for index, item in enumerate(focusable_items)
+            if item.task_id == voting_session.current_task_id
+        ),
+        None,
+    )
     return {
         "items": queue_items,
         "total": len(queue_items),
         "completed": completed,
         "pending": pending,
+        "active": active,
+        "skipped": skipped,
         "current_position": current_position,
+        "has_previous": focus_index is not None and focus_index > 0,
+        "has_next": focus_index is not None
+        and focus_index < len(focusable_items) - 1,
     }
 
 
@@ -160,11 +220,53 @@ def _queue_summary(voting_session):
             "id", filter=Q(status=VotingSessionTask.Status.COMPLETED)
         ),
         pending=Count("id", filter=Q(status=VotingSessionTask.Status.PENDING)),
+        active=Count("id", filter=Q(status=VotingSessionTask.Status.ACTIVE)),
+        skipped=Count("id", filter=Q(status=VotingSessionTask.Status.SKIPPED)),
     )
     summary["current_position"] = (
-        voting_session.queue_items.filter(status=VotingSessionTask.Status.ACTIVE)
+        voting_session.queue_items.filter(task_id=voting_session.current_task_id)
         .values_list("position", flat=True)
         .first()
+    )
+    return summary
+
+
+def _participant_queue_item(voting_session, participant):
+    queue_items = voting_session.queue_items.select_related("task", "current_round")
+    queue_item = None
+    if participant.current_task_id:
+        queue_item = queue_items.filter(task_id=participant.current_task_id).first()
+    if queue_item is None:
+        queue_item = queue_items.filter(
+            status=VotingSessionTask.Status.ACTIVE
+        ).first() or queue_items.first()
+        if queue_item:
+            participant.current_task = queue_item.task
+            participant.save(update_fields=("current_task",))
+    return queue_item
+
+
+def _participant_queue_summary(voting_session, participant, queue_item):
+    summary = voting_session.queue_items.aggregate(
+        total=Count("id", distinct=True),
+        completed=Count(
+            "id",
+            filter=Q(status=VotingSessionTask.Status.COMPLETED),
+            distinct=True,
+        ),
+        voted=Count(
+            "current_round__votes",
+            filter=Q(current_round__votes__participant=participant),
+            distinct=True,
+        ),
+    )
+    position = queue_item.position if queue_item else None
+    summary.update(
+        {
+            "current_position": position,
+            "has_previous": bool(position and position > 1),
+            "has_next": bool(position and position < summary["total"]),
+        }
     )
     return summary
 
@@ -277,13 +379,13 @@ def session_create(request, pk):
             voting_session = form.save(commit=False)
             voting_session.project = project
             voting_session.save()
-            queued_count = _add_tasks_to_queue(
+            queued_items = _add_tasks_to_queue(
                 voting_session,
                 project.tasks.filter(pk__in=form.cleaned_data["task_ids"]),
             )
         messages.success(
             request,
-            f"Комната создана. В очередь добавлено задач: {queued_count}.",
+            f"Комната создана. В очередь добавлено задач: {len(queued_items)}.",
         )
         return redirect(voting_session)
     messages.error(request, "Не удалось создать комнату: проверьте параметры.")
@@ -340,7 +442,10 @@ def session_queue_add(request, pk):
     task_ids = request.POST.getlist("task_ids")
     tasks = voting_session.project.tasks.filter(pk__in=task_ids)
     with transaction.atomic():
-        created = _add_tasks_to_queue(voting_session, tasks)
+        created_items = _add_tasks_to_queue(voting_session, tasks)
+        if voting_session.status == VotingSession.Status.ACTIVE:
+            _open_pending_queue_items(voting_session)
+    created = len(created_items)
     if created:
         messages.success(request, f"В очередь добавлено задач: {created}.")
     else:
@@ -355,18 +460,60 @@ def session_start(request, pk):
     if voting_session.status == VotingSession.Status.FINISHED:
         messages.error(request, "Завершённую сессию нельзя продолжить.")
         return redirect(voting_session)
-    if voting_session.current_round:
-        messages.error(request, "Голосование уже запущено.")
+    if voting_session.status == VotingSession.Status.ACTIVE:
+        messages.info(request, "Голосование уже открыто для всех задач очереди.")
         return redirect(voting_session)
 
     with transaction.atomic():
-        queue_item = _start_next_queue_item(voting_session)
-    if queue_item is None:
+        opened_items = _open_pending_queue_items(voting_session)
+    if not opened_items and not voting_session.queue_items.filter(
+        status=VotingSessionTask.Status.ACTIVE
+    ).exists():
         messages.info(request, "В очереди нет задач, ожидающих оценки.")
     else:
         messages.success(
-            request, f"Открыто голосование по задаче {queue_item.task.number}."
+            request,
+            "Асинхронное голосование открыто для всех задач очереди.",
         )
+    return redirect(voting_session)
+
+
+@login_required
+@require_POST
+def session_navigate(request, pk, direction):
+    voting_session = _session_for_user(request.user, pk)
+    if direction not in ("previous", "next"):
+        messages.error(request, "Неизвестное направление перехода.")
+        return redirect(voting_session)
+
+    queue_items = list(
+        voting_session.queue_items.select_related("task").filter(
+            status=VotingSessionTask.Status.ACTIVE
+        )
+    )
+    current_index = next(
+        (
+            index
+            for index, item in enumerate(queue_items)
+            if item.task_id == voting_session.current_task_id
+        ),
+        None,
+    )
+    if current_index is None:
+        target = queue_items[0] if queue_items else None
+    else:
+        target_index = current_index + (1 if direction == "next" else -1)
+        target = (
+            queue_items[target_index]
+            if 0 <= target_index < len(queue_items)
+            else None
+        )
+    if target is None:
+        messages.info(request, "В этом направлении больше нет открытых задач.")
+        return redirect(voting_session)
+
+    voting_session.current_task = target.task
+    voting_session.save(update_fields=("current_task",))
     return redirect(voting_session)
 
 
@@ -379,16 +526,19 @@ def session_start_task(request, pk, task_pk):
     if voting_session.status == VotingSession.Status.FINISHED:
         messages.error(request, "Завершённую сессию нельзя продолжить.")
         return redirect(voting_session)
-    if voting_session.current_round:
-        messages.error(request, "Сначала завершите текущий раунд.")
-        return redirect(voting_session)
-
     with transaction.atomic():
         queue_item = voting_session.queue_items.filter(task=task).first()
         if queue_item is None:
             _add_tasks_to_queue(voting_session, [task])
             queue_item = voting_session.queue_items.get(task=task)
-        _start_queue_item(voting_session, queue_item)
+        if queue_item.current_round_id is None or queue_item.current_round.status in (
+            VotingRound.Status.CLOSED,
+            VotingRound.Status.CANCELLED,
+        ):
+            _create_round_for_item(voting_session, queue_item)
+        voting_session.current_task = task
+        voting_session.status = VotingSession.Status.ACTIVE
+        voting_session.save(update_fields=("current_task", "status"))
 
     messages.success(request, f"Открыто голосование по задаче {task.number}.")
     return redirect(voting_session)
@@ -429,10 +579,17 @@ def session_revote(request, pk):
     with transaction.atomic():
         voting_round.status = VotingRound.Status.CANCELLED
         voting_round.save(update_fields=("status",))
-        VotingRound.objects.create(
+        queue_item = voting_session.queue_items.get(task=voting_round.task)
+        new_round = VotingRound.objects.create(
             session=voting_session,
             task=voting_round.task,
             number=voting_round.number + 1,
+        )
+        queue_item.current_round = new_round
+        queue_item.status = VotingSessionTask.Status.ACTIVE
+        queue_item.completed_at = None
+        queue_item.save(
+            update_fields=("current_round", "status", "completed_at")
         )
     messages.info(request, "Начат новый раунд. Предыдущие голоса сохранены в истории.")
     return redirect(voting_session)
@@ -449,17 +606,15 @@ def session_accept(request, pk):
 
     try:
         with transaction.atomic():
+            queue_item = voting_session.queue_items.get(task=voting_round.task)
             voting_round.task.capture_estimate(voting_round)
             voting_round.status = VotingRound.Status.CLOSED
             voting_round.closed_at = timezone.now()
             voting_round.save(update_fields=("status", "closed_at"))
-            voting_session.queue_items.filter(task=voting_round.task).update(
-                status=VotingSessionTask.Status.COMPLETED,
-                completed_at=timezone.now(),
-            )
-            voting_session.current_task = None
-            voting_session.save(update_fields=("current_task",))
-            next_item = _start_next_queue_item(voting_session)
+            queue_item.status = VotingSessionTask.Status.COMPLETED
+            queue_item.completed_at = timezone.now()
+            queue_item.save(update_fields=("status", "completed_at"))
+            next_item = _focus_next_open_item(voting_session, queue_item.position)
     except ValueError as exc:
         messages.error(request, str(exc))
         return redirect(voting_session)
@@ -469,7 +624,7 @@ def session_accept(request, pk):
         f"Оценка задачи {voting_round.task.number} сохранена: "
         f"{voting_round.task.estimate_display}."
         + (
-            f" Открыта следующая задача {next_item.task.number}."
+            f" Следующая задача для проверки: {next_item.task.number}."
             if next_item
             else " Очередь завершена."
         ),
@@ -481,14 +636,13 @@ def session_accept(request, pk):
 @require_POST
 def session_finish(request, pk):
     voting_session = _session_for_user(request.user, pk)
-    voting_round = voting_session.current_round
     with transaction.atomic():
-        if voting_round:
-            voting_round.status = VotingRound.Status.CANCELLED
-            voting_round.save(update_fields=("status",))
-            voting_session.queue_items.filter(
-                task=voting_round.task, status=VotingSessionTask.Status.ACTIVE
-            ).update(status=VotingSessionTask.Status.SKIPPED)
+        voting_session.rounds.filter(
+            status__in=(VotingRound.Status.VOTING, VotingRound.Status.REVEALED)
+        ).update(status=VotingRound.Status.CANCELLED)
+        voting_session.queue_items.filter(
+            status=VotingSessionTask.Status.ACTIVE
+        ).update(status=VotingSessionTask.Status.SKIPPED)
         voting_session.current_task = None
         voting_session.status = VotingSession.Status.FINISHED
         voting_session.finished_at = timezone.now()
@@ -532,6 +686,11 @@ def session_state(request, pk):
         for participant in voting_session.participants.all()
     ]
     queue = _queue_summary(voting_session)
+    queue_items = list(
+        voting_session.queue_items.annotate(
+            vote_count=Count("current_round__votes")
+        ).values("id", "status", "vote_count")
+    )
     minimum_reached = len(voted_ids) >= voting_session.minimum_participants
     return JsonResponse(
         {
@@ -557,6 +716,7 @@ def session_state(request, pk):
                 "pending": queue["pending"],
                 "current_position": queue["current_position"],
             },
+            "queue_items": queue_items,
             "votes": votes,
             "summary": summary,
         }
@@ -600,8 +760,18 @@ def room_join(request, token):
         if any(existing.casefold() == name.casefold() for existing in existing_names):
             form.add_error("name", "Это имя уже используется в комнате.")
         else:
+            first_task_id = (
+                voting_session.queue_items.filter(
+                    status=VotingSessionTask.Status.ACTIVE
+                )
+                .values_list("task_id", flat=True)
+                .first()
+                or voting_session.queue_items.values_list(
+                    "task_id", flat=True
+                ).first()
+            )
             participant = Participant.objects.create(
-                session=voting_session, name=name
+                session=voting_session, name=name, current_task_id=first_task_id
             )
             request.session[_participant_session_key(voting_session)] = str(
                 participant.client_token
@@ -627,24 +797,24 @@ def room_state(request, token):
         return JsonResponse({"error": "participant_required"}, status=403)
 
     Participant.objects.filter(pk=participant.pk).update(last_seen_at=timezone.now())
-    voting_round = voting_session.current_round
+    queue_item = _participant_queue_item(voting_session, participant)
+    queue = _participant_queue_summary(voting_session, participant, queue_item)
     response = {
         "session_status": voting_session.status,
         "session_name": voting_session.name,
         "current_task": None,
         "round": None,
         "minimum_participants": voting_session.minimum_participants,
+        "queue": queue,
     }
-    queue = _queue_summary(voting_session)
-    response["queue"] = {
-        "total": queue["total"],
-        "completed": queue["completed"],
-        "pending": queue["pending"],
-        "current_position": queue["current_position"],
-    }
-    if not voting_round or not voting_session.current_task:
+    if (
+        voting_session.status == VotingSession.Status.DRAFT
+        or queue_item is None
+        or queue_item.current_round_id is None
+    ):
         return JsonResponse(response)
 
+    voting_round = queue_item.current_round
     vote = voting_round.votes.filter(participant=participant).first()
     vote_count = voting_round.votes.count()
     round_data = {
@@ -659,7 +829,10 @@ def room_state(request, token):
         "votes": [],
         "average": None,
     }
-    if voting_round.status == VotingRound.Status.REVEALED:
+    if voting_round.status in (
+        VotingRound.Status.REVEALED,
+        VotingRound.Status.CLOSED,
+    ):
         revealed_votes = voting_round.votes.select_related("participant").order_by(
             "participant__joined_at"
         )
@@ -672,9 +845,9 @@ def room_state(request, token):
         )
 
     response["current_task"] = {
-        "id": voting_session.current_task_id,
-        "number": voting_session.current_task.number,
-        "title": voting_session.current_task.title,
+        "id": queue_item.task_id,
+        "number": queue_item.task.number,
+        "title": queue_item.task.title,
     }
     response["round"] = round_data
     return JsonResponse(response)
@@ -686,7 +859,8 @@ def room_vote(request, token):
     participant = _participant_from_request(request, voting_session)
     if not participant:
         return JsonResponse({"error": "participant_required"}, status=403)
-    voting_round = voting_session.current_round
+    queue_item = _participant_queue_item(voting_session, participant)
+    voting_round = queue_item.current_round if queue_item else None
     if not voting_round or voting_round.status != VotingRound.Status.VOTING:
         return JsonResponse({"error": "voting_closed"}, status=409)
 
@@ -703,6 +877,40 @@ def room_vote(request, token):
         defaults={"value": value},
     )
     return JsonResponse({"ok": True, "value": value})
+
+
+@require_POST
+def room_navigate(request, token):
+    voting_session = get_object_or_404(VotingSession, public_token=token)
+    participant = _participant_from_request(request, voting_session)
+    if not participant:
+        return JsonResponse({"error": "participant_required"}, status=403)
+
+    direction = request.POST.get("direction")
+    if direction not in ("previous", "next"):
+        return JsonResponse({"error": "invalid_direction"}, status=400)
+
+    queue_item = _participant_queue_item(voting_session, participant)
+    if queue_item is None:
+        return JsonResponse({"error": "empty_queue"}, status=409)
+
+    position_filter = (
+        {"position__gt": queue_item.position}
+        if direction == "next"
+        else {"position__lt": queue_item.position}
+    )
+    target_items = voting_session.queue_items.select_related("task").filter(
+        **position_filter
+    )
+    target = target_items.first() if direction == "next" else target_items.last()
+    if target is None:
+        return JsonResponse({"error": "queue_boundary"}, status=409)
+
+    participant.current_task = target.task
+    participant.save(update_fields=("current_task",))
+    return JsonResponse(
+        {"ok": True, "position": target.position, "task_id": target.task_id}
+    )
 
 
 @login_required

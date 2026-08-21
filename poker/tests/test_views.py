@@ -236,6 +236,101 @@ class VotingFlowTests(TestCase):
             self.voting_session.current_round.status, VotingRound.Status.VOTING
         )
 
+    def test_start_opens_every_queued_task_for_async_voting(self):
+        second_task = Task.objects.create(
+            project=self.project, number="ABS-102", title="Вторая задача"
+        )
+        VotingSessionTask.objects.bulk_create(
+            [
+                VotingSessionTask(
+                    session=self.voting_session, task=self.task, position=1
+                ),
+                VotingSessionTask(
+                    session=self.voting_session, task=second_task, position=2
+                ),
+            ]
+        )
+
+        self.organizer.post(
+            reverse("poker:session_start", args=[self.voting_session.pk])
+        )
+
+        queue_items = list(
+            self.voting_session.queue_items.select_related("current_round")
+        )
+        self.assertEqual(
+            [item.status for item in queue_items],
+            [VotingSessionTask.Status.ACTIVE, VotingSessionTask.Status.ACTIVE],
+        )
+        self.assertTrue(all(item.current_round_id for item in queue_items))
+        self.assertEqual(
+            {item.current_round.status for item in queue_items},
+            {VotingRound.Status.VOTING},
+        )
+
+    def test_participants_navigate_and_vote_independently(self):
+        second_task = Task.objects.create(
+            project=self.project, number="ABS-102", title="Вторая задача"
+        )
+        VotingSessionTask.objects.bulk_create(
+            [
+                VotingSessionTask(
+                    session=self.voting_session, task=self.task, position=1
+                ),
+                VotingSessionTask(
+                    session=self.voting_session, task=second_task, position=2
+                ),
+            ]
+        )
+        anna = self.join_participant("Анна")
+        boris = self.join_participant("Борис")
+        room_response = anna.get(
+            reverse("poker:room", args=[self.voting_session.public_token])
+        )
+        self.assertContains(room_response, "Вперёд")
+        self.organizer.post(
+            reverse("poker:session_start", args=[self.voting_session.pk])
+        )
+        vote_url = reverse(
+            "poker:room_vote", args=[self.voting_session.public_token]
+        )
+        navigate_url = reverse(
+            "poker:room_navigate", args=[self.voting_session.public_token]
+        )
+        state_url = reverse(
+            "poker:room_state", args=[self.voting_session.public_token]
+        )
+
+        self.assertEqual(anna.post(vote_url, {"value": 2}).status_code, 200)
+        self.assertEqual(
+            anna.post(navigate_url, {"direction": "next"}).status_code, 200
+        )
+        self.assertEqual(anna.post(vote_url, {"value": 8}).status_code, 200)
+        self.assertEqual(boris.post(vote_url, {"value": 4}).status_code, 200)
+
+        anna_state = anna.get(state_url).json()
+        boris_state = boris.get(state_url).json()
+        self.assertEqual(anna_state["current_task"]["id"], second_task.pk)
+        self.assertEqual(anna_state["round"]["my_vote"], 8)
+        self.assertEqual(anna_state["queue"]["total"], 2)
+        self.assertEqual(anna_state["queue"]["voted"], 2)
+        self.assertEqual(boris_state["current_task"]["id"], self.task.pk)
+        self.assertEqual(boris_state["round"]["my_vote"], 4)
+        self.assertEqual(boris_state["queue"]["voted"], 1)
+
+        organizer_state = self.organizer.get(
+            reverse("poker:session_state", args=[self.voting_session.pk])
+        ).json()
+        self.assertEqual(
+            [item["vote_count"] for item in organizer_state["queue_items"]],
+            [2, 1],
+        )
+
+        anna.post(navigate_url, {"direction": "previous"})
+        returned_state = anna.get(state_url).json()
+        self.assertEqual(returned_state["current_task"]["id"], self.task.pk)
+        self.assertEqual(returned_state["round"]["my_vote"], 2)
+
     def test_participant_name_must_be_unique_in_room(self):
         self.join_participant("Анна")
         second = Client()

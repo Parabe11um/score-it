@@ -80,6 +80,19 @@
         });
     }
 
+    function renderQueueProgress(items, minimumParticipants) {
+        (items || []).forEach((item) => {
+            const row = document.querySelector(`[data-queue-item="${item.id}"]`);
+            const votes = row?.querySelector("[data-queue-votes]");
+            if (!votes) return;
+            votes.textContent = `${item.vote_count} / ${minimumParticipants} голосов`;
+            votes.classList.toggle(
+                "queue-row__votes--ready",
+                item.vote_count >= minimumParticipants,
+            );
+        });
+    }
+
     async function refresh() {
         try {
             const response = await fetch(root.dataset.stateUrl, {
@@ -102,6 +115,7 @@
             }
             if (state.summary && averageValue) averageValue.textContent = state.summary.average;
             if (state.votes) renderRevealedVotes(state.votes);
+            renderQueueProgress(state.queue_items, state.minimum_participants);
         } catch (_error) {
             // Следующая фоновая попытка восстановит состояние.
         }

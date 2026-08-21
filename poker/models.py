@@ -148,6 +148,17 @@ class VotingSession(models.Model):
 
     @property
     def current_round(self):
+        queue_item = (
+            self.queue_items.select_related("current_round")
+            .filter(task_id=self.current_task_id)
+            .first()
+        )
+        if queue_item and queue_item.current_round_id:
+            if queue_item.current_round.status in (
+                VotingRound.Status.VOTING,
+                VotingRound.Status.REVEALED,
+            ):
+                return queue_item.current_round
         return self.rounds.filter(
             task=self.current_task,
             status__in=(VotingRound.Status.VOTING, VotingRound.Status.REVEALED),
@@ -172,6 +183,14 @@ class VotingSessionTask(models.Model):
         on_delete=models.CASCADE,
         related_name="session_queue_items",
         verbose_name="Задача",
+    )
+    current_round = models.OneToOneField(
+        "VotingRound",
+        on_delete=models.SET_NULL,
+        related_name="queue_item",
+        null=True,
+        blank=True,
+        verbose_name="Текущий раунд",
     )
     position = models.PositiveIntegerField("Порядок")
     status = models.CharField(
@@ -209,6 +228,14 @@ class Participant(models.Model):
         "Токен участника", default=uuid.uuid4, unique=True, editable=False
     )
     name = models.CharField("Имя", max_length=100)
+    current_task = models.ForeignKey(
+        Task,
+        on_delete=models.SET_NULL,
+        related_name="participant_cursors",
+        null=True,
+        blank=True,
+        verbose_name="Текущая задача участника",
+    )
     joined_at = models.DateTimeField("Подключился", auto_now_add=True)
     last_seen_at = models.DateTimeField("Последняя активность", auto_now=True)
 

@@ -15,10 +15,16 @@
     const feedback = document.getElementById("vote-feedback");
     const average = document.getElementById("room-average");
     const votesList = document.getElementById("room-votes");
+    const resultNote = document.getElementById("result-note");
     const connectionState = document.getElementById("connection-state");
+    const taskNavigation = document.getElementById("task-navigation");
+    const previousTask = document.getElementById("previous-task");
+    const nextTask = document.getElementById("next-task");
+    const personalProgress = document.getElementById("personal-progress");
     const cards = Array.from(document.querySelectorAll(".poker-card"));
     const csrfToken = document.querySelector("#csrf-form [name=csrfmiddlewaretoken]")?.value;
     let requestInProgress = false;
+    let navigationInProgress = false;
 
     function showOnly(element) {
         [waitingState, votingState, revealedState, finishedState].forEach((item) => {
@@ -47,10 +53,12 @@
 
     function render(state) {
         if (state.session_status === "finished") {
+            taskNavigation.hidden = true;
             showOnly(finishedState);
             return;
         }
         if (!state.current_task || !state.round) {
+            taskNavigation.hidden = true;
             selectCard(null);
             if (state.queue?.total) {
                 waitingProgress.textContent = state.queue.completed >= state.queue.total
@@ -63,11 +71,19 @@
             return;
         }
 
-        if (state.round.status === "revealed") {
+        taskNavigation.hidden = false;
+        previousTask.disabled = !state.queue.has_previous || navigationInProgress;
+        nextTask.disabled = !state.queue.has_next || navigationInProgress;
+        personalProgress.textContent = `Оценено вами: ${state.queue.voted} из ${state.queue.total}`;
+
+        if (state.round.status === "revealed" || state.round.status === "closed") {
             resultTaskNumber.textContent = state.current_task.number;
             resultTaskTitle.textContent = state.current_task.title;
             average.textContent = state.round.average ?? "—";
             renderVotes(state.round.votes || []);
+            resultNote.textContent = state.round.status === "closed"
+                ? "Итоговая оценка сохранена. Можно перейти к другой задаче."
+                : "Голоса раскрыты. Можно перейти к другой задаче.";
             showOnly(revealedState);
             return;
         }
@@ -80,7 +96,7 @@
         progress.textContent = `${queueLabel}голосов ${state.round.voted_count} из минимум ${state.round.minimum_participants}`;
         selectCard(state.round.my_vote);
         feedback.textContent = state.round.has_voted
-            ? `Ваш выбор: ${state.round.my_vote}. Его можно изменить до раскрытия.`
+            ? `Ваш выбор: ${state.round.my_vote}. Можно перейти дальше или изменить голос.`
             : "Можно изменить выбор до раскрытия.";
         showOnly(votingState);
     }
@@ -120,7 +136,7 @@
             });
             if (!response.ok) throw new Error("vote request failed");
             selectCard(value);
-            feedback.textContent = `Ваш выбор: ${value}. Его можно изменить до раскрытия.`;
+            feedback.textContent = `Ваш выбор: ${value}. Голос сохранён — можно перейти дальше.`;
             await refresh();
         } catch (_error) {
             feedback.textContent = "Не удалось сохранить голос. Попробуйте ещё раз.";
@@ -133,6 +149,32 @@
     cards.forEach((card) => {
         card.addEventListener("click", () => sendVote(Number(card.dataset.value)));
     });
+
+    async function navigate(direction) {
+        if (navigationInProgress || requestInProgress) return;
+        navigationInProgress = true;
+        previousTask.disabled = true;
+        nextTask.disabled = true;
+        const body = new FormData();
+        body.append("direction", direction);
+        try {
+            const response = await fetch(root.dataset.navigateUrl, {
+                method: "POST",
+                body,
+                headers: {"X-CSRFToken": csrfToken, "X-Requested-With": "XMLHttpRequest"},
+            });
+            if (!response.ok) throw new Error("navigation request failed");
+            selectCard(null);
+        } catch (_error) {
+            feedback.textContent = "Не удалось перейти к другой задаче. Попробуйте ещё раз.";
+        } finally {
+            navigationInProgress = false;
+            await refresh();
+        }
+    }
+
+    previousTask.addEventListener("click", () => navigate("previous"));
+    nextTask.addEventListener("click", () => navigate("next"));
 
     refresh();
     window.setInterval(refresh, 1500);

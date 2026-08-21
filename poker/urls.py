@@ -15,6 +15,11 @@ urlpatterns = [
     path("sessions/<int:pk>/", views.session_manage, name="session_manage"),
     path("sessions/<int:pk>/start/", views.session_start, name="session_start"),
     path(
+        "sessions/<int:pk>/navigate/<str:direction>/",
+        views.session_navigate,
+        name="session_navigate",
+    ),
+    path(
         "sessions/<int:pk>/queue/add/",
         views.session_queue_add,
         name="session_queue_add",
@@ -33,6 +38,11 @@ urlpatterns = [
     path("room/<uuid:token>/join/", views.room_join, name="room_join"),
     path("room/<uuid:token>/state/", views.room_state, name="room_state"),
     path("room/<uuid:token>/vote/", views.room_vote, name="room_vote"),
+    path(
+        "room/<uuid:token>/navigate/",
+        views.room_navigate,
+        name="room_navigate",
+    ),
     path("sprints/<int:pk>/", views.sprint_detail, name="sprint_detail"),
     path("sprints/<int:pk>/tasks/add/", views.sprint_add_tasks, name="sprint_add_tasks"),
     path(

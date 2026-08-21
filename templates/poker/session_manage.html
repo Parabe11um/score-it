@@ -39,6 +39,15 @@
                 <h2>{{ voting_session.current_task.title }}</h2>
                 <p>{% if queue.current_position %}Задача {{ queue.current_position }} из {{ queue.total }} · {% endif %}Раунд {{ current_round.number }}</p>
             </div>
+            <nav class="organizer-task-navigation" aria-label="Переход между задачами">
+                <form method="post" action="{% url 'poker:session_navigate' voting_session.pk 'previous' %}">
+                    {% csrf_token %}<button class="button button--secondary" type="submit" {% if not queue.has_previous %}disabled{% endif %}>← Назад</button>
+                </form>
+                <span>Проверка результатов</span>
+                <form method="post" action="{% url 'poker:session_navigate' voting_session.pk 'next' %}">
+                    {% csrf_token %}<button class="button button--secondary" type="submit" {% if not queue.has_next %}disabled{% endif %}>Вперёд →</button>
+                </form>
+            </nav>
 
             {% if current_round.status == "voting" %}
                 <div class="waiting-visual"><span></span><span></span><span></span></div>
@@ -60,7 +69,7 @@
                     {% for vote in current_round.votes.all %}<div><span>{{ vote.participant.name }}</span><strong>{{ vote.value }}</strong></div>{% endfor %}
                 </div>
                 <div class="button-row button-row--center mobile-action-bar">
-                    <form method="post" action="{% url 'poker:session_accept' voting_session.pk %}">{% csrf_token %}<button class="button button--primary" type="submit">{% if queue.pending %}Сохранить и перейти к следующей{% else %}Сохранить оценку{% endif %}</button></form>
+                    <form method="post" action="{% url 'poker:session_accept' voting_session.pk %}">{% csrf_token %}<button class="button button--primary" type="submit">{% if queue.has_next %}Сохранить и перейти к следующей{% else %}Сохранить оценку{% endif %}</button></form>
                     <form method="post" action="{% url 'poker:session_revote' voting_session.pk %}">{% csrf_token %}<button class="button button--secondary" type="submit">Переголосовать</button></form>
                 </div>
             {% endif %}
@@ -107,10 +116,16 @@
     {% endif %}
     <div class="queue-list">
         {% for item in queue.items %}
-            <div class="queue-row queue-row--{{ item.status }}">
+            <div class="queue-row queue-row--{{ item.status }} {% if item.is_current %}queue-row--current{% endif %}" data-queue-item="{{ item.pk }}">
                 <span class="queue-row__position">{{ item.display_position }}</span>
-                <div class="queue-row__task"><span class="task-number">{{ item.task.number }}</span><strong>{{ item.task.title }}</strong></div>
-                <span class="badge {% if item.status == 'completed' %}badge--success{% elif item.status == 'active' %}badge--active{% endif %}">{{ item.get_status_display }}</span>
+                <div class="queue-row__task">
+                    {% if item.status == 'active' %}
+                        <form class="inline-form" method="post" action="{% url 'poker:session_start_task' voting_session.pk item.task.pk %}">{% csrf_token %}<button class="task-number task-jump" type="submit">{{ item.task.number }}</button></form>
+                    {% else %}<span class="task-number">{{ item.task.number }}</span>{% endif %}
+                    <strong>{{ item.task.title }}</strong>
+                </div>
+                <span class="badge {% if item.status == 'completed' %}badge--success{% elif item.status == 'active' %}badge--active{% endif %}">{% if item.status == 'active' %}Открыта{% else %}{{ item.get_status_display }}{% endif %}</span>
+                <span class="queue-row__votes {% if item.vote_count >= voting_session.minimum_participants %}queue-row__votes--ready{% endif %}" data-queue-votes>{{ item.vote_count }} / {{ voting_session.minimum_participants }} голосов</span>
                 <strong class="queue-row__estimate">{{ item.task.estimate_display }}</strong>
             </div>
         {% empty %}<div class="compact-empty">Добавьте задачи в очередь ниже.</div>{% endfor %}

@@ -5,18 +5,19 @@
 
 {% block content %}
 <div class="room-header">
-    <div><span class="eyebrow">КОМНАТА</span><h1>{{ voting_session.name }}</h1><p>Вы вошли как <strong>{{ participant.name }}</strong></p></div>
+    <div><span class="eyebrow">АСИНХРОННАЯ ОЦЕНКА</span><h1>{{ voting_session.name }}</h1><p>Вы вошли как <strong>{{ participant.name }}</strong>. Ваш прогресс сохраняется автоматически.</p></div>
     <span class="connection-state" id="connection-state"><span></span> Подключено</span>
 </div>
 
 <section class="card participant-stage" id="room-app"
          data-state-url="{% url 'poker:room_state' voting_session.public_token %}"
-         data-vote-url="{% url 'poker:room_vote' voting_session.public_token %}">
+         data-vote-url="{% url 'poker:room_vote' voting_session.public_token %}"
+         data-navigate-url="{% url 'poker:room_navigate' voting_session.public_token %}">
     <form id="csrf-form" hidden>{% csrf_token %}</form>
 
     <div id="waiting-state" class="empty-state empty-state--stage">
         <div class="waiting-visual"><span></span><span></span><span></span></div>
-        <h2>Ждём следующую задачу</h2>
+        <h2>Ждём начала оценки</h2>
         <p id="waiting-progress">Организатор скоро запустит голосование.</p>
     </div>
 
@@ -37,10 +38,16 @@
         <div class="task-focus task-focus--participant"><span class="task-number" id="result-task-number"></span><h2 id="result-task-title"></h2></div>
         <div class="average-panel average-panel--large"><span>Средняя оценка команды</span><strong id="room-average"></strong></div>
         <div class="revealed-votes revealed-votes--grid" id="room-votes"></div>
-        <p class="centered muted">Организатор может сохранить оценку или начать новый раунд.</p>
+        <p class="centered muted" id="result-note">Голоса раскрыты. Можно перейти к другой задаче.</p>
     </div>
 
     <div id="finished-state" class="empty-state empty-state--stage" hidden><div class="empty-state__icon">✓</div><h2>Сессия завершена</h2><p>Спасибо за участие.</p></div>
+
+    <nav class="participant-task-navigation" id="task-navigation" aria-label="Переход между задачами" hidden>
+        <button class="button button--secondary" id="previous-task" type="button">← Назад</button>
+        <span id="personal-progress">Оценено вами: 0 из 0</span>
+        <button class="button button--primary" id="next-task" type="button">Вперёд →</button>
+    </nav>
 </section>
 {% endblock %}
 
