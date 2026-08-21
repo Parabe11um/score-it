@@ -25,6 +25,7 @@
     const csrfToken = document.querySelector("#csrf-form [name=csrfmiddlewaretoken]")?.value;
     let requestInProgress = false;
     let navigationInProgress = false;
+    let atLastTask = false;
 
     function showOnly(element) {
         [waitingState, votingState, revealedState, finishedState].forEach((item) => {
@@ -52,6 +53,10 @@
     }
 
     function render(state) {
+        if (state.participant_completed) {
+            window.location.reload();
+            return;
+        }
         if (state.session_status === "finished") {
             taskNavigation.hidden = true;
             showOnly(finishedState);
@@ -73,7 +78,9 @@
 
         taskNavigation.hidden = false;
         previousTask.disabled = !state.queue.has_previous || navigationInProgress;
-        nextTask.disabled = !state.queue.has_next || navigationInProgress;
+        atLastTask = !state.queue.has_next;
+        nextTask.disabled = navigationInProgress;
+        nextTask.textContent = atLastTask ? "Завершить оценку" : "Вперёд →";
         personalProgress.textContent = `Оценено вами: ${state.queue.voted} из ${state.queue.total}`;
 
         if (state.round.status === "revealed" || state.round.status === "closed") {
@@ -173,8 +180,34 @@
         }
     }
 
+    async function completeVoting() {
+        if (navigationInProgress || requestInProgress) return;
+        navigationInProgress = true;
+        previousTask.disabled = true;
+        nextTask.disabled = true;
+        nextTask.textContent = "Завершаем…";
+        try {
+            const response = await fetch(root.dataset.completeUrl, {
+                method: "POST",
+                headers: {"X-CSRFToken": csrfToken, "X-Requested-With": "XMLHttpRequest"},
+            });
+            if (!response.ok) throw new Error("completion request failed");
+            window.location.reload();
+        } catch (_error) {
+            personalProgress.textContent = "Не удалось завершить оценку. Попробуйте ещё раз.";
+            navigationInProgress = false;
+            await refresh();
+        }
+    }
+
     previousTask.addEventListener("click", () => navigate("previous"));
-    nextTask.addEventListener("click", () => navigate("next"));
+    nextTask.addEventListener("click", () => {
+        if (atLastTask) {
+            completeVoting();
+            return;
+        }
+        navigate("next");
+    });
 
     refresh();
     window.setInterval(refresh, 1500);

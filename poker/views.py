@@ -735,6 +735,12 @@ def room(request, token):
             "poker/room_join.html",
             {"voting_session": voting_session, "join_form": JoinRoomForm()},
         )
+    if participant.completed_at:
+        return render(
+            request,
+            "poker/room_completed.html",
+            {"voting_session": voting_session},
+        )
     return render(
         request,
         "poker/room.html",
@@ -802,6 +808,7 @@ def room_state(request, token):
     response = {
         "session_status": voting_session.status,
         "session_name": voting_session.name,
+        "participant_completed": participant.completed_at is not None,
         "current_task": None,
         "round": None,
         "minimum_participants": voting_session.minimum_participants,
@@ -859,6 +866,8 @@ def room_vote(request, token):
     participant = _participant_from_request(request, voting_session)
     if not participant:
         return JsonResponse({"error": "participant_required"}, status=403)
+    if participant.completed_at:
+        return JsonResponse({"error": "participant_completed"}, status=409)
     queue_item = _participant_queue_item(voting_session, participant)
     voting_round = queue_item.current_round if queue_item else None
     if not voting_round or voting_round.status != VotingRound.Status.VOTING:
@@ -885,6 +894,8 @@ def room_navigate(request, token):
     participant = _participant_from_request(request, voting_session)
     if not participant:
         return JsonResponse({"error": "participant_required"}, status=403)
+    if participant.completed_at:
+        return JsonResponse({"error": "participant_completed"}, status=409)
 
     direction = request.POST.get("direction")
     if direction not in ("previous", "next"):
@@ -911,6 +922,33 @@ def room_navigate(request, token):
     return JsonResponse(
         {"ok": True, "position": target.position, "task_id": target.task_id}
     )
+
+
+@require_POST
+def room_complete(request, token):
+    voting_session = get_object_or_404(VotingSession, public_token=token)
+    participant = _participant_from_request(request, voting_session)
+    if not participant:
+        return JsonResponse({"error": "participant_required"}, status=403)
+    if participant.completed_at:
+        return JsonResponse({"ok": True})
+
+    queue_item = _participant_queue_item(voting_session, participant)
+    if queue_item is None:
+        return JsonResponse({"error": "empty_queue"}, status=409)
+    if (
+        voting_session.status != VotingSession.Status.ACTIVE
+        or queue_item.current_round_id is None
+    ):
+        return JsonResponse({"error": "voting_not_started"}, status=409)
+    if voting_session.queue_items.filter(
+        position__gt=queue_item.position
+    ).exists():
+        return JsonResponse({"error": "last_task_required"}, status=409)
+
+    participant.completed_at = timezone.now()
+    participant.save(update_fields=("completed_at",))
+    return JsonResponse({"ok": True})
 
 
 @login_required

@@ -47,7 +47,13 @@ class VotingSessionAdmin(admin.ModelAdmin):
 
 @admin.register(Participant)
 class ParticipantAdmin(admin.ModelAdmin):
-    list_display = ("name", "session", "joined_at", "last_seen_at")
+    list_display = (
+        "name",
+        "session",
+        "joined_at",
+        "last_seen_at",
+        "completed_at",
+    )
     search_fields = ("name",)
 
 

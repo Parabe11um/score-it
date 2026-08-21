@@ -12,7 +12,8 @@
 <section class="card participant-stage" id="room-app"
          data-state-url="{% url 'poker:room_state' voting_session.public_token %}"
          data-vote-url="{% url 'poker:room_vote' voting_session.public_token %}"
-         data-navigate-url="{% url 'poker:room_navigate' voting_session.public_token %}">
+         data-navigate-url="{% url 'poker:room_navigate' voting_session.public_token %}"
+         data-complete-url="{% url 'poker:room_complete' voting_session.public_token %}">
     <form id="csrf-form" hidden>{% csrf_token %}</form>
 
     <div id="waiting-state" class="empty-state empty-state--stage">

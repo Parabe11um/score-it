@@ -238,6 +238,9 @@ class Participant(models.Model):
     )
     joined_at = models.DateTimeField("Подключился", auto_now_add=True)
     last_seen_at = models.DateTimeField("Последняя активность", auto_now=True)
+    completed_at = models.DateTimeField(
+        "Завершил оценку", null=True, blank=True
+    )
 
     class Meta:
         ordering = ("joined_at",)

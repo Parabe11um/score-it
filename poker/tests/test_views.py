@@ -331,6 +331,63 @@ class VotingFlowTests(TestCase):
         self.assertEqual(returned_state["current_task"]["id"], self.task.pk)
         self.assertEqual(returned_state["round"]["my_vote"], 2)
 
+    def test_participant_finishes_on_last_task_and_sees_thank_you_page(self):
+        second_task = Task.objects.create(
+            project=self.project, number="ABS-102", title="Вторая задача"
+        )
+        VotingSessionTask.objects.bulk_create(
+            [
+                VotingSessionTask(
+                    session=self.voting_session, task=self.task, position=1
+                ),
+                VotingSessionTask(
+                    session=self.voting_session, task=second_task, position=2
+                ),
+            ]
+        )
+        participant_client = self.join_participant("Анна")
+        self.organizer.post(
+            reverse("poker:session_start", args=[self.voting_session.pk])
+        )
+        complete_url = reverse(
+            "poker:room_complete", args=[self.voting_session.public_token]
+        )
+        navigate_url = reverse(
+            "poker:room_navigate", args=[self.voting_session.public_token]
+        )
+
+        early_response = participant_client.post(complete_url)
+        self.assertEqual(early_response.status_code, 409)
+        self.assertEqual(early_response.json()["error"], "last_task_required")
+
+        participant_client.post(navigate_url, {"direction": "next"})
+        response = participant_client.post(complete_url)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["ok"])
+
+        participant = Participant.objects.get(name="Анна")
+        self.assertIsNotNone(participant.completed_at)
+        room_response = participant_client.get(
+            reverse("poker:room", args=[self.voting_session.public_token])
+        )
+        self.assertContains(room_response, "Спасибо за оценку!")
+        self.assertContains(room_response, "Ваши ответы сохранены.")
+        self.assertNotContains(room_response, "Вперёд")
+
+        state_response = participant_client.get(
+            reverse("poker:room_state", args=[self.voting_session.public_token])
+        )
+        self.assertTrue(state_response.json()["participant_completed"])
+        self.assertEqual(
+            participant_client.post(
+                reverse(
+                    "poker:room_vote", args=[self.voting_session.public_token]
+                ),
+                {"value": 8},
+            ).status_code,
+            409,
+        )
+
     def test_participant_name_must_be_unique_in_room(self):
         self.join_participant("Анна")
         second = Client()

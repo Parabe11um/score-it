@@ -43,6 +43,11 @@ urlpatterns = [
         views.room_navigate,
         name="room_navigate",
     ),
+    path(
+        "room/<uuid:token>/complete/",
+        views.room_complete,
+        name="room_complete",
+    ),
     path("sprints/<int:pk>/", views.sprint_detail, name="sprint_detail"),
     path("sprints/<int:pk>/tasks/add/", views.sprint_add_tasks, name="sprint_add_tasks"),
     path(
