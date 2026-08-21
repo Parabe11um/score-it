@@ -2,6 +2,7 @@ import uuid
 from decimal import Decimal, ROUND_HALF_UP
 
 from django.conf import settings
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.urls import reverse
 
@@ -114,6 +115,12 @@ class VotingSession(models.Model):
     status = models.CharField(
         "Статус", max_length=20, choices=Status.choices, default=Status.DRAFT
     )
+    minimum_participants = models.PositiveSmallIntegerField(
+        "Минимум голосов",
+        default=2,
+        validators=(MinValueValidator(1), MaxValueValidator(100)),
+        help_text="Сколько участников должны проголосовать до раскрытия карт.",
+    )
     current_task = models.ForeignKey(
         Task,
         on_delete=models.SET_NULL,
@@ -145,6 +152,50 @@ class VotingSession(models.Model):
             task=self.current_task,
             status__in=(VotingRound.Status.VOTING, VotingRound.Status.REVEALED),
         ).first()
+
+
+class VotingSessionTask(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "pending", "В очереди"
+        ACTIVE = "active", "Оценивается"
+        COMPLETED = "completed", "Оценена"
+        SKIPPED = "skipped", "Пропущена"
+
+    session = models.ForeignKey(
+        VotingSession,
+        on_delete=models.CASCADE,
+        related_name="queue_items",
+        verbose_name="Сессия",
+    )
+    task = models.ForeignKey(
+        Task,
+        on_delete=models.CASCADE,
+        related_name="session_queue_items",
+        verbose_name="Задача",
+    )
+    position = models.PositiveIntegerField("Порядок")
+    status = models.CharField(
+        "Статус", max_length=20, choices=Status.choices, default=Status.PENDING
+    )
+    added_at = models.DateTimeField("Добавлена", auto_now_add=True)
+    completed_at = models.DateTimeField("Оценена", null=True, blank=True)
+
+    class Meta:
+        ordering = ("position", "added_at")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("session", "task"), name="unique_task_in_voting_queue"
+            ),
+            models.UniqueConstraint(
+                fields=("session", "position"),
+                name="unique_position_in_voting_queue",
+            ),
+        ]
+        verbose_name = "Задача в очереди голосования"
+        verbose_name_plural = "Очередь голосования"
+
+    def __str__(self):
+        return f"{self.session.name}: {self.position}. {self.task.number}"
 
 
 class Participant(models.Model):

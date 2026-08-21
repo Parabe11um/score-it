@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}{{ project.name }} — Score It{% endblock %}
 
@@ -28,15 +29,49 @@
         </form>
     </details>
 
-    <details class="card action-card">
+    <details class="card action-card" {% if session_form.errors %}open{% endif %}>
         <summary>
             <span class="action-card__number">2</span>
             <span><strong>Создать голосование</strong><small>Получить ссылку для команды</small></span>
         </summary>
-        <form method="post" action="{% url 'poker:session_create' project.pk %}" class="stack-form details-form">
+        <form method="post" action="{% url 'poker:session_create' project.pk %}" class="stack-form details-form" data-task-picker>
             {% csrf_token %}
-            <div class="field">{{ session_form.name }}</div>
-            <button class="button button--primary" type="submit">Создать комнату</button>
+            <div class="field">
+                <label for="{{ session_form.name.id_for_label }}">Название комнаты</label>
+                {{ session_form.name }}
+                {% for error in session_form.name.errors %}<div class="form-error">{{ error }}</div>{% endfor %}
+            </div>
+            <div class="field">
+                <label for="{{ session_form.minimum_participants.id_for_label }}">Минимум голосов</label>
+                {{ session_form.minimum_participants }}
+                <div class="help-text">Карты нельзя раскрыть, пока не проголосует указанное число участников.</div>
+                {% for error in session_form.minimum_participants.errors %}<div class="form-error">{{ error }}</div>{% endfor %}
+            </div>
+            <div class="field">
+                <div class="picker-heading">
+                    <label>Задачи в очереди</label>
+                    <strong data-task-count>0 выбрано</strong>
+                </div>
+                <div class="picker-tools">
+                    <input type="search" placeholder="Найти задачу" aria-label="Найти задачу" data-task-search>
+                    <div class="button-row">
+                        <button class="button button--ghost button--small" type="button" data-task-select-all>Выбрать все</button>
+                        <button class="button button--ghost button--small" type="button" data-task-select-none>Снять</button>
+                    </div>
+                </div>
+                <div class="queue-picker" data-task-options>
+                    {% for choice in session_form.task_ids %}
+                        <label class="queue-picker__item" data-task-option data-search-text="{{ choice.choice_label|lower }}">
+                            {{ choice.tag }}<span>{{ choice.choice_label }}</span>
+                        </label>
+                    {% empty %}
+                        <div class="compact-empty">Сначала импортируйте задачи.</div>
+                    {% endfor %}
+                </div>
+                {% for error in session_form.task_ids.errors %}<div class="form-error">{{ error }}</div>{% endfor %}
+                <div class="help-text">Неоценённые задачи отмечены автоматически. Порядок совпадает с бэклогом.</div>
+            </div>
+            <button class="button button--primary" type="submit" {% if not tasks %}disabled{% endif %}>Создать комнату с очередью</button>
         </form>
     </details>
 
@@ -110,3 +145,4 @@
 </div>
 {% endblock %}
 
+{% block scripts %}<script src="{% static 'js/task-picker.js' %}" defer></script>{% endblock %}

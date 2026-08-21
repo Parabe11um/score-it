@@ -13,6 +13,12 @@ urlpatterns = [
     path("projects/<int:pk>/sessions/new/", views.session_create, name="session_create"),
     path("projects/<int:pk>/sprints/new/", views.sprint_create, name="sprint_create"),
     path("sessions/<int:pk>/", views.session_manage, name="session_manage"),
+    path("sessions/<int:pk>/start/", views.session_start, name="session_start"),
+    path(
+        "sessions/<int:pk>/queue/add/",
+        views.session_queue_add,
+        name="session_queue_add",
+    ),
     path(
         "sessions/<int:pk>/tasks/<int:task_pk>/start/",
         views.session_start_task,
@@ -36,4 +42,3 @@ urlpatterns = [
     ),
     path("sprints/<int:pk>/export/", views.sprint_export, name="sprint_export"),
 ]
-

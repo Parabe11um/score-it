@@ -25,6 +25,9 @@
     const participantPill = document.getElementById("participant-pill");
     const votedCount = document.getElementById("voted-count");
     const participantCount = document.getElementById("participant-count");
+    const minimumCount = document.getElementById("minimum-count");
+    const thresholdHint = document.getElementById("threshold-hint");
+    const revealButton = document.getElementById("reveal-button");
     const revealedVotes = document.getElementById("revealed-votes");
     const averageValue = document.getElementById("average-value");
 
@@ -89,6 +92,14 @@
             if (participantPill) participantPill.textContent = state.participant_count;
             if (votedCount) votedCount.textContent = state.voted_count;
             if (participantCount) participantCount.textContent = state.participant_count;
+            if (minimumCount) minimumCount.textContent = state.minimum_participants;
+            if (revealButton) revealButton.disabled = !state.minimum_reached;
+            if (thresholdHint) {
+                thresholdHint.textContent = state.minimum_reached
+                    ? "Можно раскрывать карты"
+                    : `До раскрытия нужно ещё голосов: ${state.votes_remaining}`;
+                thresholdHint.classList.toggle("threshold-hint--ready", state.minimum_reached);
+            }
             if (state.summary && averageValue) averageValue.textContent = state.summary.average;
             if (state.votes) renderRevealedVotes(state.votes);
         } catch (_error) {
@@ -99,4 +110,3 @@
     refresh();
     window.setInterval(refresh, 1500);
 })();
-

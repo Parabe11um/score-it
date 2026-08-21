@@ -11,6 +11,10 @@
         <span class="eyebrow">КОМНАТА ГОЛОСОВАНИЯ</span>
         <h1>{{ voting_session.name }}</h1>
         <p><span class="status-dot status-dot--active"></span>{{ voting_session.get_status_display }}</p>
+        <div class="session-meta">
+            <span>Минимум голосов: <strong>{{ voting_session.minimum_participants }}</strong></span>
+            <span>Оценено: <strong>{{ queue.completed }} из {{ queue.total }}</strong></span>
+        </div>
     </div>
     {% if voting_session.status != "finished" %}
         <form method="post" action="{% url 'poker:session_finish' voting_session.pk %}" onsubmit="return confirm('Завершить сессию?');">
@@ -33,15 +37,18 @@
             <div class="task-focus">
                 <span class="task-number">{{ voting_session.current_task.number }}</span>
                 <h2>{{ voting_session.current_task.title }}</h2>
-                <p>Раунд {{ current_round.number }}</p>
+                <p>{% if queue.current_position %}Задача {{ queue.current_position }} из {{ queue.total }} · {% endif %}Раунд {{ current_round.number }}</p>
             </div>
 
             {% if current_round.status == "voting" %}
                 <div class="waiting-visual"><span></span><span></span><span></span></div>
                 <h3 class="centered">Команда выбирает оценки</h3>
-                <p class="centered muted"><strong id="voted-count">{{ current_round.votes.count }}</strong> из <strong id="participant-count">{{ voting_session.participants.count }}</strong> проголосовали</p>
-                <form method="post" action="{% url 'poker:session_reveal' voting_session.pk %}" class="centered-actions">
-                    {% csrf_token %}<button class="button button--primary button--large" type="submit">Раскрыть голоса</button>
+                <p class="centered muted"><strong id="voted-count">{{ current_round.votes.count }}</strong> проголосовали · минимум <strong id="minimum-count">{{ voting_session.minimum_participants }}</strong></p>
+                <p class="threshold-hint centered" id="threshold-hint">
+                    {% if current_round.votes.count >= voting_session.minimum_participants %}Можно раскрывать карты{% else %}Ждём нужное количество голосов{% endif %}
+                </p>
+                <form method="post" action="{% url 'poker:session_reveal' voting_session.pk %}" class="centered-actions mobile-action-bar">
+                    {% csrf_token %}<button class="button button--primary button--large" id="reveal-button" type="submit" {% if current_round.votes.count < voting_session.minimum_participants %}disabled{% endif %}>Раскрыть голоса</button>
                 </form>
             {% elif current_round.status == "revealed" %}
                 <div class="average-panel">
@@ -52,15 +59,30 @@
                 <div class="revealed-votes" id="revealed-votes">
                     {% for vote in current_round.votes.all %}<div><span>{{ vote.participant.name }}</span><strong>{{ vote.value }}</strong></div>{% endfor %}
                 </div>
-                <div class="button-row button-row--center">
-                    <form method="post" action="{% url 'poker:session_accept' voting_session.pk %}">{% csrf_token %}<button class="button button--primary" type="submit">Сохранить среднюю</button></form>
+                <div class="button-row button-row--center mobile-action-bar">
+                    <form method="post" action="{% url 'poker:session_accept' voting_session.pk %}">{% csrf_token %}<button class="button button--primary" type="submit">{% if queue.pending %}Сохранить и перейти к следующей{% else %}Сохранить оценку{% endif %}</button></form>
                     <form method="post" action="{% url 'poker:session_revote' voting_session.pk %}">{% csrf_token %}<button class="button button--secondary" type="submit">Переголосовать</button></form>
                 </div>
             {% endif %}
         {% elif voting_session.status == "finished" %}
             <div class="empty-state empty-state--stage"><div class="empty-state__icon">✓</div><h2>Сессия завершена</h2><p>Все принятые оценки сохранены в бэклоге.</p></div>
         {% else %}
-            <div class="empty-state empty-state--stage"><div class="empty-state__icon">▶</div><h2>Выберите следующую задачу</h2><p>После запуска она автоматически появится у всех участников.</p></div>
+            <div class="empty-state empty-state--stage">
+                <div class="empty-state__icon">▶</div>
+                {% if queue.pending %}
+                    <h2>Очередь готова</h2>
+                    <p>{{ queue.pending }} задач будут открываться по порядку.</p>
+                    <form method="post" action="{% url 'poker:session_start' voting_session.pk %}" class="centered-actions mobile-action-bar">
+                        {% csrf_token %}<button class="button button--primary button--large" type="submit">Начать оценку</button>
+                    </form>
+                {% elif queue.total %}
+                    <h2>Все задачи очереди пройдены</h2>
+                    <p>Можно добавить ещё задачи или завершить сессию.</p>
+                {% else %}
+                    <h2>Очередь пока пуста</h2>
+                    <p>Добавьте задачи ниже — можно выбрать весь список сразу.</p>
+                {% endif %}
+            </div>
         {% endif %}
     </section>
 
@@ -72,22 +94,57 @@
     </aside>
 </div>
 
-{% if voting_session.status != "finished" and not current_round %}
 <section class="card section-card">
-    <div class="section-heading"><div><h2>Задачи для оценки</h2><p>Можно повторно оценить уже завершённую задачу.</p></div><span class="pill">{{ tasks|length }}</span></div>
-    <div class="table-wrap">
-        <table>
-            <thead><tr><th>Номер</th><th>Название</th><th>Текущая оценка</th><th></th></tr></thead>
-            <tbody>
-            {% for task in tasks %}
-                <tr><td><span class="task-number">{{ task.number }}</span></td><td>{{ task.title }}</td><td>{{ task.estimate_display }}</td><td class="align-right"><form method="post" action="{% url 'poker:session_start_task' voting_session.pk task.pk %}">{% csrf_token %}<button class="button button--secondary button--small" type="submit">Оценивать</button></form></td></tr>
-            {% empty %}<tr><td colspan="4" class="table-empty">Сначала добавьте задачи в проект.</td></tr>{% endfor %}
-            </tbody>
-        </table>
+    <div class="section-heading">
+        <div><h2>Очередь задач</h2><p>После сохранения оценки автоматически откроется следующая.</p></div>
+        <span class="pill">{{ queue.total }}</span>
+    </div>
+    {% if queue.total %}
+        <div class="queue-progress">
+            <progress max="{{ queue.total }}" value="{{ queue.completed }}">{{ queue.completed }} из {{ queue.total }}</progress>
+            <span>{{ queue.completed }} из {{ queue.total }} оценено</span>
+        </div>
+    {% endif %}
+    <div class="queue-list">
+        {% for item in queue.items %}
+            <div class="queue-row queue-row--{{ item.status }}">
+                <span class="queue-row__position">{{ item.display_position }}</span>
+                <div class="queue-row__task"><span class="task-number">{{ item.task.number }}</span><strong>{{ item.task.title }}</strong></div>
+                <span class="badge {% if item.status == 'completed' %}badge--success{% elif item.status == 'active' %}badge--active{% endif %}">{{ item.get_status_display }}</span>
+                <strong class="queue-row__estimate">{{ item.task.estimate_display }}</strong>
+            </div>
+        {% empty %}<div class="compact-empty">Добавьте задачи в очередь ниже.</div>{% endfor %}
     </div>
 </section>
+
+{% if voting_session.status != "finished" and available_tasks %}
+<details class="card section-card add-queue-card" data-task-picker>
+    <summary class="section-heading">
+        <div><h2>Добавить задачи в очередь</h2><p>Подходит и для уже созданных комнат.</p></div>
+        <span class="pill">{{ available_tasks|length }}</span>
+    </summary>
+    <form method="post" action="{% url 'poker:session_queue_add' voting_session.pk %}" class="stack-form">
+        {% csrf_token %}
+        <div class="picker-tools">
+            <input type="search" placeholder="Найти задачу" aria-label="Найти задачу" data-task-search>
+            <div class="button-row">
+                <button class="button button--ghost button--small" type="button" data-task-select-all>Выбрать все</button>
+                <button class="button button--ghost button--small" type="button" data-task-select-none>Снять</button>
+            </div>
+        </div>
+        <div class="picker-heading"><span>Доступные задачи</span><strong data-task-count>0 выбрано</strong></div>
+        <div class="queue-picker" data-task-options>
+            {% for task in available_tasks %}
+                <label class="queue-picker__item" data-task-option data-search-text="{{ task.number|lower }} {{ task.title|lower }}">
+                    <input type="checkbox" name="task_ids" value="{{ task.pk }}" checked>
+                    <span><strong>{{ task.number }}</strong> — {{ task.title }}</span>
+                </label>
+            {% endfor %}
+        </div>
+        <button class="button button--secondary" type="submit">Добавить выбранные в очередь</button>
+    </form>
+</details>
 {% endif %}
 {% endblock %}
 
-{% block scripts %}<script src="{% static 'js/organizer.js' %}" defer></script>{% endblock %}
-
+{% block scripts %}<script src="{% static 'js/task-picker.js' %}" defer></script><script src="{% static 'js/organizer.js' %}" defer></script>{% endblock %}

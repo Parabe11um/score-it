@@ -11,6 +11,7 @@
     const resultTaskNumber = document.getElementById("result-task-number");
     const resultTaskTitle = document.getElementById("result-task-title");
     const progress = document.getElementById("room-progress");
+    const waitingProgress = document.getElementById("waiting-progress");
     const feedback = document.getElementById("vote-feedback");
     const average = document.getElementById("room-average");
     const votesList = document.getElementById("room-votes");
@@ -51,6 +52,13 @@
         }
         if (!state.current_task || !state.round) {
             selectCard(null);
+            if (state.queue?.total) {
+                waitingProgress.textContent = state.queue.completed >= state.queue.total
+                    ? `Очередь завершена: ${state.queue.completed} из ${state.queue.total}.`
+                    : `В очереди ${state.queue.total} задач, оценено ${state.queue.completed}.`;
+            } else {
+                waitingProgress.textContent = "Организатор скоро запустит голосование.";
+            }
             showOnly(waitingState);
             return;
         }
@@ -66,7 +74,10 @@
 
         taskNumber.textContent = state.current_task.number;
         taskTitle.textContent = state.current_task.title;
-        progress.textContent = `Проголосовало: ${state.round.voted_count} из ${state.round.participant_count}`;
+        const queueLabel = state.queue?.current_position
+            ? `Задача ${state.queue.current_position} из ${state.queue.total} · `
+            : "";
+        progress.textContent = `${queueLabel}голосов ${state.round.voted_count} из минимум ${state.round.minimum_participants}`;
         selectCard(state.round.my_vote);
         feedback.textContent = state.round.has_voted
             ? `Ваш выбор: ${state.round.my_vote}. Его можно изменить до раскрытия.`
@@ -126,4 +137,3 @@
     refresh();
     window.setInterval(refresh, 1500);
 })();
-

@@ -9,6 +9,7 @@ from .models import (
     Vote,
     VotingRound,
     VotingSession,
+    VotingSessionTask,
 )
 
 
@@ -25,10 +26,23 @@ class TaskAdmin(admin.ModelAdmin):
     search_fields = ("number", "title")
 
 
+class VotingSessionTaskInline(admin.TabularInline):
+    model = VotingSessionTask
+    extra = 0
+
+
 @admin.register(VotingSession)
 class VotingSessionAdmin(admin.ModelAdmin):
-    list_display = ("name", "project", "status", "current_task", "created_at")
+    list_display = (
+        "name",
+        "project",
+        "status",
+        "minimum_participants",
+        "current_task",
+        "created_at",
+    )
     list_filter = ("status",)
+    inlines = (VotingSessionTaskInline,)
 
 
 @admin.register(Participant)
@@ -57,4 +71,3 @@ class SprintTaskInline(admin.TabularInline):
 class SprintAdmin(admin.ModelAdmin):
     list_display = ("name", "project", "start_date", "end_date", "capacity")
     inlines = (SprintTaskInline,)
-

@@ -17,7 +17,7 @@
     <div id="waiting-state" class="empty-state empty-state--stage">
         <div class="waiting-visual"><span></span><span></span><span></span></div>
         <h2>Ждём следующую задачу</h2>
-        <p>Организатор скоро запустит голосование.</p>
+        <p id="waiting-progress">Организатор скоро запустит голосование.</p>
     </div>
 
     <div id="voting-state" hidden>
@@ -45,4 +45,3 @@
 {% endblock %}
 
 {% block scripts %}<script src="{% static 'js/room.js' %}" defer></script>{% endblock %}
-

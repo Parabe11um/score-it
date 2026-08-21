@@ -14,6 +14,7 @@ from poker.models import (
     Vote,
     VotingRound,
     VotingSession,
+    VotingSessionTask,
 )
 
 
@@ -52,6 +53,44 @@ class OrganizerViewsTests(TestCase):
         self.client.force_login(self.other_user)
         response = self.client.get(self.project.get_absolute_url())
         self.assertEqual(response.status_code, 404)
+
+    def test_project_page_offers_bulk_queue_and_minimum_votes(self):
+        Task.objects.create(project=self.project, number="ABS-1", title="Первая")
+        self.client.force_login(self.user)
+
+        response = self.client.get(self.project.get_absolute_url())
+
+        self.assertContains(response, "Создать комнату с очередью")
+        self.assertContains(response, "Минимум голосов")
+        self.assertContains(response, "checked")
+
+    def test_session_creation_adds_selected_tasks_to_ordered_queue(self):
+        first = Task.objects.create(
+            project=self.project, number="ABS-1", title="Первая"
+        )
+        second = Task.objects.create(
+            project=self.project, number="ABS-2", title="Вторая"
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("poker:session_create", args=[self.project.pk]),
+            {
+                "name": "Пакетная оценка",
+                "minimum_participants": 3,
+                "task_ids": [first.pk, second.pk],
+            },
+        )
+
+        voting_session = VotingSession.objects.get(name="Пакетная оценка")
+        self.assertRedirects(response, voting_session.get_absolute_url())
+        self.assertEqual(voting_session.minimum_participants, 3)
+        self.assertEqual(
+            list(
+                voting_session.queue_items.values_list("task_id", "position")
+            ),
+            [(first.pk, 1), (second.pk, 2)],
+        )
 
 
 class VotingFlowTests(TestCase):
@@ -130,6 +169,73 @@ class VotingFlowTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(Vote.objects.count(), 0)
 
+    def test_reveal_waits_for_configured_minimum_votes(self):
+        first = self.join_participant("Анна")
+        self.organizer.post(
+            reverse(
+                "poker:session_start_task",
+                args=[self.voting_session.pk, self.task.pk],
+            )
+        )
+        first.post(
+            reverse("poker:room_vote", args=[self.voting_session.public_token]),
+            {"value": 8},
+        )
+
+        self.organizer.post(
+            reverse("poker:session_reveal", args=[self.voting_session.pk])
+        )
+
+        self.voting_session.refresh_from_db()
+        voting_round = self.voting_session.current_round
+        self.assertEqual(voting_round.status, VotingRound.Status.VOTING)
+
+    def test_accepting_estimate_starts_next_queued_task(self):
+        second_task = Task.objects.create(
+            project=self.project, number="ABS-102", title="Следующая задача"
+        )
+        VotingSessionTask.objects.bulk_create(
+            [
+                VotingSessionTask(
+                    session=self.voting_session, task=self.task, position=1
+                ),
+                VotingSessionTask(
+                    session=self.voting_session, task=second_task, position=2
+                ),
+            ]
+        )
+        first = self.join_participant("Анна")
+        second = self.join_participant("Борис")
+        self.organizer.post(
+            reverse("poker:session_start", args=[self.voting_session.pk])
+        )
+        vote_url = reverse(
+            "poker:room_vote", args=[self.voting_session.public_token]
+        )
+        first.post(vote_url, {"value": 4})
+        second.post(vote_url, {"value": 8})
+        self.organizer.post(
+            reverse("poker:session_reveal", args=[self.voting_session.pk])
+        )
+
+        self.organizer.post(
+            reverse("poker:session_accept", args=[self.voting_session.pk])
+        )
+
+        self.voting_session.refresh_from_db()
+        self.assertEqual(self.voting_session.current_task, second_task)
+        self.assertEqual(
+            self.voting_session.queue_items.get(task=self.task).status,
+            VotingSessionTask.Status.COMPLETED,
+        )
+        self.assertEqual(
+            self.voting_session.queue_items.get(task=second_task).status,
+            VotingSessionTask.Status.ACTIVE,
+        )
+        self.assertEqual(
+            self.voting_session.current_round.status, VotingRound.Status.VOTING
+        )
+
     def test_participant_name_must_be_unique_in_room(self):
         self.join_participant("Анна")
         second = Client()
@@ -180,4 +286,3 @@ class SprintTests(TestCase):
         self.assertEqual(sheet["D2"].value, "=E2/F2")
         self.assertEqual(sheet["E2"].value, 14)
         self.assertEqual(sheet["F2"].value, 3)
-

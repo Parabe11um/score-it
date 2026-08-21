@@ -2,13 +2,15 @@ import re
 
 from django import forms
 
-from .models import Project, Sprint, VotingSession
+from .models import Project, Sprint, Task, VotingSession
 
 
 class BootstrapFormMixin:
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         for field in self.fields.values():
+            if isinstance(field.widget, forms.CheckboxSelectMultiple):
+                continue
             current = field.widget.attrs.get("class", "")
             css_class = "form-check-input" if isinstance(
                 field.widget, forms.CheckboxInput
@@ -77,12 +79,32 @@ class BulkTaskImportForm(BootstrapFormMixin, forms.Form):
 
 
 class VotingSessionForm(BootstrapFormMixin, forms.ModelForm):
+    task_ids = forms.ModelMultipleChoiceField(
+        label="Задачи для оценки",
+        queryset=Task.objects.none(),
+        widget=forms.CheckboxSelectMultiple,
+        help_text="Неоценённые задачи выбраны автоматически.",
+    )
+
     class Meta:
         model = VotingSession
-        fields = ("name",)
+        fields = ("name", "minimum_participants")
         widgets = {
-            "name": forms.TextInput(attrs={"placeholder": "Например, Оценка спринта 24"})
+            "name": forms.TextInput(attrs={"placeholder": "Например, Оценка спринта 24"}),
+            "minimum_participants": forms.NumberInput(
+                attrs={"min": 1, "max": 100, "inputmode": "numeric"}
+            ),
         }
+
+    def __init__(self, *args, project=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.project = project
+        if project is None:
+            return
+        tasks = project.tasks.all()
+        self.fields["task_ids"].queryset = tasks
+        if not self.is_bound:
+            self.initial["task_ids"] = tasks.filter(status=Task.Status.UNESTIMATED)
 
 
 class JoinRoomForm(BootstrapFormMixin, forms.Form):
@@ -116,4 +138,3 @@ class SprintForm(BootstrapFormMixin, forms.ModelForm):
         if start_date and end_date and end_date < start_date:
             self.add_error("end_date", "Дата завершения не может быть раньше начала.")
         return cleaned
-
