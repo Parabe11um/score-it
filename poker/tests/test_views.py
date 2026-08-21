@@ -1,4 +1,6 @@
 from io import BytesIO
+from datetime import timedelta
+from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.test import Client, TestCase
@@ -219,6 +221,41 @@ class OrganizerViewsTests(TestCase):
 
         self.client.post(reverse("poker:session_delete", args=[voting_session.pk]))
         self.assertFalse(VotingSession.objects.filter(pk=voting_session.pk).exists())
+
+    def test_dashboard_summarizes_active_work(self):
+        new_task = Task.objects.create(
+            project=self.project, number="ABS-1", title="Новая задача"
+        )
+        active_room = VotingSession.objects.create(
+            project=self.project,
+            name="Активная оценка",
+            status=VotingSession.Status.ACTIVE,
+        )
+        Participant.objects.create(
+            session=active_room,
+            name="Анна",
+            completed_at=timezone.now(),
+        )
+        Participant.objects.create(session=active_room, name="Борис")
+        active_sprint = Sprint.objects.create(
+            project=self.project,
+            name="Текущий спринт",
+            status=Sprint.Status.ACTIVE,
+            end_date=timezone.localdate() + timedelta(days=5),
+            capacity=20,
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("poker:dashboard"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["new_task_count"], 1)
+        self.assertEqual(response.context["unestimated_task_count"], 1)
+        self.assertEqual(response.context["incomplete_participant_count"], 1)
+        self.assertEqual(list(response.context["active_rooms"]), [active_room])
+        self.assertEqual(list(response.context["active_sprints"]), [active_sprint])
+        self.assertContains(response, "Активная оценка")
+        self.assertContains(response, "Текущий спринт")
 
 
 class VotingFlowTests(TestCase):
@@ -516,6 +553,93 @@ class VotingFlowTests(TestCase):
             409,
         )
 
+    def test_organizer_sees_full_participant_progress(self):
+        second_task = Task.objects.create(
+            project=self.project, number="ABS-102", title="Вторая задача"
+        )
+        VotingSessionTask.objects.bulk_create(
+            [
+                VotingSessionTask(
+                    session=self.voting_session, task=self.task, position=1
+                ),
+                VotingSessionTask(
+                    session=self.voting_session, task=second_task, position=2
+                ),
+            ]
+        )
+        self.join_participant("Не начинал")
+        in_progress = self.join_participant("В процессе")
+        all_voted = self.join_participant("Оценил всё")
+        completed = self.join_participant("Завершил")
+        self.organizer.post(
+            reverse("poker:session_start", args=[self.voting_session.pk])
+        )
+        vote_url = reverse(
+            "poker:room_vote", args=[self.voting_session.public_token]
+        )
+        navigate_url = reverse(
+            "poker:room_navigate", args=[self.voting_session.public_token]
+        )
+        complete_url = reverse(
+            "poker:room_complete", args=[self.voting_session.public_token]
+        )
+
+        in_progress.post(vote_url, {"value": 4})
+        for participant_client in (all_voted, completed):
+            participant_client.post(vote_url, {"value": 8})
+            participant_client.post(navigate_url, {"direction": "next"})
+            participant_client.post(vote_url, {"value": 12})
+        completed.post(complete_url)
+
+        state = self.organizer.get(
+            reverse("poker:session_state", args=[self.voting_session.pk])
+        ).json()
+        progress = {
+            item["name"]: (item["progress_status"], item["progress_label"])
+            for item in state["participants"]
+        }
+        self.assertEqual(progress["Не начинал"], ("not_started", "Не приступил"))
+        self.assertEqual(progress["В процессе"], ("in_progress", "1 из 2"))
+        self.assertEqual(progress["Оценил всё"], ("all_voted", "Оценил всё"))
+        self.assertEqual(progress["Завершил"], ("completed", "Завершил"))
+        self.assertEqual(state["completed_participant_count"], 1)
+        self.assertEqual(state["participant_count"], 4)
+        organizer_page = self.organizer.get(self.voting_session.get_absolute_url())
+        self.assertContains(organizer_page, "Не приступил")
+        self.assertContains(organizer_page, "1 из 2")
+        self.assertContains(organizer_page, "Оценил всё")
+        self.assertContains(organizer_page, "Завершил")
+
+    def test_room_copy_keeps_queue_but_resets_voting_data(self):
+        second_task = Task.objects.create(
+            project=self.project, number="ABS-102", title="Вторая задача"
+        )
+        VotingSessionTask.objects.bulk_create(
+            [
+                VotingSessionTask(
+                    session=self.voting_session, task=self.task, position=1
+                ),
+                VotingSessionTask(
+                    session=self.voting_session, task=second_task, position=2
+                ),
+            ]
+        )
+        self.join_participant("Анна")
+
+        response = self.organizer.post(
+            reverse("poker:session_copy", args=[self.voting_session.pk])
+        )
+
+        copied = VotingSession.objects.exclude(pk=self.voting_session.pk).get()
+        self.assertRedirects(response, copied.get_absolute_url())
+        self.assertEqual(copied.status, VotingSession.Status.DRAFT)
+        self.assertEqual(
+            list(copied.queue_items.values_list("task_id", "position")),
+            [(self.task.pk, 1), (second_task.pk, 2)],
+        )
+        self.assertEqual(copied.participants.count(), 0)
+        self.assertEqual(copied.rounds.count(), 0)
+
     def test_participant_name_must_be_unique_in_room(self):
         self.join_participant("Анна")
         second = Client()
@@ -638,6 +762,85 @@ class SprintTests(TestCase):
 
         self.assertFalse(Sprint.objects.filter(pk=sprint_pk).exists())
         self.assertTrue(Task.objects.filter(pk=task_pk).exists())
+
+    def test_capacity_shows_remaining_and_overage(self):
+        self.sprint.refresh_from_db()
+        self.assertEqual(self.sprint.capacity_remaining_display, "15.33")
+        self.assertFalse(self.sprint.is_over_capacity)
+
+        large_task = Task.objects.create(
+            project=self.project,
+            number="ABS-11",
+            title="Крупная задача",
+            status=Task.Status.ESTIMATED,
+            estimate_sum=20,
+            estimate_count=1,
+        )
+        SprintTask.objects.create(
+            sprint=self.sprint, task=large_task, position=2
+        )
+        sprint = Sprint.objects.get(pk=self.sprint.pk)
+
+        self.assertTrue(sprint.is_over_capacity)
+        self.assertEqual(sprint.capacity_overage_display, "4.67")
+        self.assertEqual(sprint.capacity_remaining, Decimal("0"))
+        response = self.client.get(sprint.get_absolute_url())
+        self.assertContains(response, "Превышение: 4.67 points")
+        self.assertContains(response, "План превышает заданную ёмкость")
+
+    def test_sprint_copy_keeps_planned_tasks_and_resets_dates(self):
+        self.sprint.start_date = timezone.localdate()
+        self.sprint.end_date = timezone.localdate() + timedelta(days=14)
+        self.sprint.status = Sprint.Status.ACTIVE
+        self.sprint.save(update_fields=("start_date", "end_date", "status"))
+
+        response = self.client.post(
+            reverse("poker:sprint_copy", args=[self.sprint.pk])
+        )
+
+        copied = Sprint.objects.exclude(pk=self.sprint.pk).get()
+        self.assertRedirects(response, copied.get_absolute_url())
+        self.assertEqual(copied.status, Sprint.Status.PLANNING)
+        self.assertIsNone(copied.start_date)
+        self.assertIsNone(copied.end_date)
+        self.assertEqual(copied.capacity, self.sprint.capacity)
+        self.assertEqual(
+            list(
+                copied.sprint_tasks.values_list("task_id", "status", "position")
+            ),
+            [(self.task.pk, SprintTask.Status.PLANNED, 1)],
+        )
+
+    def test_transfer_preserves_source_history_and_moves_capacity(self):
+        target = Sprint.objects.create(
+            project=self.project,
+            name="Спринт 25",
+            status=Sprint.Status.PLANNING,
+            capacity=20,
+        )
+
+        response = self.client.post(
+            reverse("poker:sprint_transfer_tasks", args=[self.sprint.pk]),
+            {"target_sprint": target.pk, "task_ids": [self.task.pk]},
+        )
+
+        self.assertRedirects(response, self.sprint.get_absolute_url())
+        source_item = SprintTask.objects.get(
+            sprint=self.sprint, task=self.task
+        )
+        target_item = SprintTask.objects.get(sprint=target, task=self.task)
+        self.assertEqual(source_item.status, SprintTask.Status.TRANSFERRED)
+        self.assertEqual(source_item.transferred_to, target)
+        self.assertIsNotNone(source_item.transferred_at)
+        self.assertEqual(target_item.status, SprintTask.Status.PLANNED)
+
+        source = Sprint.objects.get(pk=self.sprint.pk)
+        target = Sprint.objects.get(pk=target.pk)
+        self.assertEqual(source.total_estimate, Decimal("0"))
+        self.assertEqual(target.total_estimate_display, "4.67")
+        history_page = self.client.get(source.get_absolute_url())
+        self.assertContains(history_page, "Перенесена")
+        self.assertContains(history_page, target.name)
 
     def test_excel_export_contains_average_formula(self):
         response = self.client.get(

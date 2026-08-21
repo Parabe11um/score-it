@@ -11,6 +11,43 @@
     </div>
 </div>
 
+<div class="workspace-metrics">
+    <div class="workspace-metric"><span>Активные комнаты</span><strong>{{ active_rooms|length }}</strong></div>
+    <div class="workspace-metric"><span>Не завершили оценку</span><strong>{{ incomplete_participant_count }}</strong></div>
+    <div class="workspace-metric"><span>Активные спринты</span><strong>{{ active_sprints|length }}</strong></div>
+    <div class="workspace-metric"><span>Новые задачи</span><strong>{{ new_task_count }}</strong></div>
+    <div class="workspace-metric"><span>Не оценены</span><strong>{{ unestimated_task_count }}</strong></div>
+</div>
+
+<div class="dashboard-overview">
+    <section class="card overview-card">
+        <div class="section-heading"><div><h2>Активные комнаты</h2><p>Текущая оценка команд.</p></div><span class="pill">{{ active_rooms|length }}</span></div>
+        <div class="overview-list">
+            {% for room in active_rooms %}
+                <a class="overview-item" href="{{ room.get_absolute_url }}"><div><strong>{{ room.name }}</strong><small>{{ room.project.name }} · {{ room.queue_completed }} из {{ room.queue_total }} задач</small></div><span>{% if room.incomplete_participant_count %}Не завершили: {{ room.incomplete_participant_count }}{% else %}Все завершили{% endif %}</span></a>
+            {% empty %}<div class="compact-empty">Активных комнат нет.</div>{% endfor %}
+        </div>
+    </section>
+
+    <section class="card overview-card">
+        <div class="section-heading"><div><h2>Активные спринты</h2><p>Текущий план и ёмкость.</p></div><span class="pill">{{ active_sprints|length }}</span></div>
+        <div class="overview-list">
+            {% for sprint in active_sprints %}
+                <a class="overview-item" href="{{ sprint.get_absolute_url }}"><div><strong>{{ sprint.name }}</strong><small>{{ sprint.project.name }} · {{ sprint.active_task_count }} задач</small></div><span>{% if sprint.capacity != None %}{{ sprint.total_estimate_display }} из {{ sprint.capacity }}{% else %}{{ sprint.total_estimate_display }} points{% endif %}</span></a>
+            {% empty %}<div class="compact-empty">Активных спринтов нет.</div>{% endfor %}
+        </div>
+    </section>
+
+    <section class="card overview-card">
+        <div class="section-heading"><div><h2>Ближайшие завершения</h2><p>Планируемые и активные спринты.</p></div></div>
+        <div class="overview-list">
+            {% for sprint in upcoming_sprints %}
+                <a class="overview-item" href="{{ sprint.get_absolute_url }}"><div><strong>{{ sprint.name }}</strong><small>{{ sprint.project.name }} · {{ sprint.get_status_display }}</small></div><span class="{% if sprint.end_date < today %}text-danger{% endif %}">{{ sprint.end_date|date:"d.m.Y" }}</span></a>
+            {% empty %}<div class="compact-empty">Даты завершения не заданы.</div>{% endfor %}
+        </div>
+    </section>
+</div>
+
 <div class="dashboard-grid">
     <section class="card">
         <div class="section-heading">
@@ -57,4 +94,3 @@
     </section>
 </div>
 {% endblock %}
-

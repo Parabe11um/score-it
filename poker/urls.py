@@ -51,6 +51,7 @@ urlpatterns = [
     path("sessions/<int:pk>/archive/", views.session_archive, name="session_archive"),
     path("sessions/<int:pk>/restore/", views.session_restore, name="session_restore"),
     path("sessions/<int:pk>/delete/", views.session_delete, name="session_delete"),
+    path("sessions/<int:pk>/copy/", views.session_copy, name="session_copy"),
     path("sessions/<int:pk>/state/", views.session_state, name="session_state"),
     path("room/<uuid:token>/", views.room, name="room"),
     path("room/<uuid:token>/join/", views.room_join, name="room_join"),
@@ -75,6 +76,12 @@ urlpatterns = [
     path("sprints/<int:pk>/archive/", views.sprint_archive, name="sprint_archive"),
     path("sprints/<int:pk>/restore/", views.sprint_restore, name="sprint_restore"),
     path("sprints/<int:pk>/delete/", views.sprint_delete, name="sprint_delete"),
+    path("sprints/<int:pk>/copy/", views.sprint_copy, name="sprint_copy"),
+    path(
+        "sprints/<int:pk>/transfer/",
+        views.sprint_transfer_tasks,
+        name="sprint_transfer_tasks",
+    ),
     path("sprints/<int:pk>/tasks/add/", views.sprint_add_tasks, name="sprint_add_tasks"),
     path(
         "sprints/<int:pk>/tasks/<int:task_pk>/remove/",

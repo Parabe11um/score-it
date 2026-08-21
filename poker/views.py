@@ -68,6 +68,19 @@ def _participant_session_key(voting_session):
     return f"score_it_participant_{voting_session.pk}"
 
 
+def _copy_name(name):
+    suffix = " — копия"
+    return f"{name[:160 - len(suffix)]}{suffix}"
+
+
+def _warn_if_over_capacity(request, sprint):
+    if sprint.is_over_capacity:
+        messages.warning(
+            request,
+            f"Ёмкость спринта превышена на {sprint.capacity_overage_display} points.",
+        )
+
+
 def _participant_from_request(request, voting_session):
     token = request.session.get(_participant_session_key(voting_session))
     if not token:
@@ -280,6 +293,40 @@ def _participant_queue_summary(voting_session, participant, queue_item):
     return summary
 
 
+def _participant_progress(voting_session, current_round_voted_ids=None):
+    queue_total = voting_session.queue_items.count()
+    current_round_voted_ids = current_round_voted_ids or set()
+    participants = list(
+        voting_session.participants.annotate(
+            progress_voted=Count(
+                "votes__voting_round__queue_item",
+                filter=Q(
+                    votes__voting_round__queue_item__session=voting_session
+                ),
+                distinct=True,
+            )
+        )
+    )
+    for participant in participants:
+        participant.progress_total = queue_total
+        participant.current_round_voted = participant.pk in current_round_voted_ids
+        if participant.completed_at:
+            participant.progress_status = "completed"
+            participant.progress_label = "Завершил"
+        elif participant.progress_voted == 0:
+            participant.progress_status = "not_started"
+            participant.progress_label = "Не приступил"
+        elif participant.progress_voted >= queue_total and queue_total:
+            participant.progress_status = "all_voted"
+            participant.progress_label = "Оценил всё"
+        else:
+            participant.progress_status = "in_progress"
+            participant.progress_label = (
+                f"{participant.progress_voted} из {queue_total}"
+            )
+    return participants
+
+
 def _project_detail_context(
     project,
     *,
@@ -303,7 +350,9 @@ def _project_detail_context(
 
     tasks = project.tasks.annotate(
         in_sprint=Exists(
-            SprintTask.objects.filter(task_id=OuterRef("pk"))
+            SprintTask.objects.filter(
+                task_id=OuterRef("pk"), status=SprintTask.Status.PLANNED
+            )
         ),
         has_voting_history=Exists(
             VotingSessionTask.objects.filter(task_id=OuterRef("pk"))
@@ -363,17 +412,95 @@ def _project_detail_context(
     }
 
 
-@login_required
-def dashboard(request):
-    projects = (
-        Project.objects.filter(owner=request.user)
+def _dashboard_context(user, project_form=None):
+    projects = list(
+        Project.objects.filter(owner=user)
         .prefetch_related("tasks", "voting_sessions", "sprints")
         .order_by("-updated_at")
     )
+    active_rooms = list(
+        VotingSession.objects.filter(
+            project__owner=user,
+            status=VotingSession.Status.ACTIVE,
+            archived_at__isnull=True,
+        )
+        .select_related("project")
+        .annotate(
+            participant_count=Count("participants", distinct=True),
+            completed_participant_count=Count(
+                "participants",
+                filter=Q(participants__completed_at__isnull=False),
+                distinct=True,
+            ),
+            queue_total=Count("queue_items", distinct=True),
+            queue_completed=Count(
+                "queue_items",
+                filter=Q(queue_items__status=VotingSessionTask.Status.COMPLETED),
+                distinct=True,
+            ),
+        )
+        .order_by("-created_at")
+    )
+    for voting_session in active_rooms:
+        voting_session.incomplete_participant_count = (
+            voting_session.participant_count
+            - voting_session.completed_participant_count
+        )
+
+    active_sprints = list(
+        Sprint.objects.filter(
+            project__owner=user,
+            status=Sprint.Status.ACTIVE,
+            archived_at__isnull=True,
+        )
+        .select_related("project")
+        .order_by("end_date", "-created_at")
+    )
+    upcoming_sprints = list(
+        Sprint.objects.filter(
+            project__owner=user,
+            status__in=(Sprint.Status.PLANNING, Sprint.Status.ACTIVE),
+            archived_at__isnull=True,
+            end_date__isnull=False,
+        )
+        .select_related("project")
+        .order_by("end_date")[:5]
+    )
+    unestimated_tasks = Task.objects.filter(
+        project__owner=user,
+        completed_at__isnull=True,
+        status=Task.Status.UNESTIMATED,
+    )
+    new_task_count = (
+        unestimated_tasks.annotate(
+            has_voting_history=Exists(
+                VotingSessionTask.objects.filter(task_id=OuterRef("pk"))
+            )
+        )
+        .filter(has_voting_history=False)
+        .count()
+    )
+    return {
+        "projects": projects,
+        "project_form": project_form or ProjectForm(),
+        "active_rooms": active_rooms,
+        "active_sprints": active_sprints,
+        "upcoming_sprints": upcoming_sprints,
+        "incomplete_participant_count": sum(
+            item.incomplete_participant_count for item in active_rooms
+        ),
+        "new_task_count": new_task_count,
+        "unestimated_task_count": unestimated_tasks.count(),
+        "today": timezone.localdate(),
+    }
+
+
+@login_required
+def dashboard(request):
     return render(
         request,
         "poker/dashboard.html",
-        {"projects": projects, "project_form": ProjectForm()},
+        _dashboard_context(request.user),
     )
 
 
@@ -388,11 +515,10 @@ def project_create(request):
         messages.success(request, f"Проект «{project.name}» создан.")
         return redirect(project)
 
-    projects = Project.objects.filter(owner=request.user)
     return render(
         request,
         "poker/dashboard.html",
-        {"projects": projects, "project_form": form},
+        _dashboard_context(request.user, project_form=form),
         status=400,
     )
 
@@ -520,6 +646,12 @@ def session_manage(request, pk):
     ).exclude(pk__in=queued_task_ids)
     public_url = request.build_absolute_uri(voting_session.get_public_url())
     summary = current_round.summary() if current_round else None
+    current_round_voted_ids = set(
+        current_round.votes.values_list("participant_id", flat=True)
+    ) if current_round else set()
+    participant_progress = _participant_progress(
+        voting_session, current_round_voted_ids
+    )
     return render(
         request,
         "poker/session_manage.html",
@@ -529,6 +661,11 @@ def session_manage(request, pk):
             "available_tasks": available_tasks,
             "current_round": current_round,
             "summary": summary,
+            "participant_progress": participant_progress,
+            "completed_participant_count": sum(
+                item.progress_status == "completed"
+                for item in participant_progress
+            ),
             "average_display": _format_decimal(summary["average"])
             if summary
             else None,
@@ -798,6 +935,33 @@ def session_delete(request, pk):
 
 
 @login_required
+@require_POST
+def session_copy(request, pk):
+    source = _session_for_user(request.user, pk)
+    with transaction.atomic():
+        copied = VotingSession.objects.create(
+            project=source.project,
+            name=_copy_name(source.name),
+            minimum_participants=source.minimum_participants,
+        )
+        VotingSessionTask.objects.bulk_create(
+            [
+                VotingSessionTask(
+                    session=copied,
+                    task=item.task,
+                    position=item.position,
+                )
+                for item in source.queue_items.select_related("task")
+            ]
+        )
+    messages.success(
+        request,
+        f"Создана копия комнаты «{copied.name}» без участников и голосов.",
+    )
+    return redirect(copied)
+
+
+@login_required
 @require_GET
 def session_state(request, pk):
     voting_session = _session_for_user(request.user, pk)
@@ -825,9 +989,17 @@ def session_state(request, pk):
                 "average": _format_decimal(round_summary["average"]),
             }
 
+    participant_progress = _participant_progress(voting_session, voted_ids)
     participants = [
-        {"name": participant.name, "voted": participant.pk in voted_ids}
-        for participant in voting_session.participants.all()
+        {
+            "name": participant.name,
+            "current_round_voted": participant.current_round_voted,
+            "progress_voted": participant.progress_voted,
+            "progress_total": participant.progress_total,
+            "progress_status": participant.progress_status,
+            "progress_label": participant.progress_label,
+        }
+        for participant in participant_progress
     ]
     queue = _queue_summary(voting_session)
     queue_items = list(
@@ -849,6 +1021,10 @@ def session_state(request, pk):
             "participants": participants,
             "voted_count": len(voted_ids),
             "participant_count": len(participants),
+            "completed_participant_count": sum(
+                item.progress_status == "completed"
+                for item in participant_progress
+            ),
             "minimum_participants": voting_session.minimum_participants,
             "minimum_reached": minimum_reached,
             "votes_remaining": max(
@@ -1113,19 +1289,30 @@ def sprint_create(request, pk):
 @login_required
 def sprint_detail(request, pk):
     sprint = _sprint_for_user(request.user, pk)
-    sprint_items = sprint.sprint_tasks.select_related("task")
-    available_tasks = sprint.project.tasks.filter(
-        status=Task.Status.ESTIMATED,
-        completed_at__isnull=True,
-        sprint_items__isnull=True,
+    sprint_items = sprint.sprint_tasks.select_related("task", "transferred_to")
+    planned_items = sprint_items.filter(status=SprintTask.Status.PLANNED)
+    available_tasks = (
+        sprint.project.tasks.filter(
+            status=Task.Status.ESTIMATED,
+            completed_at__isnull=True,
+        )
+        .exclude(sprint_items__sprint=sprint)
+        .exclude(sprint_items__status=SprintTask.Status.PLANNED)
+        .distinct()
     )
+    transfer_targets = sprint.project.sprints.filter(
+        archived_at__isnull=True,
+        status__in=(Sprint.Status.PLANNING, Sprint.Status.ACTIVE),
+    ).exclude(pk=sprint.pk)
     return render(
         request,
         "poker/sprint_detail.html",
         {
             "sprint": sprint,
             "sprint_items": sprint_items,
+            "planned_items": planned_items,
             "available_tasks": available_tasks,
+            "transfer_targets": transfer_targets,
         },
     )
 
@@ -1145,8 +1332,9 @@ def sprint_add_tasks(request, pk):
         pk__in=task_ids,
         status=Task.Status.ESTIMATED,
         completed_at__isnull=True,
-        sprint_items__isnull=True,
-    )
+    ).exclude(sprint_items__sprint=sprint).exclude(
+        sprint_items__status=SprintTask.Status.PLANNED
+    ).distinct()
     position = (
         sprint.sprint_tasks.aggregate(value=Max("position"))["value"] or 0
     )
@@ -1154,9 +1342,15 @@ def sprint_add_tasks(request, pk):
     with transaction.atomic():
         for task in tasks:
             position += 1
-            SprintTask.objects.create(sprint=sprint, task=task, position=position)
+            SprintTask.objects.create(
+                sprint=sprint,
+                task=task,
+                position=position,
+                status=SprintTask.Status.PLANNED,
+            )
             created += 1
     messages.success(request, f"В спринт добавлено задач: {created}.")
+    _warn_if_over_capacity(request, sprint)
     return redirect(sprint)
 
 
@@ -1170,7 +1364,12 @@ def sprint_remove_task(request, pk, task_pk):
             "Нельзя менять состав завершённого или архивного спринта.",
         )
         return redirect(sprint)
-    item = get_object_or_404(SprintTask, sprint=sprint, task_id=task_pk)
+    item = get_object_or_404(
+        SprintTask,
+        sprint=sprint,
+        task_id=task_pk,
+        status=SprintTask.Status.PLANNED,
+    )
     item.delete()
     messages.info(request, "Задача удалена из спринта.")
     return redirect(sprint)
@@ -1236,13 +1435,117 @@ def sprint_delete(request, pk):
 
 
 @login_required
+@require_POST
+def sprint_copy(request, pk):
+    source = _sprint_for_user(request.user, pk)
+    with transaction.atomic():
+        copied = Sprint.objects.create(
+            project=source.project,
+            name=_copy_name(source.name),
+            status=Sprint.Status.PLANNING,
+            goal=source.goal,
+            capacity=source.capacity,
+        )
+        SprintTask.objects.bulk_create(
+            [
+                SprintTask(
+                    sprint=copied,
+                    task=item.task,
+                    position=item.position,
+                    status=SprintTask.Status.PLANNED,
+                )
+                for item in source.sprint_tasks.select_related("task").filter(
+                    status=SprintTask.Status.PLANNED
+                )
+            ]
+        )
+    messages.success(
+        request,
+        f"Создан планируемый спринт «{copied.name}» без дат.",
+    )
+    _warn_if_over_capacity(request, copied)
+    return redirect(copied)
+
+
+@login_required
+@require_POST
+def sprint_transfer_tasks(request, pk):
+    source = _sprint_for_user(request.user, pk)
+    if source.archived_at is not None:
+        messages.error(request, "Нельзя переносить задачи из архивного спринта.")
+        return redirect(source)
+
+    target = get_object_or_404(
+        Sprint,
+        pk=request.POST.get("target_sprint"),
+        project=source.project,
+        archived_at__isnull=True,
+        status__in=(Sprint.Status.PLANNING, Sprint.Status.ACTIVE),
+    )
+    if target.pk == source.pk:
+        messages.error(request, "Выберите другой спринт.")
+        return redirect(source)
+
+    task_ids = request.POST.getlist("task_ids")
+    source_items = list(
+        source.sprint_tasks.select_related("task").filter(
+            task_id__in=task_ids,
+            status=SprintTask.Status.PLANNED,
+        )
+    )
+    position = target.sprint_tasks.aggregate(value=Max("position"))["value"] or 0
+    transferred = 0
+    now = timezone.now()
+    with transaction.atomic():
+        for source_item in source_items:
+            target_item = target.sprint_tasks.filter(task=source_item.task).first()
+            if target_item is None:
+                position += 1
+                SprintTask.objects.create(
+                    sprint=target,
+                    task=source_item.task,
+                    position=position,
+                    status=SprintTask.Status.PLANNED,
+                )
+            elif target_item.status != SprintTask.Status.PLANNED:
+                target_item.status = SprintTask.Status.PLANNED
+                target_item.transferred_to = None
+                target_item.transferred_at = None
+                target_item.save(
+                    update_fields=("status", "transferred_to", "transferred_at")
+                )
+
+            source_item.status = SprintTask.Status.TRANSFERRED
+            source_item.transferred_to = target
+            source_item.transferred_at = now
+            source_item.save(
+                update_fields=("status", "transferred_to", "transferred_at")
+            )
+            transferred += 1
+
+    if transferred:
+        messages.success(
+            request,
+            f"В спринт «{target.name}» перенесено задач: {transferred}.",
+        )
+        _warn_if_over_capacity(request, target)
+    else:
+        messages.info(request, "Выберите задачи для переноса.")
+    return redirect(source)
+
+
+@login_required
 def sprint_export(request, pk):
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Font, PatternFill
     from openpyxl.utils import get_column_letter
 
     sprint = _sprint_for_user(request.user, pk)
-    items = list(sprint.sprint_tasks.select_related("task"))
+    items = list(
+        sprint.sprint_tasks.select_related("task").filter(
+            status=SprintTask.Status.PLANNED
+        )
+    )
 
     workbook = Workbook()
     sheet = workbook.active

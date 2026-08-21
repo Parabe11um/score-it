@@ -17,6 +17,9 @@
         </div>
     </div>
     <div class="page-heading__actions">
+        <form method="post" action="{% url 'poker:session_copy' voting_session.pk %}" onsubmit="return confirm('Создать новую черновую комнату с такой же очередью?');">
+            {% csrf_token %}<button class="button button--secondary" type="submit">Копировать</button>
+        </form>
         {% if voting_session.status != "finished" %}
             <form method="post" action="{% url 'poker:session_finish' voting_session.pk %}" onsubmit="return confirm('Завершить сессию? Незакрытые раунды будут отменены.');">
                 {% csrf_token %}<button class="button button--danger-soft" type="submit">Завершить сессию</button>
@@ -113,9 +116,9 @@
     </section>
 
     <aside class="card participants-card">
-        <div class="section-heading"><div><h2>Участники</h2><p>Статус текущего голоса</p></div><span class="pill" id="participant-pill">{{ voting_session.participants.count }}</span></div>
+        <div class="section-heading"><div><h2>Участники</h2><p id="participant-progress-summary">Завершили: {{ completed_participant_count }} из {{ participant_progress|length }}</p></div><span class="pill" id="participant-pill">{{ participant_progress|length }}</span></div>
         <div class="participant-list" id="participant-list">
-            {% for participant in voting_session.participants.all %}<div class="participant"><span class="avatar">{{ participant.name|first|upper }}</span><strong>{{ participant.name }}</strong><span class="participant__state">В комнате</span></div>{% empty %}<div class="compact-empty">Ждём участников по ссылке.</div>{% endfor %}
+            {% for participant in participant_progress %}<div class="participant"><span class="avatar">{{ participant.name|first|upper }}</span><strong>{{ participant.name }}</strong><span class="participant__state participant__state--{{ participant.progress_status }}">{{ participant.progress_label }}</span></div>{% empty %}<div class="compact-empty">Ждём участников по ссылке.</div>{% endfor %}
         </div>
     </aside>
 </div>

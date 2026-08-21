@@ -168,7 +168,7 @@
         <div class="item-list">
             {% for sprint in sprints %}
                 <a class="list-item" href="{{ sprint.get_absolute_url }}">
-                    <div><strong>{{ sprint.name }}</strong><small>{% if sprint.archived_at %}Архив · {% endif %}{{ sprint.get_status_display }} · {{ sprint.tasks.count }} задач · {{ sprint.total_estimate_display }} points</small></div>
+                    <div><strong>{{ sprint.name }}</strong><small>{% if sprint.archived_at %}Архив · {% endif %}{{ sprint.get_status_display }} · {{ sprint.active_task_count }} задач · {{ sprint.total_estimate_display }} points</small></div>
                     <span>→</span>
                 </a>
             {% empty %}<div class="compact-empty">{% if show_archived %}В архиве спринтов нет.{% else %}Спринтов пока нет.{% endif %}</div>{% endfor %}

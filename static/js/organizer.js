@@ -23,6 +23,7 @@
 
     const participantList = document.getElementById("participant-list");
     const participantPill = document.getElementById("participant-pill");
+    const participantProgressSummary = document.getElementById("participant-progress-summary");
     const votedCount = document.getElementById("voted-count");
     const participantCount = document.getElementById("participant-count");
     const minimumCount = document.getElementById("minimum-count");
@@ -35,7 +36,7 @@
         return Array.from(name.trim())[0]?.toUpperCase() || "?";
     }
 
-    function renderParticipants(participants, roundStatus) {
+    function renderParticipants(participants) {
         if (!participantList) return;
         participantList.replaceChildren();
         if (!participants.length) {
@@ -57,9 +58,8 @@
             name.textContent = participant.name;
 
             const status = document.createElement("span");
-            status.className = `participant__state${participant.voted ? " participant__state--ready" : ""}`;
-            if (!roundStatus) status.textContent = "В комнате";
-            else status.textContent = participant.voted ? "Готово" : "Думает";
+            status.className = `participant__state participant__state--${participant.progress_status}`;
+            status.textContent = participant.progress_label;
 
             row.append(avatar, name, status);
             participantList.append(row);
@@ -101,8 +101,11 @@
             });
             if (!response.ok) return;
             const state = await response.json();
-            renderParticipants(state.participants, state.round_status);
+            renderParticipants(state.participants);
             if (participantPill) participantPill.textContent = state.participant_count;
+            if (participantProgressSummary) {
+                participantProgressSummary.textContent = `Завершили: ${state.completed_participant_count} из ${state.participant_count}`;
+            }
             if (votedCount) votedCount.textContent = state.voted_count;
             if (participantCount) participantCount.textContent = state.participant_count;
             if (minimumCount) minimumCount.textContent = state.minimum_participants;

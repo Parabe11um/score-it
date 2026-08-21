@@ -8,6 +8,9 @@
     <div><span class="eyebrow">ПЛАНИРОВАНИЕ СПРИНТА</span><h1>{{ sprint.name }}</h1><p>{{ sprint.get_status_display }}{% if sprint.archived_at %} · В архиве{% endif %}{% if sprint.start_date %} · {{ sprint.start_date|date:"d.m.Y" }}{% endif %}{% if sprint.end_date %} — {{ sprint.end_date|date:"d.m.Y" }}{% endif %}{% if sprint.goal %} · {{ sprint.goal }}{% endif %}</p></div>
     <div class="page-heading__actions">
         <a class="button button--secondary" href="{% url 'poker:sprint_export' sprint.pk %}">Выгрузить Excel</a>
+        <form method="post" action="{% url 'poker:sprint_copy' sprint.pk %}" onsubmit="return confirm('Создать планируемую копию спринта с тем же составом?');">
+            {% csrf_token %}<button class="button button--secondary" type="submit">Копировать</button>
+        </form>
         {% if sprint.archived_at %}
             <form method="post" action="{% url 'poker:sprint_restore' sprint.pk %}">
                 {% csrf_token %}<button class="button button--secondary" type="submit">Восстановить</button>
@@ -40,24 +43,51 @@
 {% endif %}
 
 <div class="sprint-metrics">
-    <div class="metric-card"><span>Задач</span><strong>{{ sprint_items|length }}</strong></div>
+    <div class="metric-card"><span>Задач</span><strong>{{ sprint.active_task_count }}</strong></div>
     <div class="metric-card"><span>Запланировано</span><strong>{{ sprint.total_estimate_display }}</strong><small>points</small></div>
     <div class="metric-card"><span>Ёмкость</span><strong>{{ sprint.capacity|default:"—" }}</strong><small>{% if sprint.capacity %}points{% endif %}</small></div>
 </div>
+
+{% if sprint.capacity != None %}
+<section class="card capacity-panel {% if sprint.is_over_capacity %}capacity-panel--over{% endif %}">
+    <div class="capacity-panel__heading">
+        <div><strong>{{ sprint.total_estimate_display }} из {{ sprint.capacity }} points</strong><small>Использование ёмкости спринта</small></div>
+        {% if sprint.is_over_capacity %}
+            <span>Превышение: {{ sprint.capacity_overage_display }} points</span>
+        {% else %}
+            <span>Осталось: {{ sprint.capacity_remaining_display }} points</span>
+        {% endif %}
+    </div>
+    <div class="capacity-track"><span style="width: {{ sprint.capacity_usage_percent }}%"></span></div>
+    {% if sprint.is_over_capacity %}<p>План превышает заданную ёмкость. Уберите или перенесите часть задач.</p>{% endif %}
+</section>
+{% endif %}
 
 <section class="card section-card">
     <div class="section-heading"><div><h2>Состав спринта</h2><p>Сумма считается из точных средних оценок.</p></div></div>
     <div class="table-wrap">
         <table>
-            <thead><tr><th>№</th><th>Задача</th><th class="align-right">Оценка</th><th></th></tr></thead>
+            <thead><tr><th>№</th><th>Задача</th><th>Статус</th><th class="align-right">Оценка</th><th></th></tr></thead>
             <tbody>
             {% for item in sprint_items %}
-                <tr><td>{{ forloop.counter }}</td><td><span class="task-number">{{ item.task.number }}</span><div class="task-title-secondary">{{ item.task.title }}</div></td><td class="align-right"><strong class="estimate-value">{{ item.task.estimate_display }}</strong></td><td class="align-right">{% if not sprint.archived_at and sprint.status != "completed" %}<form method="post" action="{% url 'poker:sprint_remove_task' sprint.pk item.task.pk %}" onsubmit="return confirm('Убрать задачу {{ item.task.number|escapejs }} из спринта?');">{% csrf_token %}<button class="icon-button" type="submit" title="Убрать из спринта">×</button></form>{% endif %}</td></tr>
-            {% empty %}<tr><td colspan="4" class="table-empty">Добавьте оценённые задачи из списка ниже.</td></tr>{% endfor %}
+                <tr class="{% if item.status == 'transferred' %}sprint-task--transferred{% endif %}"><td>{{ forloop.counter }}</td><td><span class="task-number">{{ item.task.number }}</span><div class="task-title-secondary">{{ item.task.title }}</div></td><td>{% if item.status == "transferred" %}<span class="badge">Перенесена{% if item.transferred_to %} → {{ item.transferred_to.name }}{% endif %}</span>{% else %}<span class="badge badge--active">Запланирована</span>{% endif %}</td><td class="align-right"><strong class="estimate-value">{{ item.task.estimate_display }}</strong></td><td class="align-right">{% if item.status == "planned" and not sprint.archived_at and sprint.status != "completed" %}<form method="post" action="{% url 'poker:sprint_remove_task' sprint.pk item.task.pk %}" onsubmit="return confirm('Убрать задачу {{ item.task.number|escapejs }} из спринта?');">{% csrf_token %}<button class="icon-button" type="submit" title="Убрать из спринта">×</button></form>{% endif %}</td></tr>
+            {% empty %}<tr><td colspan="5" class="table-empty">Добавьте оценённые задачи из списка ниже.</td></tr>{% endfor %}
             </tbody>
         </table>
     </div>
 </section>
+
+{% if not sprint.archived_at and planned_items and transfer_targets %}
+<details class="card section-card transfer-card">
+    <summary class="section-heading"><div><h2>Перенести задачи</h2><p>В старом спринте сохранится запись «Перенесена».</p></div></summary>
+    <form method="post" action="{% url 'poker:sprint_transfer_tasks' sprint.pk %}" class="stack-form">
+        {% csrf_token %}
+        <div class="field"><label for="target-sprint">Новый спринт</label><select id="target-sprint" name="target_sprint" required>{% for target in transfer_targets %}<option value="{{ target.pk }}">{{ target.name }} · {{ target.get_status_display }}</option>{% endfor %}</select></div>
+        <div class="check-list">{% for item in planned_items %}<label class="check-item"><input type="checkbox" name="task_ids" value="{{ item.task_id }}"><span><strong>{{ item.task.number }}</strong><small>{{ item.task.title }}</small></span><b>{{ item.task.estimate_display }}</b></label>{% endfor %}</div>
+        <div class="section-footer"><button class="button button--primary" type="submit">Перенести выбранные</button></div>
+    </form>
+</details>
+{% endif %}
 
 {% if not sprint.archived_at and sprint.status != "completed" %}
 <section class="card section-card">

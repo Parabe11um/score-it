@@ -78,6 +78,7 @@ class VoteAdmin(admin.ModelAdmin):
 
 class SprintTaskInline(admin.TabularInline):
     model = SprintTask
+    fk_name = "sprint"
     extra = 0
 
 

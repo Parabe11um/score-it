@@ -1,5 +1,6 @@
 import uuid
 from decimal import Decimal, ROUND_HALF_UP
+from functools import cached_property
 
 from django.conf import settings
 from django.core.validators import MaxValueValidator, MinValueValidator
@@ -360,7 +361,12 @@ class Sprint(models.Model):
     capacity = models.DecimalField(
         "Плановая ёмкость", max_digits=8, decimal_places=2, null=True, blank=True
     )
-    tasks = models.ManyToManyField(Task, through="SprintTask", related_name="sprints")
+    tasks = models.ManyToManyField(
+        Task,
+        through="SprintTask",
+        through_fields=("sprint", "task"),
+        related_name="sprints",
+    )
     created_at = models.DateTimeField("Создан", auto_now_add=True)
     archived_at = models.DateTimeField("В архиве", null=True, blank=True)
 
@@ -375,10 +381,12 @@ class Sprint(models.Model):
     def get_absolute_url(self):
         return reverse("poker:sprint_detail", args=[self.pk])
 
-    @property
+    @cached_property
     def total_estimate(self):
         total = Decimal("0")
-        for item in self.sprint_tasks.select_related("task"):
+        for item in self.sprint_tasks.select_related("task").filter(
+            status=SprintTask.Status.PLANNED
+        ):
             if item.task.estimate is not None:
                 total += item.task.estimate
         return total
@@ -388,8 +396,61 @@ class Sprint(models.Model):
         rounded = self.total_estimate.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         return format(rounded.normalize(), "f")
 
+    @property
+    def active_task_count(self):
+        return self.sprint_tasks.filter(status=SprintTask.Status.PLANNED).count()
+
+    @property
+    def capacity_remaining(self):
+        if self.capacity is None:
+            return None
+        return max(self.capacity - self.total_estimate, Decimal("0"))
+
+    @property
+    def capacity_overage(self):
+        if self.capacity is None:
+            return Decimal("0")
+        return max(self.total_estimate - self.capacity, Decimal("0"))
+
+    @property
+    def capacity_remaining_display(self):
+        if self.capacity_remaining is None:
+            return "—"
+        return format(
+            self.capacity_remaining.quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            ).normalize(),
+            "f",
+        )
+
+    @property
+    def capacity_overage_display(self):
+        return format(
+            self.capacity_overage.quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            ).normalize(),
+            "f",
+        )
+
+    @property
+    def capacity_usage_percent(self):
+        if self.capacity is None:
+            return 0
+        if self.capacity <= 0:
+            return 100 if self.total_estimate > 0 else 0
+        percent = (self.total_estimate / self.capacity) * Decimal("100")
+        return min(int(percent.quantize(Decimal("1"), rounding=ROUND_HALF_UP)), 100)
+
+    @property
+    def is_over_capacity(self):
+        return self.capacity is not None and self.total_estimate > self.capacity
+
 
 class SprintTask(models.Model):
+    class Status(models.TextChoices):
+        PLANNED = "planned", "Запланирована"
+        TRANSFERRED = "transferred", "Перенесена"
+
     sprint = models.ForeignKey(
         Sprint,
         on_delete=models.CASCADE,
@@ -403,6 +464,18 @@ class SprintTask(models.Model):
         verbose_name="Задача",
     )
     position = models.PositiveIntegerField("Порядок", default=0)
+    status = models.CharField(
+        "Статус", max_length=20, choices=Status.choices, default=Status.PLANNED
+    )
+    transferred_to = models.ForeignKey(
+        Sprint,
+        on_delete=models.SET_NULL,
+        related_name="transferred_from_items",
+        null=True,
+        blank=True,
+        verbose_name="Перенесена в спринт",
+    )
+    transferred_at = models.DateTimeField("Перенесена", null=True, blank=True)
     added_at = models.DateTimeField("Добавлена", auto_now_add=True)
 
     class Meta:
@@ -410,9 +483,6 @@ class SprintTask(models.Model):
         constraints = [
             models.UniqueConstraint(
                 fields=("sprint", "task"), name="unique_task_in_sprint"
-            ),
-            models.UniqueConstraint(
-                fields=("task",), name="task_can_belong_to_only_one_sprint"
             ),
         ]
         verbose_name = "Задача спринта"
