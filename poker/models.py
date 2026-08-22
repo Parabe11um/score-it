@@ -8,7 +8,49 @@ from django.db import models
 from django.urls import reverse
 
 
-ESTIMATION_VALUES = (0, 2, 4, 8, 12, 20, 32, 52)
+ESTIMATION_GUIDE = (
+    {
+        "value": 0,
+        "label": "Нет работы",
+        "description": "Уже сделано или изменение не требуется.",
+    },
+    {
+        "value": 2,
+        "label": "Минимальная",
+        "description": "Локальное очевидное изменение без зависимостей.",
+    },
+    {
+        "value": 4,
+        "label": "Небольшая",
+        "description": "Понятная работа в одном компоненте и простая проверка.",
+    },
+    {
+        "value": 8,
+        "label": "Обычная",
+        "description": "Стандартная задача команды с полным циклом выполнения.",
+    },
+    {
+        "value": 12,
+        "label": "Средняя",
+        "description": "Несколько этапов или компонентов, есть неопределённость.",
+    },
+    {
+        "value": 20,
+        "label": "Большая",
+        "description": "Много работы, зависимостей или рисков; лучше разделить.",
+    },
+    {
+        "value": 32,
+        "label": "Разбить",
+        "description": "Слишком большая для спринта, требуется декомпозиция.",
+    },
+    {
+        "value": 52,
+        "label": "Эпик",
+        "description": "Недостаточно проработана, оценивать целиком ещё рано.",
+    },
+)
+ESTIMATION_VALUES = tuple(item["value"] for item in ESTIMATION_GUIDE)
 ESTIMATION_CHOICES = tuple((value, str(value)) for value in ESTIMATION_VALUES)
 
 

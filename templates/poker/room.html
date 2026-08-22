@@ -30,9 +30,29 @@
         </div>
         <div class="vote-prompt">Выберите оценку</div>
         <div class="card-grid" id="vote-cards">
-            {% for value in estimation_values %}<button type="button" class="poker-card" data-value="{{ value }}"><span>{{ value }}</span></button>{% endfor %}
+            {% for option in estimation_guide %}
+                <button type="button" class="poker-card" data-value="{{ option.value }}" aria-label="{{ option.value }} — {{ option.label }}">
+                    <span class="poker-card__value">{{ option.value }}</span>
+                    <span class="poker-card__label">{{ option.label }}</span>
+                </button>
+            {% endfor %}
         </div>
         <p class="vote-feedback" id="vote-feedback">Можно изменить выбор до раскрытия.</p>
+        <details class="estimation-guide">
+            <summary>Как оценивать?</summary>
+            <div class="estimation-guide__content">
+                <p>Оценивайте весь путь задачи до состояния «Готово»: анализ, разработку, тестирование, зависимости, риски и неопределённость.</p>
+                <div class="estimation-guide__list">
+                    {% for option in estimation_guide %}
+                        <div class="estimation-guide__item">
+                            <strong>{{ option.value }}</strong>
+                            <span><b>{{ option.label }}</b><small>{{ option.description }}</small></span>
+                        </div>
+                    {% endfor %}
+                </div>
+                <p class="estimation-guide__note"><strong>Не хватает информации?</strong> Не выбирайте 0 — сообщите организатору, что задачу нужно уточнить.</p>
+            </div>
+        </details>
     </div>
 
     <div id="revealed-state" hidden>

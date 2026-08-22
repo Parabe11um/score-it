@@ -17,6 +17,7 @@ from .forms import (
     VotingSessionForm,
 )
 from .models import (
+    ESTIMATION_GUIDE,
     ESTIMATION_VALUES,
     Participant,
     Project,
@@ -1067,7 +1068,7 @@ def room(request, token):
         {
             "voting_session": voting_session,
             "participant": participant,
-            "estimation_values": ESTIMATION_VALUES,
+            "estimation_guide": ESTIMATION_GUIDE,
         },
     )
 

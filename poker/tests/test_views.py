@@ -334,6 +334,29 @@ class VotingFlowTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(Vote.objects.count(), 0)
 
+    def test_participant_room_explains_estimation_scale(self):
+        participant = self.join_participant("Анна")
+
+        response = participant.get(
+            reverse("poker:room", args=[self.voting_session.public_token])
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Как оценивать?")
+        self.assertContains(response, "Оценивайте весь путь задачи")
+        self.assertContains(response, "Не выбирайте 0")
+        for label in (
+            "Нет работы",
+            "Минимальная",
+            "Небольшая",
+            "Обычная",
+            "Средняя",
+            "Большая",
+            "Разбить",
+            "Эпик",
+        ):
+            self.assertContains(response, label)
+
     def test_reveal_waits_for_configured_minimum_votes(self):
         first = self.join_participant("Анна")
         self.organizer.post(
