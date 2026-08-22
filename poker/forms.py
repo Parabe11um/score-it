@@ -1,6 +1,7 @@
 import re
 
 from django import forms
+from django.contrib.auth.forms import UserCreationForm
 
 from .models import Project, Sprint, Task, VotingSession
 
@@ -23,6 +24,34 @@ class ProjectForm(BootstrapFormMixin, forms.ModelForm):
         model = Project
         fields = ("name",)
         widgets = {"name": forms.TextInput(attrs={"placeholder": "Например, ABS Core"})}
+
+
+class OrganizerRegistrationForm(BootstrapFormMixin, UserCreationForm):
+    class Meta(UserCreationForm.Meta):
+        fields = ("username", "password1", "password2")
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["username"].label = "Логин"
+        self.fields["username"].widget.attrs.update(
+            {
+                "autocomplete": "username",
+                "placeholder": "Придумайте логин",
+            }
+        )
+        self.fields["password1"].label = "Пароль"
+        self.fields["password1"].widget.attrs["autocomplete"] = "new-password"
+        self.fields["password2"].label = "Повторите пароль"
+        self.fields["password2"].widget.attrs["autocomplete"] = "new-password"
+
+    def save(self, commit=True):
+        user = super().save(commit=False)
+        user.is_staff = False
+        user.is_superuser = False
+        user.is_active = True
+        if commit:
+            user.save()
+        return user
 
 
 class BulkTaskImportForm(BootstrapFormMixin, forms.Form):

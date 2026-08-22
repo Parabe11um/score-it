@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block title %}Приглашение организатора — score it{% endblock %}
+
+{% block content %}
+<div class="auth-layout invitation-layout">
+    <section class="auth-intro">
+        <span class="eyebrow">ПРИГЛАШЕНИЕ В SCORE IT</span>
+        <h1>Создайте пространство для своей команды</h1>
+        <p>После регистрации вы сможете создавать собственные проекты, загружать задачи, проводить оценку и планировать спринты.</p>
+        <div class="organizer-capabilities" aria-label="Возможности организатора">
+            <span>Свои проекты</span>
+            <span>Комнаты оценки</span>
+            <span>Планирование спринтов</span>
+        </div>
+    </section>
+
+    <section class="card auth-card">
+        {% if invitation_available %}
+            <h2>Регистрация организатора</h2>
+            <p class="muted">Придумайте логин и пароль. В дальнейшем используйте их на странице входа.</p>
+            <form method="post" class="stack-form" novalidate>
+                {% csrf_token %}
+                {% if registration_form.non_field_errors %}
+                    <div class="form-error">{{ registration_form.non_field_errors }}</div>
+                {% endif %}
+                {% for field in registration_form %}
+                    <div class="field">
+                        <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                        {{ field }}
+                        {% if field.help_text %}<div class="help-text">{{ field.help_text|safe }}</div>{% endif %}
+                        {% for error in field.errors %}<div class="form-error">{{ error }}</div>{% endfor %}
+                    </div>
+                {% endfor %}
+                <button class="button button--primary button--wide" type="submit">Создать учётную запись</button>
+            </form>
+            <p class="invitation-expiry">Ссылка одноразовая и действует до {{ invitation.expires_at|date:"d.m.Y H:i" }}.</p>
+        {% else %}
+            <div class="invitation-unavailable">
+                <div class="empty-state__icon">!</div>
+                <h2>{{ invitation_heading }}</h2>
+                <p>{{ invitation_explanation }}</p>
+                <a class="button button--secondary button--wide" href="{% url 'login' %}">Перейти ко входу</a>
+            </div>
+        {% endif %}
+    </section>
+</div>
+{% endblock %}

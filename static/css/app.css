@@ -100,6 +100,13 @@ input:focus, textarea:focus, select:focus { border-color: var(--primary); box-sh
 .scale-preview span { display: grid; place-items: center; width: 43px; height: 55px; color: var(--primary); font-weight: 800; background: white; border: 1px solid #cbd6f4; border-radius: 9px; box-shadow: 0 5px 14px rgba(31,63,140,.08); transform: rotate(-2deg); }
 .scale-preview span:nth-child(even) { transform: translateY(6px) rotate(2deg); }
 .scale-preview--large span { width: 50px; height: 68px; }
+.organizer-capabilities { display: flex; gap: 8px; margin-top: 26px; flex-wrap: wrap; }
+.organizer-capabilities span { padding: 8px 11px; color: var(--primary); background: white; border: 1px solid #d3dcf2; border-radius: 999px; font-size: 12px; font-weight: 750; }
+.invitation-expiry { margin: 17px 0 0; color: var(--muted); font-size: 12px; text-align: center; }
+.login-invitation-note { margin: 17px 0 0; color: var(--muted); font-size: 12px; text-align: center; }
+.invitation-unavailable { text-align: center; }
+.invitation-unavailable p { margin-bottom: 22px; }
+.invitation-unavailable .button { margin-top: 4px; }
 
 .dashboard-grid { display: grid; grid-template-columns: minmax(260px, .38fr) minmax(0, 1fr); gap: 24px; align-items: start; }
 .workspace-metrics { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-bottom: 22px; }

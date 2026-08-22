@@ -6,6 +6,11 @@ from . import views
 app_name = "poker"
 
 urlpatterns = [
+    path(
+        "organizer/invite/<uuid:token>/",
+        views.organizer_invitation_accept,
+        name="organizer_invitation_accept",
+    ),
     path("", views.dashboard, name="dashboard"),
     path("projects/new/", views.project_create, name="project_create"),
     path("projects/<int:pk>/", views.project_detail, name="project_detail"),

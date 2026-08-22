@@ -1,4 +1,5 @@
 import uuid
+from datetime import timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from functools import cached_property
 
@@ -6,6 +7,7 @@ from django.conf import settings
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.urls import reverse
+from django.utils import timezone
 
 
 ESTIMATION_GUIDE = (
@@ -52,6 +54,72 @@ ESTIMATION_GUIDE = (
 )
 ESTIMATION_VALUES = tuple(item["value"] for item in ESTIMATION_GUIDE)
 ESTIMATION_CHOICES = tuple((value, str(value)) for value in ESTIMATION_VALUES)
+
+
+def default_organizer_invitation_expiry():
+    return timezone.now() + timedelta(days=7)
+
+
+class OrganizerInvitation(models.Model):
+    recipient_label = models.CharField(
+        "Для кого",
+        max_length=160,
+        blank=True,
+        help_text="Необязательная пометка, видимая только в админке.",
+    )
+    token = models.UUIDField(
+        "Токен",
+        default=uuid.uuid4,
+        unique=True,
+        editable=False,
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        verbose_name="Создал",
+        related_name="created_organizer_invitations",
+        on_delete=models.SET_NULL,
+        null=True,
+        editable=False,
+    )
+    created_at = models.DateTimeField("Создано", auto_now_add=True)
+    expires_at = models.DateTimeField(
+        "Действует до",
+        default=default_organizer_invitation_expiry,
+        editable=False,
+    )
+    used_at = models.DateTimeField("Использовано", null=True, blank=True)
+    used_by = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        verbose_name="Созданный организатор",
+        related_name="organizer_invitation",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        editable=False,
+    )
+
+    class Meta:
+        ordering = ("-created_at",)
+        verbose_name = "Приглашение организатора"
+        verbose_name_plural = "Приглашения организаторов"
+
+    def __str__(self):
+        return self.recipient_label or f"Приглашение {self.token}"
+
+    @property
+    def is_available(self):
+        return self.used_at is None and self.expires_at > timezone.now()
+
+    @property
+    def status(self):
+        if self.used_at is not None:
+            return "used"
+        if self.expires_at <= timezone.now():
+            return "expired"
+        return "active"
+
+    def get_absolute_url(self):
+        return reverse("poker:organizer_invitation_accept", args=[self.token])
 
 
 class Project(models.Model):

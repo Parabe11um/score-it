@@ -19,6 +19,9 @@
             {% if request.user.is_authenticated %}
                 <div class="topbar__actions">
                     <span class="user-label">{{ request.user.get_username }}</span>
+                    {% if request.user.is_superuser %}
+                        <a class="button button--ghost button--small" href="{% url 'admin:index' %}">Админка</a>
+                    {% endif %}
                     <form method="post" action="{% url 'logout' %}">
                         {% csrf_token %}
                         <button class="button button--ghost button--small" type="submit">Выйти</button>

@@ -1,17 +1,21 @@
 from decimal import Decimal, ROUND_HALF_UP
 
 from django.contrib import messages
+from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
 from django.db import transaction
 from django.db.models import Count, Exists, Max, OuterRef, Q
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
-from django.views.decorators.http import require_GET, require_POST
+from django.views.decorators.cache import never_cache
+from django.views.decorators.debug import sensitive_post_parameters
+from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from .forms import (
     BulkTaskImportForm,
     JoinRoomForm,
+    OrganizerRegistrationForm,
     ProjectForm,
     SprintForm,
     VotingSessionForm,
@@ -19,6 +23,7 @@ from .forms import (
 from .models import (
     ESTIMATION_GUIDE,
     ESTIMATION_VALUES,
+    OrganizerInvitation,
     Participant,
     Project,
     Sprint,
@@ -67,6 +72,26 @@ def _task_for_user(user, project_pk, task_pk):
 
 def _participant_session_key(voting_session):
     return f"score_it_participant_{voting_session.pk}"
+
+
+def _invitation_unavailable_response(request, invitation):
+    if invitation.used_at is not None:
+        heading = "Приглашение уже использовано"
+        explanation = "По этой ссылке учётная запись организатора уже создана."
+    else:
+        heading = "Срок приглашения истёк"
+        explanation = "Попросите администратора создать новую ссылку."
+    return render(
+        request,
+        "registration/organizer_invitation.html",
+        {
+            "invitation": invitation,
+            "invitation_available": False,
+            "invitation_heading": heading,
+            "invitation_explanation": explanation,
+        },
+        status=410,
+    )
 
 
 def _copy_name(name):
@@ -494,6 +519,50 @@ def _dashboard_context(user, project_form=None):
         "unestimated_task_count": unestimated_tasks.count(),
         "today": timezone.localdate(),
     }
+
+
+@sensitive_post_parameters("password1", "password2")
+@never_cache
+@require_http_methods(["GET", "POST"])
+def organizer_invitation_accept(request, token):
+    invitation = get_object_or_404(OrganizerInvitation, token=token)
+    if not invitation.is_available:
+        return _invitation_unavailable_response(request, invitation)
+
+    form = OrganizerRegistrationForm(request.POST or None)
+    if request.method == "POST" and form.is_valid():
+        with transaction.atomic():
+            invitation = OrganizerInvitation.objects.select_for_update().get(
+                pk=invitation.pk
+            )
+            if not invitation.is_available:
+                return _invitation_unavailable_response(request, invitation)
+
+            organizer = form.save()
+            invitation.used_at = timezone.now()
+            invitation.used_by = organizer
+            invitation.save(update_fields=("used_at", "used_by"))
+
+        login(
+            request,
+            organizer,
+            backend="django.contrib.auth.backends.ModelBackend",
+        )
+        messages.success(
+            request,
+            "Учётная запись организатора создана. Можно создавать первый проект.",
+        )
+        return redirect("poker:dashboard")
+
+    return render(
+        request,
+        "registration/organizer_invitation.html",
+        {
+            "invitation": invitation,
+            "invitation_available": True,
+            "registration_form": form,
+        },
+    )
 
 
 @login_required
