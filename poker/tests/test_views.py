@@ -502,9 +502,13 @@ class VotingFlowTests(TestCase):
         self.assertEqual(anna_state["round"]["my_vote"], 8)
         self.assertEqual(anna_state["queue"]["total"], 2)
         self.assertEqual(anna_state["queue"]["voted"], 2)
+        self.assertEqual(anna_state["queue"]["missing"], 0)
+        self.assertTrue(anna_state["queue"]["all_voted"])
         self.assertEqual(boris_state["current_task"]["id"], self.task.pk)
         self.assertEqual(boris_state["round"]["my_vote"], 4)
         self.assertEqual(boris_state["queue"]["voted"], 1)
+        self.assertEqual(boris_state["queue"]["missing"], 1)
+        self.assertFalse(boris_state["queue"]["all_voted"])
 
         organizer_state = self.organizer.get(
             reverse("poker:session_state", args=[self.voting_session.pk])
@@ -548,7 +552,12 @@ class VotingFlowTests(TestCase):
         self.assertEqual(early_response.status_code, 409)
         self.assertEqual(early_response.json()["error"], "last_task_required")
 
+        vote_url = reverse(
+            "poker:room_vote", args=[self.voting_session.public_token]
+        )
+        participant_client.post(vote_url, {"value": 4})
         participant_client.post(navigate_url, {"direction": "next"})
+        participant_client.post(vote_url, {"value": 8})
         response = participant_client.post(complete_url)
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()["ok"])
@@ -575,6 +584,93 @@ class VotingFlowTests(TestCase):
             ).status_code,
             409,
         )
+
+    def test_participant_cannot_finish_with_missing_votes_and_can_jump_to_first_missing(self):
+        second_task = Task.objects.create(
+            project=self.project, number="ABS-102", title="Вторая задача"
+        )
+        VotingSessionTask.objects.bulk_create(
+            [
+                VotingSessionTask(
+                    session=self.voting_session, task=self.task, position=1
+                ),
+                VotingSessionTask(
+                    session=self.voting_session, task=second_task, position=2
+                ),
+            ]
+        )
+        participant_client = self.join_participant("Анна")
+        self.organizer.post(
+            reverse("poker:session_start", args=[self.voting_session.pk])
+        )
+        vote_url = reverse(
+            "poker:room_vote", args=[self.voting_session.public_token]
+        )
+        navigate_url = reverse(
+            "poker:room_navigate", args=[self.voting_session.public_token]
+        )
+        complete_url = reverse(
+            "poker:room_complete", args=[self.voting_session.public_token]
+        )
+
+        participant_client.post(navigate_url, {"direction": "next"})
+        participant_client.post(vote_url, {"value": 8})
+        response = participant_client.post(complete_url)
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["error"], "incomplete_tasks")
+        self.assertEqual(response.json()["voted"], 1)
+        self.assertEqual(response.json()["missing"], 1)
+        self.assertEqual(
+            response.json()["first_missing_task_id"], self.task.pk
+        )
+        participant = Participant.objects.get(name="Анна")
+        self.assertIsNone(participant.completed_at)
+
+        jump_response = participant_client.post(
+            navigate_url, {"direction": "missing"}
+        )
+        self.assertEqual(jump_response.status_code, 200)
+        state = participant_client.get(
+            reverse("poker:room_state", args=[self.voting_session.public_token])
+        ).json()
+        self.assertEqual(state["current_task"]["id"], self.task.pk)
+        self.assertFalse(state["queue"]["current_has_voted"])
+
+    def test_adding_task_to_active_room_reopens_completed_participant(self):
+        VotingSessionTask.objects.create(
+            session=self.voting_session, task=self.task, position=1
+        )
+        participant_client = self.join_participant("Анна")
+        self.organizer.post(
+            reverse("poker:session_start", args=[self.voting_session.pk])
+        )
+        participant_client.post(
+            reverse("poker:room_vote", args=[self.voting_session.public_token]),
+            {"value": 4},
+        )
+        participant_client.post(
+            reverse("poker:room_complete", args=[self.voting_session.public_token])
+        )
+        participant = Participant.objects.get(name="Анна")
+        self.assertIsNotNone(participant.completed_at)
+
+        second_task = Task.objects.create(
+            project=self.project, number="ABS-102", title="Вторая задача"
+        )
+        self.organizer.post(
+            reverse("poker:session_queue_add", args=[self.voting_session.pk]),
+            {"task_ids": [second_task.pk]},
+        )
+
+        participant.refresh_from_db()
+        self.assertIsNone(participant.completed_at)
+        state = participant_client.get(
+            reverse("poker:room_state", args=[self.voting_session.public_token])
+        ).json()
+        self.assertEqual(state["queue"]["voted"], 1)
+        self.assertEqual(state["queue"]["total"], 2)
+        self.assertEqual(state["queue"]["missing"], 1)
 
     def test_organizer_sees_full_participant_progress(self):
         second_task = Task.objects.create(
@@ -621,17 +717,27 @@ class VotingFlowTests(TestCase):
             item["name"]: (item["progress_status"], item["progress_label"])
             for item in state["participants"]
         }
-        self.assertEqual(progress["Не начинал"], ("not_started", "Не приступил"))
+        self.assertEqual(
+            progress["Не начинал"],
+            ("not_started", "0 из 2 · не приступил"),
+        )
         self.assertEqual(progress["В процессе"], ("in_progress", "1 из 2"))
-        self.assertEqual(progress["Оценил всё"], ("all_voted", "Оценил всё"))
-        self.assertEqual(progress["Завершил"], ("completed", "Завершил"))
+        self.assertEqual(
+            progress["Оценил всё"], ("all_voted", "2 из 2 · готов")
+        )
+        self.assertEqual(
+            progress["Завершил"], ("completed", "2 из 2 · завершил")
+        )
         self.assertEqual(state["completed_participant_count"], 1)
         self.assertEqual(state["participant_count"], 4)
         organizer_page = self.organizer.get(self.voting_session.get_absolute_url())
-        self.assertContains(organizer_page, "Не приступил")
+        self.assertContains(organizer_page, "0 из 2 · не приступил")
         self.assertContains(organizer_page, "1 из 2")
-        self.assertContains(organizer_page, "Оценил всё")
-        self.assertContains(organizer_page, "Завершил")
+        self.assertContains(organizer_page, "2 из 2 · готов")
+        self.assertContains(organizer_page, "2 из 2 · завершил")
+        self.assertContains(organizer_page, "Завершили полностью: 1 из 4")
+        self.assertContains(organizer_page, "Итог сохранён:")
+        self.assertContains(organizer_page, "Сохранённая оценка")
 
     def test_room_copy_keeps_queue_but_resets_voting_data(self):
         second_task = Task.objects.create(

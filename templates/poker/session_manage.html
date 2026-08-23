@@ -13,7 +13,7 @@
         <p><span class="status-dot {% if voting_session.status == 'active' %}status-dot--active{% endif %}"></span>{{ voting_session.get_status_display }}{% if voting_session.archived_at %} · В архиве{% endif %}</p>
         <div class="session-meta">
             <span>Минимум голосов: <strong>{{ voting_session.minimum_participants }}</strong></span>
-            <span>Оценено: <strong>{{ queue.completed }} из {{ queue.total }}</strong></span>
+            <span>Итог сохранён: <strong>{{ queue.completed }} из {{ queue.total }}</strong></span>
         </div>
     </div>
     <div class="page-heading__actions">
@@ -116,7 +116,7 @@
     </section>
 
     <aside class="card participants-card">
-        <div class="section-heading"><div><h2>Участники</h2><p id="participant-progress-summary">Завершили: {{ completed_participant_count }} из {{ participant_progress|length }}</p></div><span class="pill" id="participant-pill">{{ participant_progress|length }}</span></div>
+        <div class="section-heading"><div><h2>Участники</h2><p id="participant-progress-summary">Завершили полностью: {{ completed_participant_count }} из {{ participant_progress|length }}</p></div><span class="pill" id="participant-pill">{{ participant_progress|length }}</span></div>
         <div class="participant-list" id="participant-list">
             {% for participant in participant_progress %}<div class="participant"><span class="avatar">{{ participant.name|first|upper }}</span><strong>{{ participant.name }}</strong><span class="participant__state participant__state--{{ participant.progress_status }}">{{ participant.progress_label }}</span></div>{% empty %}<div class="compact-empty">Ждём участников по ссылке.</div>{% endfor %}
         </div>
@@ -131,7 +131,7 @@
     {% if queue.total %}
         <div class="queue-progress">
             <progress max="{{ queue.total }}" value="{{ queue.completed }}">{{ queue.completed }} из {{ queue.total }}</progress>
-            <span>{{ queue.completed }} из {{ queue.total }} оценено</span>
+            <span>{{ queue.completed }} из {{ queue.total }} итогов сохранено</span>
         </div>
     {% endif %}
     <div class="queue-list">
@@ -146,7 +146,7 @@
                 </div>
                 <span class="badge {% if item.status == 'completed' %}badge--success{% elif item.status == 'active' %}badge--active{% endif %}">{% if item.status == 'active' %}Открыта{% else %}{{ item.get_status_display }}{% endif %}</span>
                 <span class="queue-row__votes {% if item.vote_count >= voting_session.minimum_participants %}queue-row__votes--ready{% endif %}" data-queue-votes>{{ item.vote_count }} / {{ voting_session.minimum_participants }} голосов</span>
-                <strong class="queue-row__estimate">{{ item.task.estimate_display }}</strong>
+                <span class="queue-row__estimate"><small>Сохранённая оценка</small><strong>{{ item.task.estimate_display }}</strong></span>
             </div>
         {% empty %}<div class="compact-empty">Добавьте задачи в очередь ниже.</div>{% endfor %}
     </div>

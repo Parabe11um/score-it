@@ -104,7 +104,7 @@
             renderParticipants(state.participants);
             if (participantPill) participantPill.textContent = state.participant_count;
             if (participantProgressSummary) {
-                participantProgressSummary.textContent = `Завершили: ${state.completed_participant_count} из ${state.participant_count}`;
+                participantProgressSummary.textContent = `Завершили полностью: ${state.completed_participant_count} из ${state.participant_count}`;
             }
             if (votedCount) votedCount.textContent = state.voted_count;
             if (participantCount) participantCount.textContent = state.participant_count;

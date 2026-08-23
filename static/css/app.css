@@ -284,14 +284,16 @@ td { font-size: 14px; }
 .queue-progress progress::-webkit-progress-value { background: var(--success); border-radius: 999px; }
 .queue-progress progress::-moz-progress-bar { background: var(--success); border-radius: 999px; }
 .queue-list { display: grid; gap: 7px; }
-.queue-row { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto auto 48px; align-items: center; gap: 12px; padding: 12px; border: 1px solid #e7edf3; border-radius: 11px; background: var(--surface-soft); }
+.queue-row { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto auto minmax(88px, auto); align-items: center; gap: 12px; padding: 12px; border: 1px solid #e7edf3; border-radius: 11px; background: var(--surface-soft); }
 .queue-row--active { border-color: #d8e1f2; }
 .queue-row--current { box-shadow: inset 4px 0 0 var(--primary), 0 6px 16px rgba(49,87,213,.1); }
 .queue-row--completed { opacity: .72; }
 .queue-row__position { display: grid; place-items: center; width: 30px; height: 30px; color: var(--muted); background: white; border: 1px solid var(--line); border-radius: 8px; font-size: 12px; font-weight: 800; }
 .queue-row__task { min-width: 0; }
 .queue-row__task strong { display: inline; margin-left: 8px; font-size: 13px; overflow-wrap: anywhere; }
-.queue-row__estimate { text-align: right; }
+.queue-row__estimate { display: grid; justify-items: end; gap: 2px; text-align: right; }
+.queue-row__estimate small { max-width: 90px; color: var(--muted); font-size: 9px; line-height: 1.15; }
+.queue-row__estimate strong { color: var(--text); font-size: 14px; }
 .queue-row__votes { color: var(--muted); font-size: 12px; white-space: nowrap; }
 .queue-row__votes--ready { color: var(--success); font-weight: 800; }
 .badge--active { color: var(--primary); background: var(--primary-soft); }

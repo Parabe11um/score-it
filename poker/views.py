@@ -139,6 +139,12 @@ def _add_tasks_to_queue(voting_session, tasks):
     return queue_items
 
 
+def _reset_participant_completions(voting_session):
+    return voting_session.participants.filter(
+        completed_at__isnull=False
+    ).update(completed_at=None)
+
+
 def _create_round_for_item(voting_session, queue_item):
     last_number = (
         VotingRound.objects.filter(
@@ -157,6 +163,7 @@ def _create_round_for_item(voting_session, queue_item):
     queue_item.save(
         update_fields=("status", "completed_at", "current_round")
     )
+    _reset_participant_completions(voting_session)
     return voting_round
 
 
@@ -295,28 +302,59 @@ def _participant_queue_item(voting_session, participant):
 
 
 def _participant_queue_summary(voting_session, participant, queue_item):
-    summary = voting_session.queue_items.aggregate(
-        total=Count("id", distinct=True),
-        completed=Count(
+    queue_rows = list(
+        voting_session.queue_items.annotate(
+            participant_vote_count=Count(
+                "current_round__votes",
+                filter=Q(current_round__votes__participant=participant),
+                distinct=True,
+            )
+        ).values(
             "id",
-            filter=Q(status=VotingSessionTask.Status.COMPLETED),
-            distinct=True,
-        ),
-        voted=Count(
-            "current_round__votes",
-            filter=Q(current_round__votes__participant=participant),
-            distinct=True,
-        ),
+            "task_id",
+            "position",
+            "status",
+            "participant_vote_count",
+        ).order_by("position")
     )
-    position = queue_item.position if queue_item else None
-    summary.update(
-        {
-            "current_position": position,
-            "has_previous": bool(position and position > 1),
-            "has_next": bool(position and position < summary["total"]),
-        }
+    current_index = next(
+        (
+            index
+            for index, row in enumerate(queue_rows)
+            if queue_item and row["id"] == queue_item.pk
+        ),
+        None,
     )
-    return summary
+    missing_rows = [
+        row for row in queue_rows if row["participant_vote_count"] == 0
+    ]
+    voted = len(queue_rows) - len(missing_rows)
+    total = len(queue_rows)
+    current_row = queue_rows[current_index] if current_index is not None else None
+    first_missing = missing_rows[0] if missing_rows else None
+    return {
+        "total": total,
+        "completed": sum(
+            row["status"] == VotingSessionTask.Status.COMPLETED
+            for row in queue_rows
+        ),
+        "voted": voted,
+        "missing": total - voted,
+        "all_voted": bool(total and voted == total),
+        "current_position": current_row["position"] if current_row else None,
+        "current_has_voted": bool(
+            current_row and current_row["participant_vote_count"]
+        ),
+        "has_previous": current_index is not None and current_index > 0,
+        "has_next": current_index is not None
+        and current_index < total - 1,
+        "first_missing_task_id": (
+            first_missing["task_id"] if first_missing else None
+        ),
+        "first_missing_position": (
+            first_missing["position"] if first_missing else None
+        ),
+    }
 
 
 def _participant_progress(voting_session, current_round_voted_ids=None):
@@ -336,15 +374,20 @@ def _participant_progress(voting_session, current_round_voted_ids=None):
     for participant in participants:
         participant.progress_total = queue_total
         participant.current_round_voted = participant.pk in current_round_voted_ids
-        if participant.completed_at:
-            participant.progress_status = "completed"
-            participant.progress_label = "Завершил"
-        elif participant.progress_voted == 0:
+        if participant.progress_voted == 0:
             participant.progress_status = "not_started"
-            participant.progress_label = "Не приступил"
+            participant.progress_label = f"0 из {queue_total} · не приступил"
         elif participant.progress_voted >= queue_total and queue_total:
-            participant.progress_status = "all_voted"
-            participant.progress_label = "Оценил всё"
+            if participant.completed_at:
+                participant.progress_status = "completed"
+                participant.progress_label = (
+                    f"{queue_total} из {queue_total} · завершил"
+                )
+            else:
+                participant.progress_status = "all_voted"
+                participant.progress_label = (
+                    f"{queue_total} из {queue_total} · готов"
+                )
         else:
             participant.progress_status = "in_progress"
             participant.progress_label = (
@@ -895,17 +938,7 @@ def session_revote(request, pk):
         voting_round.status = VotingRound.Status.CANCELLED
         voting_round.save(update_fields=("status",))
         queue_item = voting_session.queue_items.get(task=voting_round.task)
-        new_round = VotingRound.objects.create(
-            session=voting_session,
-            task=voting_round.task,
-            number=voting_round.number + 1,
-        )
-        queue_item.current_round = new_round
-        queue_item.status = VotingSessionTask.Status.ACTIVE
-        queue_item.completed_at = None
-        queue_item.save(
-            update_fields=("current_round", "status", "completed_at")
-        )
+        _create_round_for_item(voting_session, queue_item)
     messages.info(request, "Начат новый раунд. Предыдущие голоса сохранены в истории.")
     return redirect(voting_session)
 
@@ -1288,22 +1321,40 @@ def room_navigate(request, token):
         return JsonResponse({"error": "participant_completed"}, status=409)
 
     direction = request.POST.get("direction")
-    if direction not in ("previous", "next"):
+    if direction not in ("previous", "next", "missing"):
         return JsonResponse({"error": "invalid_direction"}, status=400)
 
     queue_item = _participant_queue_item(voting_session, participant)
     if queue_item is None:
         return JsonResponse({"error": "empty_queue"}, status=409)
 
-    position_filter = (
-        {"position__gt": queue_item.position}
-        if direction == "next"
-        else {"position__lt": queue_item.position}
-    )
-    target_items = voting_session.queue_items.select_related("task").filter(
-        **position_filter
-    )
-    target = target_items.first() if direction == "next" else target_items.last()
+    if direction == "missing":
+        queue = _participant_queue_summary(
+            voting_session, participant, queue_item
+        )
+        target = (
+            voting_session.queue_items.select_related("task")
+            .filter(task_id=queue["first_missing_task_id"])
+            .first()
+            if queue["first_missing_task_id"]
+            else None
+        )
+        if target is None:
+            return JsonResponse({"error": "no_missing_tasks"}, status=409)
+    else:
+        position_filter = (
+            {"position__gt": queue_item.position}
+            if direction == "next"
+            else {"position__lt": queue_item.position}
+        )
+        target_items = voting_session.queue_items.select_related("task").filter(
+            **position_filter
+        )
+        target = (
+            target_items.first()
+            if direction == "next"
+            else target_items.last()
+        )
     if target is None:
         return JsonResponse({"error": "queue_boundary"}, status=409)
 
@@ -1320,12 +1371,12 @@ def room_complete(request, token):
     participant = _participant_from_request(request, voting_session)
     if not participant:
         return JsonResponse({"error": "participant_required"}, status=403)
-    if participant.completed_at:
-        return JsonResponse({"ok": True})
-
     queue_item = _participant_queue_item(voting_session, participant)
     if queue_item is None:
         return JsonResponse({"error": "empty_queue"}, status=409)
+    queue = _participant_queue_summary(voting_session, participant, queue_item)
+    if participant.completed_at and queue["all_voted"]:
+        return JsonResponse({"ok": True})
     if (
         voting_session.status != VotingSession.Status.ACTIVE
         or queue_item.current_round_id is None
@@ -1335,6 +1386,18 @@ def room_complete(request, token):
         position__gt=queue_item.position
     ).exists():
         return JsonResponse({"error": "last_task_required"}, status=409)
+    if not queue["all_voted"]:
+        return JsonResponse(
+            {
+                "error": "incomplete_tasks",
+                "voted": queue["voted"],
+                "total": queue["total"],
+                "missing": queue["missing"],
+                "first_missing_task_id": queue["first_missing_task_id"],
+                "first_missing_position": queue["first_missing_position"],
+            },
+            status=409,
+        )
 
     participant.completed_at = timezone.now()
     participant.save(update_fields=("completed_at",))

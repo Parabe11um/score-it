@@ -26,6 +26,7 @@
     let requestInProgress = false;
     let navigationInProgress = false;
     let atLastTask = false;
+    let nextAction = "next";
 
     function showOnly(element) {
         [waitingState, votingState, revealedState, finishedState].forEach((item) => {
@@ -79,9 +80,29 @@
         taskNavigation.hidden = false;
         previousTask.disabled = !state.queue.has_previous || navigationInProgress;
         atLastTask = !state.queue.has_next;
+        nextAction = "next";
         nextTask.disabled = navigationInProgress;
-        nextTask.textContent = atLastTask ? "Завершить оценку" : "Вперёд →";
-        personalProgress.textContent = `Оценено вами: ${state.queue.voted} из ${state.queue.total}`;
+        nextTask.textContent = "Вперёд →";
+
+        if (atLastTask && state.queue.all_voted) {
+            nextAction = "complete";
+            nextTask.textContent = "Завершить оценку";
+            personalProgress.textContent = `Оценены все задачи: ${state.queue.total}`;
+        } else if (
+            atLastTask
+            && state.queue.first_missing_task_id !== state.current_task.id
+        ) {
+            nextAction = "missing";
+            nextTask.textContent = "К первой пропущенной →";
+            personalProgress.textContent = `Осталось оценить: ${state.queue.missing}`;
+        } else if (atLastTask) {
+            nextAction = "current_vote_required";
+            nextTask.textContent = "Выберите оценку";
+            nextTask.disabled = true;
+            personalProgress.textContent = `Осталось оценить: ${state.queue.missing} · начните с текущей`;
+        } else {
+            personalProgress.textContent = `Оценено вами: ${state.queue.voted} из ${state.queue.total} · осталось ${state.queue.missing}`;
+        }
 
         if (state.round.status === "revealed" || state.round.status === "closed") {
             resultTaskNumber.textContent = state.current_task.number;
@@ -174,6 +195,7 @@
             selectCard(null);
         } catch (_error) {
             feedback.textContent = "Не удалось перейти к другой задаче. Попробуйте ещё раз.";
+            personalProgress.textContent = "Не удалось перейти к другой задаче.";
         } finally {
             navigationInProgress = false;
             await refresh();
@@ -191,7 +213,13 @@
                 method: "POST",
                 headers: {"X-CSRFToken": csrfToken, "X-Requested-With": "XMLHttpRequest"},
             });
-            if (!response.ok) throw new Error("completion request failed");
+            const result = await response.json();
+            if (!response.ok) {
+                if (result.error === "incomplete_tasks") {
+                    personalProgress.textContent = `Осталось оценить: ${result.missing}`;
+                }
+                throw new Error("completion request failed");
+            }
             window.location.reload();
         } catch (_error) {
             personalProgress.textContent = "Не удалось завершить оценку. Попробуйте ещё раз.";
@@ -202,11 +230,15 @@
 
     previousTask.addEventListener("click", () => navigate("previous"));
     nextTask.addEventListener("click", () => {
-        if (atLastTask) {
+        if (nextAction === "complete") {
             completeVoting();
             return;
         }
-        navigate("next");
+        if (nextAction === "missing") {
+            navigate("missing");
+            return;
+        }
+        if (nextAction === "next") navigate("next");
     });
 
     refresh();
