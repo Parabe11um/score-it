@@ -52,6 +52,7 @@
 </section>
 
 <div class="voting-layout" id="organizer-state" data-state-url="{% url 'poker:session_state' voting_session.pk %}">
+    <form id="organizer-csrf" hidden>{% csrf_token %}</form>
     <section class="card voting-stage">
         {% if current_round %}
             <div class="task-focus">
@@ -118,7 +119,21 @@
     <aside class="card participants-card">
         <div class="section-heading"><div><h2>Участники</h2><p id="participant-progress-summary">Завершили полностью: {{ completed_participant_count }} из {{ participant_progress|length }}</p></div><span class="pill" id="participant-pill">{{ participant_progress|length }}</span></div>
         <div class="participant-list" id="participant-list">
-            {% for participant in participant_progress %}<div class="participant"><span class="avatar">{{ participant.name|first|upper }}</span><strong>{{ participant.name }}</strong><span class="participant__state participant__state--{{ participant.progress_status }}">{{ participant.progress_label }}</span></div>{% empty %}<div class="compact-empty">Ждём участников по ссылке.</div>{% endfor %}
+            {% for participant in participant_progress %}
+                <div class="participant">
+                    <span class="avatar">{{ participant.name|first|upper }}</span>
+                    <div class="participant__main">
+                        <strong>{{ participant.name }}</strong>
+                        <span class="participant__state participant__state--{{ participant.progress_status }}">{{ participant.progress_label }}</span>
+                    </div>
+                    <div class="participant__actions">
+                        <button class="participant__action" type="button" data-resume-copy="{{ participant.resume_url }}" aria-label="Скопировать персональную ссылку участника {{ participant.name }}">Скопировать ссылку</button>
+                        <button class="participant__action participant__action--rotate" type="button" data-resume-rotate="{{ participant.rotate_url }}" aria-label="Обновить персональную ссылку участника {{ participant.name }}">Обновить</button>
+                    </div>
+                </div>
+            {% empty %}
+                <div class="compact-empty">Ждём участников по ссылке.</div>
+            {% endfor %}
         </div>
     </aside>
 </div>

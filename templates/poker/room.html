@@ -6,7 +6,10 @@
 {% block content %}
 <div class="room-header">
     <div><span class="eyebrow">АСИНХРОННАЯ ОЦЕНКА</span><h1>{{ voting_session.name }}</h1><p>Вы вошли как <strong>{{ participant.name }}</strong>. Ваш прогресс сохраняется автоматически.</p></div>
-    <span class="connection-state" id="connection-state"><span></span> Подключено</span>
+    <div class="room-header__actions">
+        <span class="connection-state" id="connection-state"><span></span> Подключено</span>
+        <button class="button button--secondary button--small" id="copy-resume-link" type="button" data-resume-url="{{ resume_url }}" title="Сохраните ссылку, чтобы продолжить оценку на другом устройстве">Ссылка для продолжения</button>
+    </div>
 </div>
 
 <section class="card participant-stage" id="room-app"

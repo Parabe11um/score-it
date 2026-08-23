@@ -31,6 +31,23 @@
     const revealButton = document.getElementById("reveal-button");
     const revealedVotes = document.getElementById("revealed-votes");
     const averageValue = document.getElementById("average-value");
+    const csrfToken = document.querySelector("#organizer-csrf [name=csrfmiddlewaretoken]")?.value;
+
+    async function copyText(value) {
+        try {
+            await navigator.clipboard.writeText(value);
+        } catch (_error) {
+            const input = document.createElement("textarea");
+            input.value = value;
+            input.setAttribute("readonly", "");
+            input.style.position = "fixed";
+            input.style.opacity = "0";
+            document.body.append(input);
+            input.select();
+            document.execCommand("copy");
+            input.remove();
+        }
+    }
 
     function initial(name) {
         return Array.from(name.trim())[0]?.toUpperCase() || "?";
@@ -61,8 +78,82 @@
             status.className = `participant__state participant__state--${participant.progress_status}`;
             status.textContent = participant.progress_label;
 
-            row.append(avatar, name, status);
+            const main = document.createElement("div");
+            main.className = "participant__main";
+            main.append(name, status);
+
+            const copyButton = document.createElement("button");
+            copyButton.className = "participant__action";
+            copyButton.type = "button";
+            copyButton.dataset.resumeCopy = participant.resume_url;
+            copyButton.textContent = "Скопировать ссылку";
+            copyButton.setAttribute(
+                "aria-label",
+                `Скопировать персональную ссылку участника ${participant.name}`,
+            );
+
+            const rotateButton = document.createElement("button");
+            rotateButton.className = "participant__action participant__action--rotate";
+            rotateButton.type = "button";
+            rotateButton.dataset.resumeRotate = participant.rotate_url;
+            rotateButton.textContent = "Обновить";
+            rotateButton.setAttribute(
+                "aria-label",
+                `Обновить персональную ссылку участника ${participant.name}`,
+            );
+
+            const actions = document.createElement("div");
+            actions.className = "participant__actions";
+            actions.append(copyButton, rotateButton);
+
+            row.append(avatar, main, actions);
             participantList.append(row);
+        });
+    }
+
+    if (participantList) {
+        participantList.addEventListener("click", async (event) => {
+            const copyButton = event.target.closest("[data-resume-copy]");
+            if (copyButton) {
+                await copyText(copyButton.dataset.resumeCopy);
+                copyButton.textContent = "Скопировано";
+                window.setTimeout(() => {
+                    copyButton.textContent = "Скопировать ссылку";
+                }, 1800);
+                return;
+            }
+
+            const rotateButton = event.target.closest("[data-resume-rotate]");
+            if (!rotateButton) return;
+            if (!window.confirm(
+                "Обновить персональную ссылку? Старая ссылка и прежняя привязка браузера перестанут работать."
+            )) return;
+
+            rotateButton.disabled = true;
+            rotateButton.textContent = "Обновляем…";
+            try {
+                const response = await fetch(rotateButton.dataset.resumeRotate, {
+                    method: "POST",
+                    headers: {
+                        "X-CSRFToken": csrfToken,
+                        "X-Requested-With": "XMLHttpRequest",
+                    },
+                });
+                if (!response.ok) throw new Error("resume rotation failed");
+                const result = await response.json();
+                await copyText(result.resume_url);
+                const currentCopyButton = rotateButton
+                    .closest(".participant")
+                    ?.querySelector("[data-resume-copy]");
+                if (currentCopyButton) {
+                    currentCopyButton.dataset.resumeCopy = result.resume_url;
+                    currentCopyButton.textContent = "Новая ссылка скопирована";
+                }
+                rotateButton.textContent = "Обновлено";
+            } catch (_error) {
+                rotateButton.disabled = false;
+                rotateButton.textContent = "Повторить";
+            }
         });
     }
 

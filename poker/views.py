@@ -1,3 +1,4 @@
+import uuid
 from decimal import Decimal, ROUND_HALF_UP
 
 from django.contrib import messages
@@ -7,6 +8,7 @@ from django.db import transaction
 from django.db.models import Count, Exists, Max, OuterRef, Q
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.cache import never_cache
 from django.views.decorators.debug import sensitive_post_parameters
@@ -72,6 +74,22 @@ def _task_for_user(user, project_pk, task_pk):
 
 def _participant_session_key(voting_session):
     return f"score_it_participant_{voting_session.pk}"
+
+
+def _participant_resume_url(request, voting_session, participant):
+    return request.build_absolute_uri(
+        reverse(
+            "poker:room_resume",
+            args=(voting_session.public_token, participant.client_token),
+        )
+    )
+
+
+def _participant_rotate_url(voting_session, participant):
+    return reverse(
+        "poker:participant_resume_rotate",
+        args=(voting_session.pk, participant.pk),
+    )
 
 
 def _invitation_unavailable_response(request, invitation):
@@ -765,6 +783,13 @@ def session_manage(request, pk):
     participant_progress = _participant_progress(
         voting_session, current_round_voted_ids
     )
+    for participant in participant_progress:
+        participant.resume_url = _participant_resume_url(
+            request, voting_session, participant
+        )
+        participant.rotate_url = _participant_rotate_url(
+            voting_session, participant
+        )
     return render(
         request,
         "poker/session_manage.html",
@@ -1065,6 +1090,25 @@ def session_copy(request, pk):
 
 
 @login_required
+@require_POST
+def participant_resume_rotate(request, pk, participant_pk):
+    voting_session = _session_for_user(request.user, pk)
+    participant = get_object_or_404(
+        Participant, pk=participant_pk, session=voting_session
+    )
+    participant.client_token = uuid.uuid4()
+    participant.save(update_fields=("client_token",))
+    return JsonResponse(
+        {
+            "ok": True,
+            "resume_url": _participant_resume_url(
+                request, voting_session, participant
+            ),
+        }
+    )
+
+
+@login_required
 @require_GET
 def session_state(request, pk):
     voting_session = _session_for_user(request.user, pk)
@@ -1101,6 +1145,12 @@ def session_state(request, pk):
             "progress_total": participant.progress_total,
             "progress_status": participant.progress_status,
             "progress_label": participant.progress_label,
+            "resume_url": _participant_resume_url(
+                request, voting_session, participant
+            ),
+            "rotate_url": _participant_rotate_url(
+                voting_session, participant
+            ),
         }
         for participant in participant_progress
     ]
@@ -1171,6 +1221,9 @@ def room(request, token):
             "voting_session": voting_session,
             "participant": participant,
             "estimation_guide": ESTIMATION_GUIDE,
+            "resume_url": _participant_resume_url(
+                request, voting_session, participant
+            ),
         },
     )
 
@@ -1187,7 +1240,11 @@ def room_join(request, token):
         name = form.cleaned_data["name"].strip()
         existing_names = voting_session.participants.values_list("name", flat=True)
         if any(existing.casefold() == name.casefold() for existing in existing_names):
-            form.add_error("name", "Это имя уже используется в комнате.")
+            form.add_error(
+                "name",
+                "Участник с таким именем уже существует. Используйте "
+                "персональную ссылку продолжения или запросите её у организатора.",
+            )
         else:
             first_task_id = (
                 voting_session.queue_items.filter(
@@ -1214,6 +1271,28 @@ def room_join(request, token):
         {"voting_session": voting_session, "join_form": form},
         status=400,
     )
+
+
+@never_cache
+@require_GET
+def room_resume(request, token, participant_token):
+    voting_session = get_object_or_404(VotingSession, public_token=token)
+    participant = voting_session.participants.filter(
+        client_token=participant_token
+    ).first()
+    session_key = _participant_session_key(voting_session)
+    if participant is None:
+        request.session.pop(session_key, None)
+        request.session.modified = True
+        messages.error(
+            request,
+            "Персональная ссылка недействительна. Запросите новую у организатора.",
+        )
+        return redirect("poker:room", token=token)
+
+    request.session[session_key] = str(participant.client_token)
+    request.session.modified = True
+    return redirect("poker:room", token=token)
 
 
 @require_GET

@@ -57,9 +57,19 @@ urlpatterns = [
     path("sessions/<int:pk>/restore/", views.session_restore, name="session_restore"),
     path("sessions/<int:pk>/delete/", views.session_delete, name="session_delete"),
     path("sessions/<int:pk>/copy/", views.session_copy, name="session_copy"),
+    path(
+        "sessions/<int:pk>/participants/<int:participant_pk>/resume-link/rotate/",
+        views.participant_resume_rotate,
+        name="participant_resume_rotate",
+    ),
     path("sessions/<int:pk>/state/", views.session_state, name="session_state"),
     path("room/<uuid:token>/", views.room, name="room"),
     path("room/<uuid:token>/join/", views.room_join, name="room_join"),
+    path(
+        "room/<uuid:token>/resume/<uuid:participant_token>/",
+        views.room_resume,
+        name="room_resume",
+    ),
     path("room/<uuid:token>/state/", views.room_state, name="room_state"),
     path("room/<uuid:token>/vote/", views.room_vote, name="room_vote"),
     path(

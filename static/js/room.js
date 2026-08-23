@@ -21,12 +21,39 @@
     const previousTask = document.getElementById("previous-task");
     const nextTask = document.getElementById("next-task");
     const personalProgress = document.getElementById("personal-progress");
+    const resumeLinkButton = document.getElementById("copy-resume-link");
     const cards = Array.from(document.querySelectorAll(".poker-card"));
     const csrfToken = document.querySelector("#csrf-form [name=csrfmiddlewaretoken]")?.value;
     let requestInProgress = false;
     let navigationInProgress = false;
     let atLastTask = false;
     let nextAction = "next";
+
+    async function copyText(value) {
+        try {
+            await navigator.clipboard.writeText(value);
+        } catch (_error) {
+            const input = document.createElement("textarea");
+            input.value = value;
+            input.setAttribute("readonly", "");
+            input.style.position = "fixed";
+            input.style.opacity = "0";
+            document.body.append(input);
+            input.select();
+            document.execCommand("copy");
+            input.remove();
+        }
+    }
+
+    if (resumeLinkButton) {
+        resumeLinkButton.addEventListener("click", async () => {
+            await copyText(resumeLinkButton.dataset.resumeUrl);
+            resumeLinkButton.textContent = "Ссылка скопирована";
+            window.setTimeout(() => {
+                resumeLinkButton.textContent = "Ссылка для продолжения";
+            }, 1800);
+        });
+    }
 
     function showOnly(element) {
         [waitingState, votingState, revealedState, finishedState].forEach((item) => {

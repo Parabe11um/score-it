@@ -1,3 +1,4 @@
+import uuid
 from io import BytesIO
 from datetime import timedelta
 from decimal import Decimal
@@ -739,6 +740,175 @@ class VotingFlowTests(TestCase):
         self.assertContains(organizer_page, "Итог сохранён:")
         self.assertContains(organizer_page, "Сохранённая оценка")
 
+    def test_personal_link_restores_existing_participant_on_another_device(self):
+        second_task = Task.objects.create(
+            project=self.project, number="ABS-102", title="Вторая задача"
+        )
+        VotingSessionTask.objects.bulk_create(
+            [
+                VotingSessionTask(
+                    session=self.voting_session, task=self.task, position=1
+                ),
+                VotingSessionTask(
+                    session=self.voting_session, task=second_task, position=2
+                ),
+            ]
+        )
+        original_client = self.join_participant("Анна")
+        self.organizer.post(
+            reverse("poker:session_start", args=[self.voting_session.pk])
+        )
+        original_client.post(
+            reverse("poker:room_vote", args=[self.voting_session.public_token]),
+            {"value": 8},
+        )
+        original_client.post(
+            reverse(
+                "poker:room_navigate",
+                args=[self.voting_session.public_token],
+            ),
+            {"direction": "next"},
+        )
+        participant = Participant.objects.get(name="Анна")
+        resume_url = reverse(
+            "poker:room_resume",
+            args=[self.voting_session.public_token, participant.client_token],
+        )
+
+        another_device = Client()
+        response = another_device.get(resume_url)
+
+        self.assertRedirects(
+            response,
+            reverse("poker:room", args=[self.voting_session.public_token]),
+        )
+        room_response = another_device.get(
+            reverse("poker:room", args=[self.voting_session.public_token])
+        )
+        self.assertContains(room_response, "Вы вошли как <strong>Анна</strong>")
+        self.assertContains(room_response, "Ссылка для продолжения")
+        state = another_device.get(
+            reverse("poker:room_state", args=[self.voting_session.public_token])
+        ).json()
+        self.assertEqual(state["current_task"]["id"], second_task.pk)
+        self.assertEqual(state["queue"]["voted"], 1)
+        self.assertEqual(self.voting_session.participants.count(), 1)
+        self.assertEqual(Vote.objects.count(), 1)
+
+    def test_invalid_personal_link_returns_to_join_without_new_participant(self):
+        self.join_participant("Анна")
+        invalid_url = reverse(
+            "poker:room_resume",
+            args=[self.voting_session.public_token, uuid.uuid4()],
+        )
+
+        response = Client().get(invalid_url, follow=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Персональная ссылка недействительна")
+        self.assertContains(response, "Как вас представить?")
+        self.assertEqual(self.voting_session.participants.count(), 1)
+
+    def test_organizer_can_rotate_resume_link_without_losing_votes(self):
+        participant_client = self.join_participant("Анна")
+        self.organizer.post(
+            reverse(
+                "poker:session_start_task",
+                args=[self.voting_session.pk, self.task.pk],
+            )
+        )
+        participant_client.post(
+            reverse("poker:room_vote", args=[self.voting_session.public_token]),
+            {"value": 12},
+        )
+        participant = Participant.objects.get(name="Анна")
+        old_token = participant.client_token
+        old_resume_url = reverse(
+            "poker:room_resume",
+            args=[self.voting_session.public_token, old_token],
+        )
+        rotate_url = reverse(
+            "poker:participant_resume_rotate",
+            args=[self.voting_session.pk, participant.pk],
+        )
+
+        response = self.organizer.post(rotate_url)
+
+        self.assertEqual(response.status_code, 200)
+        participant.refresh_from_db()
+        self.assertNotEqual(participant.client_token, old_token)
+        self.assertEqual(Vote.objects.count(), 1)
+        self.assertEqual(self.voting_session.participants.count(), 1)
+        self.assertIn(str(participant.client_token), response.json()["resume_url"])
+        self.assertEqual(
+            participant_client.get(
+                reverse(
+                    "poker:room_state",
+                    args=[self.voting_session.public_token],
+                )
+            ).status_code,
+            403,
+        )
+
+        old_link_response = Client().get(old_resume_url, follow=True)
+        self.assertContains(
+            old_link_response, "Персональная ссылка недействительна"
+        )
+        new_device = Client()
+        new_resume_url = reverse(
+            "poker:room_resume",
+            args=[
+                self.voting_session.public_token,
+                participant.client_token,
+            ],
+        )
+        self.assertEqual(new_device.get(new_resume_url).status_code, 302)
+        self.assertContains(
+            new_device.get(
+                reverse("poker:room", args=[self.voting_session.public_token])
+            ),
+            "Вы вошли как <strong>Анна</strong>",
+        )
+
+    def test_other_organizer_cannot_rotate_participant_resume_link(self):
+        self.join_participant("Анна")
+        participant = Participant.objects.get(name="Анна")
+        original_token = participant.client_token
+        other_user = get_user_model().objects.create_user(
+            "other-owner", password="secret"
+        )
+        other_client = Client()
+        other_client.force_login(other_user)
+
+        response = other_client.post(
+            reverse(
+                "poker:participant_resume_rotate",
+                args=[self.voting_session.pk, participant.pk],
+            )
+        )
+
+        self.assertEqual(response.status_code, 404)
+        participant.refresh_from_db()
+        self.assertEqual(participant.client_token, original_token)
+
+    def test_organizer_state_contains_participant_resume_controls(self):
+        self.join_participant("Анна")
+        participant = Participant.objects.get(name="Анна")
+
+        state = self.organizer.get(
+            reverse("poker:session_state", args=[self.voting_session.pk])
+        ).json()
+
+        participant_state = state["participants"][0]
+        self.assertIn(str(participant.client_token), participant_state["resume_url"])
+        self.assertEqual(
+            participant_state["rotate_url"],
+            reverse(
+                "poker:participant_resume_rotate",
+                args=[self.voting_session.pk, participant.pk],
+            ),
+        )
+
     def test_room_copy_keeps_queue_but_resets_voting_data(self):
         second_task = Task.objects.create(
             project=self.project, number="ABS-102", title="Вторая задача"
@@ -777,7 +947,14 @@ class VotingFlowTests(TestCase):
             {"name": "анна"},
         )
         self.assertEqual(response.status_code, 400)
-        self.assertContains(response, "Это имя уже используется", status_code=400)
+        self.assertContains(
+            response,
+            "Участник с таким именем уже существует",
+            status_code=400,
+        )
+        self.assertContains(
+            response, "персональную ссылку продолжения", status_code=400
+        )
         self.assertEqual(Participant.objects.count(), 1)
 
 
