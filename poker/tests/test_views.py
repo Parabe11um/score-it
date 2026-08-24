@@ -53,6 +53,45 @@ class OrganizerViewsTests(TestCase):
             self.project.tasks.get(number="ABS-1").title, "Обновлённое название"
         )
 
+    def test_bulk_import_supports_default_and_per_line_competencies(self):
+        self.client.force_login(self.user)
+        response = self.client.post(
+            reverse("poker:task_import", args=[self.project.pk]),
+            {
+                "competency": Task.Competency.DEVELOPMENT,
+                "tasks_text": (
+                    "[Аналитика] ABS-1 | Описать требования\n"
+                    "ABS-2 | Реализовать обработчик\n"
+                    "[QA] ABS-3 | Проверить обработчик"
+                ),
+            },
+        )
+
+        self.assertRedirects(response, self.project.get_absolute_url())
+        self.assertEqual(
+            self.project.tasks.get(number="ABS-1").competency,
+            Task.Competency.ANALYSIS,
+        )
+        self.assertEqual(
+            self.project.tasks.get(number="ABS-2").competency,
+            Task.Competency.DEVELOPMENT,
+        )
+        self.assertEqual(
+            self.project.tasks.get(number="ABS-3").competency,
+            Task.Competency.TESTING,
+        )
+
+    def test_bulk_import_rejects_unknown_competency_prefix(self):
+        self.client.force_login(self.user)
+        response = self.client.post(
+            reverse("poker:task_import", args=[self.project.pk]),
+            {"tasks_text": "[Дизайн] ABS-1 | Нарисовать экран"},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertContains(response, "Не удалось распознать строки: 1", status_code=400)
+        self.assertFalse(self.project.tasks.exists())
+
     def test_other_organizer_cannot_open_project(self):
         self.client.force_login(self.other_user)
         response = self.client.get(self.project.get_absolute_url())
@@ -152,6 +191,48 @@ class OrganizerViewsTests(TestCase):
                 expected_ids,
             )
 
+    def test_task_competency_filters_and_inline_update(self):
+        analysis = Task.objects.create(
+            project=self.project,
+            number="ABS-A",
+            title="Аналитическая задача",
+            competency=Task.Competency.ANALYSIS,
+        )
+        development = Task.objects.create(
+            project=self.project,
+            number="ABS-D",
+            title="Задача разработки",
+            competency=Task.Competency.DEVELOPMENT,
+        )
+        Task.objects.create(
+            project=self.project,
+            number="ABS-N",
+            title="Без типа",
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.get(
+            self.project.get_absolute_url(),
+            {"competency": "analysis"},
+        )
+        self.assertEqual(
+            list(response.context["tasks"].values_list("pk", flat=True)),
+            [analysis.pk],
+        )
+        self.assertContains(response, "Все направления")
+        self.assertContains(response, "Аналитика")
+
+        update = self.client.post(
+            reverse(
+                "poker:task_competency_update",
+                args=[self.project.pk, development.pk],
+            ),
+            {"competency": Task.Competency.TESTING},
+        )
+        self.assertRedirects(update, self.project.get_absolute_url())
+        development.refresh_from_db()
+        self.assertEqual(development.competency, Task.Competency.TESTING)
+
     def test_organizer_can_complete_reopen_and_delete_task(self):
         task = Task.objects.create(
             project=self.project, number="ABS-1", title="Задача"
@@ -188,6 +269,13 @@ class OrganizerViewsTests(TestCase):
         responses = (
             self.client.post(
                 reverse("poker:task_delete", args=[self.project.pk, task.pk])
+            ),
+            self.client.post(
+                reverse(
+                    "poker:task_competency_update",
+                    args=[self.project.pk, task.pk],
+                ),
+                {"competency": Task.Competency.ANALYSIS},
             ),
             self.client.post(reverse("poker:session_delete", args=[voting_session.pk])),
             self.client.post(reverse("poker:sprint_delete", args=[sprint.pk])),
@@ -1149,6 +1237,8 @@ class SprintTests(TestCase):
         self.assertContains(history_page, target.name)
 
     def test_excel_export_contains_average_formula(self):
+        self.task.competency = Task.Competency.ANALYSIS
+        self.task.save(update_fields=("competency",))
         response = self.client.get(
             reverse("poker:sprint_export", args=[self.sprint.pk])
         )
@@ -1164,3 +1254,4 @@ class SprintTests(TestCase):
         self.assertEqual(sheet["D2"].value, "=E2/F2")
         self.assertEqual(sheet["E2"].value, 14)
         self.assertEqual(sheet["F2"].value, 3)
+        self.assertEqual(sheet["G2"].value, "Аналитика")

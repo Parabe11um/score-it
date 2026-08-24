@@ -70,7 +70,7 @@
             <thead><tr><th>№</th><th>Задача</th><th>Статус</th><th class="align-right">Оценка</th><th></th></tr></thead>
             <tbody>
             {% for item in sprint_items %}
-                <tr class="{% if item.status == 'transferred' %}sprint-task--transferred{% endif %}"><td>{{ forloop.counter }}</td><td><span class="task-number">{{ item.task.number }}</span><div class="task-title-secondary">{{ item.task.title }}</div></td><td>{% if item.status == "transferred" %}<span class="badge">Перенесена{% if item.transferred_to %} → {{ item.transferred_to.name }}{% endif %}</span>{% else %}<span class="badge badge--active">Запланирована</span>{% endif %}</td><td class="align-right"><strong class="estimate-value">{{ item.task.estimate_display }}</strong></td><td class="align-right">{% if item.status == "planned" and not sprint.archived_at and sprint.status != "completed" %}<form method="post" action="{% url 'poker:sprint_remove_task' sprint.pk item.task.pk %}" onsubmit="return confirm('Убрать задачу {{ item.task.number|escapejs }} из спринта?');">{% csrf_token %}<button class="icon-button" type="submit" title="Убрать из спринта">×</button></form>{% endif %}</td></tr>
+                <tr class="{% if item.status == 'transferred' %}sprint-task--transferred{% endif %}"><td>{{ forloop.counter }}</td><td><span class="task-number">{{ item.task.number }}</span>{% if item.task.competency %} <span class="competency-badge competency-badge--{{ item.task.competency }}">{{ item.task.get_competency_display }}</span>{% endif %}<div class="task-title-secondary">{{ item.task.title }}</div></td><td>{% if item.status == "transferred" %}<span class="badge">Перенесена{% if item.transferred_to %} → {{ item.transferred_to.name }}{% endif %}</span>{% else %}<span class="badge badge--active">Запланирована</span>{% endif %}</td><td class="align-right"><strong class="estimate-value">{{ item.task.estimate_display }}</strong></td><td class="align-right">{% if item.status == "planned" and not sprint.archived_at and sprint.status != "completed" %}<form method="post" action="{% url 'poker:sprint_remove_task' sprint.pk item.task.pk %}" onsubmit="return confirm('Убрать задачу {{ item.task.number|escapejs }} из спринта?');">{% csrf_token %}<button class="icon-button" type="submit" title="Убрать из спринта">×</button></form>{% endif %}</td></tr>
             {% empty %}<tr><td colspan="5" class="table-empty">Добавьте оценённые задачи из списка ниже.</td></tr>{% endfor %}
             </tbody>
         </table>
@@ -83,7 +83,7 @@
     <form method="post" action="{% url 'poker:sprint_transfer_tasks' sprint.pk %}" class="stack-form">
         {% csrf_token %}
         <div class="field"><label for="target-sprint">Новый спринт</label><select id="target-sprint" name="target_sprint" required>{% for target in transfer_targets %}<option value="{{ target.pk }}">{{ target.name }} · {{ target.get_status_display }}</option>{% endfor %}</select></div>
-        <div class="check-list">{% for item in planned_items %}<label class="check-item"><input type="checkbox" name="task_ids" value="{{ item.task_id }}"><span><strong>{{ item.task.number }}</strong><small>{{ item.task.title }}</small></span><b>{{ item.task.estimate_display }}</b></label>{% endfor %}</div>
+        <div class="check-list">{% for item in planned_items %}<label class="check-item"><input type="checkbox" name="task_ids" value="{{ item.task_id }}"><span><strong>{{ item.task.number }}{% if item.task.competency %} · {{ item.task.get_competency_display }}{% endif %}</strong><small>{{ item.task.title }}</small></span><b>{{ item.task.estimate_display }}</b></label>{% endfor %}</div>
         <div class="section-footer"><button class="button button--primary" type="submit">Перенести выбранные</button></div>
     </form>
 </details>
@@ -96,7 +96,7 @@
         {% csrf_token %}
         <div class="check-list">
             {% for task in available_tasks %}
-                <label class="check-item"><input type="checkbox" name="task_ids" value="{{ task.pk }}"><span><strong>{{ task.number }}</strong><small>{{ task.title }}</small></span><b>{{ task.estimate_display }}</b></label>
+                <label class="check-item"><input type="checkbox" name="task_ids" value="{{ task.pk }}"><span><strong>{{ task.number }}{% if task.competency %} · {{ task.get_competency_display }}{% endif %}</strong><small>{{ task.title }}</small></span><b>{{ task.estimate_display }}</b></label>
             {% empty %}<div class="compact-empty">Нет доступных оценённых задач.</div>{% endfor %}
         </div>
         {% if available_tasks %}<div class="section-footer"><button class="button button--primary" type="submit">Добавить выбранные</button></div>{% endif %}

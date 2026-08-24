@@ -57,6 +57,7 @@
         {% if current_round %}
             <div class="task-focus">
                 <span class="task-number">{{ voting_session.current_task.number }}</span>
+                {% if voting_session.current_task.competency %}<span class="competency-badge competency-badge--{{ voting_session.current_task.competency }}">{{ voting_session.current_task.get_competency_display }}</span>{% endif %}
                 <h2>{{ voting_session.current_task.title }}</h2>
                 <p>{% if queue.current_position %}Задача {{ queue.current_position }} из {{ queue.total }} · {% endif %}Раунд {{ current_round.number }}</p>
             </div>
@@ -157,6 +158,7 @@
                     {% if item.status == 'active' %}
                         <form class="inline-form" method="post" action="{% url 'poker:session_start_task' voting_session.pk item.task.pk %}">{% csrf_token %}<button class="task-number task-jump" type="submit">{{ item.task.number }}</button></form>
                     {% else %}<span class="task-number">{{ item.task.number }}</span>{% endif %}
+                    {% if item.task.competency %}<span class="competency-badge competency-badge--{{ item.task.competency }}">{{ item.task.get_competency_display }}</span>{% endif %}
                     <strong>{{ item.task.title }}</strong>
                 </div>
                 <span class="badge {% if item.status == 'completed' %}badge--success{% elif item.status == 'active' %}badge--active{% endif %}">{% if item.status == 'active' %}Открыта{% else %}{{ item.get_status_display }}{% endif %}</span>
@@ -185,9 +187,9 @@
         <div class="picker-heading"><span>Доступные задачи</span><strong data-task-count>0 выбрано</strong></div>
         <div class="queue-picker" data-task-options>
             {% for task in available_tasks %}
-                <label class="queue-picker__item" data-task-option data-search-text="{{ task.number|lower }} {{ task.title|lower }}">
+                <label class="queue-picker__item" data-task-option data-search-text="{{ task.number|lower }} {{ task.title|lower }} {{ task.get_competency_display|lower }}">
                     <input type="checkbox" name="task_ids" value="{{ task.pk }}" checked>
-                    <span><strong>{{ task.number }}</strong> — {{ task.title }}</span>
+                    <span><strong>{{ task.number }}</strong>{% if task.competency %} <span class="competency-badge competency-badge--{{ task.competency }}">{{ task.get_competency_display }}</span>{% endif %} — {{ task.title }}</span>
                 </label>
             {% endfor %}
         </div>

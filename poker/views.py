@@ -418,6 +418,7 @@ def _project_detail_context(
     project,
     *,
     task_filter="all",
+    competency_filter="all",
     show_archived=False,
     task_import_form=None,
     session_form=None,
@@ -434,6 +435,19 @@ def _project_detail_context(
     valid_filters = {value for value, _label in task_filter_labels}
     if task_filter not in valid_filters:
         task_filter = "all"
+
+    competency_filter_labels = (
+        ("all", "Все направления"),
+        ("analysis", "Аналитика"),
+        ("development", "Разработка"),
+        ("testing", "Тестирование"),
+        ("untyped", "Без типа"),
+    )
+    valid_competency_filters = {
+        value for value, _label in competency_filter_labels
+    }
+    if competency_filter not in valid_competency_filters:
+        competency_filter = "all"
 
     tasks = project.tasks.annotate(
         in_sprint=Exists(
@@ -467,7 +481,21 @@ def _project_detail_context(
         value: tasks.filter(task_queries[value]).count()
         for value, _label in task_filter_labels
     }
-    filtered_tasks = tasks.filter(task_queries[task_filter])
+    tasks_by_status = tasks.filter(task_queries[task_filter])
+    competency_queries = {
+        "all": Q(),
+        "analysis": Q(competency=Task.Competency.ANALYSIS),
+        "development": Q(competency=Task.Competency.DEVELOPMENT),
+        "testing": Q(competency=Task.Competency.TESTING),
+        "untyped": Q(competency=Task.Competency.NONE),
+    }
+    competency_filter_counts = {
+        value: tasks_by_status.filter(competency_queries[value]).count()
+        for value, _label in competency_filter_labels
+    }
+    filtered_tasks = tasks_by_status.filter(
+        competency_queries[competency_filter]
+    )
 
     sessions = project.voting_sessions.select_related("current_task").filter(
         archived_at__isnull=not show_archived
@@ -484,6 +512,16 @@ def _project_detail_context(
             {"value": value, "label": label, "count": filter_counts[value]}
             for value, label in task_filter_labels
         ],
+        "competency_filter": competency_filter,
+        "competency_filters": [
+            {
+                "value": value,
+                "label": label,
+                "count": competency_filter_counts[value],
+            }
+            for value, label in competency_filter_labels
+        ],
+        "competency_choices": Task.Competency.choices,
         "sessions": sessions,
         "session_total": project.voting_sessions.count(),
         "sprints": sprints,
@@ -663,6 +701,7 @@ def project_detail(request, pk):
         _project_detail_context(
             project,
             task_filter=request.GET.get("tasks", "all"),
+            competency_filter=request.GET.get("competency", "all"),
             show_archived=request.GET.get("archive") == "1",
         ),
     )
@@ -685,15 +724,20 @@ def task_import(request, pk):
     created_count = 0
     updated_count = 0
     with transaction.atomic():
-        for number, title in form.parsed_tasks:
+        for number, title, competency in form.parsed_tasks:
             task, created = Task.objects.get_or_create(
-                project=project, number=number, defaults={"title": title}
+                project=project,
+                number=number,
+                defaults={"title": title, "competency": competency},
             )
             if created:
                 created_count += 1
-            elif task.title != title:
+            elif task.title != title or task.competency != competency:
                 task.title = title
-                task.save(update_fields=("title", "updated_at"))
+                task.competency = competency
+                task.save(
+                    update_fields=("title", "competency", "updated_at")
+                )
                 updated_count += 1
 
     messages.success(
@@ -725,6 +769,29 @@ def task_reopen(request, pk, task_pk):
         task.save(update_fields=("completed_at", "updated_at"))
         messages.info(request, f"Задача {task.number} возвращена в работу.")
     return redirect(project)
+
+
+@login_required
+@require_POST
+def task_competency_update(request, pk, task_pk):
+    project = _project_for_user(request.user, pk)
+    task = _task_for_user(request.user, project.pk, task_pk)
+    redirect_url = project.get_absolute_url()
+    if request.GET:
+        redirect_url = f"{redirect_url}?{request.GET.urlencode()}"
+    competency = request.POST.get("competency", "")
+    if competency not in Task.Competency.values:
+        messages.error(request, "Неизвестный тип задачи.")
+        return redirect(redirect_url)
+
+    if task.competency != competency:
+        task.competency = competency
+        task.save(update_fields=("competency", "updated_at"))
+        messages.success(
+            request,
+            f"Для задачи {task.number} установлен тип «{task.get_competency_display()}».",
+        )
+    return redirect(redirect_url)
 
 
 @login_required
@@ -1167,6 +1234,8 @@ def session_state(request, pk):
             "current_task": {
                 "number": voting_session.current_task.number,
                 "title": voting_session.current_task.title,
+                "competency": voting_session.current_task.competency,
+                "competency_label": voting_session.current_task.get_competency_display(),
             }
             if voting_session.current_task
             else None,
@@ -1357,6 +1426,8 @@ def room_state(request, token):
         "id": queue_item.task_id,
         "number": queue_item.task.number,
         "title": queue_item.task.title,
+        "competency": queue_item.task.competency,
+        "competency_label": queue_item.task.get_competency_display(),
     }
     response["round"] = round_data
     return JsonResponse(response)
@@ -1769,6 +1840,7 @@ def sprint_export(request, pk):
         "Средняя оценка",
         "Сумма голосов",
         "Количество голосов",
+        "Тип задачи",
     )
     sheet.append(headers)
 
@@ -1788,6 +1860,7 @@ def sprint_export(request, pk):
                 f"=E{row_number}/F{row_number}" if task.estimate_count else None,
                 task.estimate_sum,
                 task.estimate_count,
+                task.get_competency_display(),
             )
         )
         sheet.cell(row=row_number, column=4).number_format = "0.00"
@@ -1800,11 +1873,11 @@ def sprint_export(request, pk):
         sheet.cell(row=total_row, column=4).font = Font(bold=True)
         sheet.cell(row=total_row, column=4).number_format = "0.00"
 
-    widths = (6, 20, 70, 20, 18, 22)
+    widths = (6, 20, 70, 20, 18, 22, 20)
     for index, width in enumerate(widths, start=1):
         sheet.column_dimensions[get_column_letter(index)].width = width
     sheet.freeze_panes = "A2"
-    sheet.auto_filter.ref = f"A1:F{max(1, len(items) + 1)}"
+    sheet.auto_filter.ref = f"A1:G{max(1, len(items) + 1)}"
 
     response = HttpResponse(
         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"

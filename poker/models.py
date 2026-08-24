@@ -146,6 +146,12 @@ class Project(models.Model):
 
 
 class Task(models.Model):
+    class Competency(models.TextChoices):
+        NONE = "", "Без типа"
+        ANALYSIS = "analysis", "Аналитика"
+        DEVELOPMENT = "development", "Разработка"
+        TESTING = "testing", "Тестирование"
+
     class Status(models.TextChoices):
         UNESTIMATED = "unestimated", "Не оценена"
         ESTIMATED = "estimated", "Оценена"
@@ -158,6 +164,13 @@ class Task(models.Model):
     )
     number = models.CharField("Номер", max_length=80)
     title = models.CharField("Название", max_length=500)
+    competency = models.CharField(
+        "Тип задачи",
+        max_length=20,
+        choices=Competency.choices,
+        default=Competency.NONE,
+        blank=True,
+    )
     status = models.CharField(
         "Статус", max_length=20, choices=Status.choices, default=Status.UNESTIMATED
     )

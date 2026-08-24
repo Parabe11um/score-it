@@ -8,8 +8,10 @@
     const finishedState = document.getElementById("finished-state");
     const taskNumber = document.getElementById("room-task-number");
     const taskTitle = document.getElementById("room-task-title");
+    const taskCompetency = document.getElementById("room-task-competency");
     const resultTaskNumber = document.getElementById("result-task-number");
     const resultTaskTitle = document.getElementById("result-task-title");
+    const resultTaskCompetency = document.getElementById("result-task-competency");
     const progress = document.getElementById("room-progress");
     const waitingProgress = document.getElementById("waiting-progress");
     const feedback = document.getElementById("vote-feedback");
@@ -80,6 +82,20 @@
         });
     }
 
+    function renderCompetency(element, task) {
+        if (!element) return;
+        element.classList.remove(
+            "competency-badge--analysis",
+            "competency-badge--development",
+            "competency-badge--testing",
+        );
+        element.hidden = !task.competency;
+        element.textContent = task.competency ? task.competency_label : "";
+        if (task.competency) {
+            element.classList.add(`competency-badge--${task.competency}`);
+        }
+    }
+
     function render(state) {
         if (state.participant_completed) {
             window.location.reload();
@@ -134,6 +150,7 @@
         if (state.round.status === "revealed" || state.round.status === "closed") {
             resultTaskNumber.textContent = state.current_task.number;
             resultTaskTitle.textContent = state.current_task.title;
+            renderCompetency(resultTaskCompetency, state.current_task);
             average.textContent = state.round.average ?? "—";
             renderVotes(state.round.votes || []);
             resultNote.textContent = state.round.status === "closed"
@@ -145,6 +162,7 @@
 
         taskNumber.textContent = state.current_task.number;
         taskTitle.textContent = state.current_task.title;
+        renderCompetency(taskCompetency, state.current_task);
         const queueLabel = state.queue?.current_position
             ? `Задача ${state.queue.current_position} из ${state.queue.total} · `
             : "";

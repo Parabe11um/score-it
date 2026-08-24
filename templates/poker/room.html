@@ -28,6 +28,7 @@
     <div id="voting-state" hidden>
         <div class="task-focus task-focus--participant">
             <span class="task-number" id="room-task-number"></span>
+            <span class="competency-badge" id="room-task-competency" hidden></span>
             <h2 id="room-task-title"></h2>
             <p id="room-progress"></p>
         </div>
@@ -59,7 +60,7 @@
     </div>
 
     <div id="revealed-state" hidden>
-        <div class="task-focus task-focus--participant"><span class="task-number" id="result-task-number"></span><h2 id="result-task-title"></h2></div>
+        <div class="task-focus task-focus--participant"><span class="task-number" id="result-task-number"></span><span class="competency-badge" id="result-task-competency" hidden></span><h2 id="result-task-title"></h2></div>
         <div class="average-panel average-panel--large"><span>Средняя оценка команды</span><strong id="room-average"></strong></div>
         <div class="revealed-votes revealed-votes--grid" id="room-votes"></div>
         <p class="centered muted" id="result-note">Голоса раскрыты. Можно перейти к другой задаче.</p>

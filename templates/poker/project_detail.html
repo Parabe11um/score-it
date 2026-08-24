@@ -27,6 +27,18 @@
         </summary>
         <form method="post" action="{% url 'poker:task_import' project.pk %}" class="stack-form details-form">
             {% csrf_token %}
+            <div class="field">
+                <label>{{ task_import_form.competency.label }}</label>
+                <div class="competency-picker">
+                    {% for radio in task_import_form.competency %}
+                        <label class="competency-option competency-option--{{ radio.data.value|default:'none' }}">
+                            {{ radio.tag }}<span>{{ radio.choice_label }}</span>
+                        </label>
+                    {% endfor %}
+                </div>
+                {% for error in task_import_form.competency.errors %}<div class="form-error">{{ error }}</div>{% endfor %}
+                <div class="help-text">{{ task_import_form.competency.help_text }}</div>
+            </div>
             {{ task_import_form.tasks_text }}
             {% for error in task_import_form.tasks_text.errors %}<div class="form-error">{{ error }}</div>{% endfor %}
             <div class="help-text">{{ task_import_form.tasks_text.help_text }}</div>
@@ -105,7 +117,15 @@
     <nav class="filter-bar" aria-label="Фильтры задач">
         {% for filter in task_filters %}
             <a class="filter-chip {% if task_filter == filter.value %}filter-chip--active{% endif %}"
-               href="?tasks={{ filter.value }}{% if show_archived %}&amp;archive=1{% endif %}">
+               href="?tasks={{ filter.value }}&amp;competency={{ competency_filter }}{% if show_archived %}&amp;archive=1{% endif %}">
+                {{ filter.label }} <span>{{ filter.count }}</span>
+            </a>
+        {% endfor %}
+    </nav>
+    <nav class="filter-bar filter-bar--competency" aria-label="Фильтры по типу задачи">
+        {% for filter in competency_filters %}
+            <a class="filter-chip competency-filter competency-filter--{{ filter.value }} {% if competency_filter == filter.value %}filter-chip--active{% endif %}"
+               href="?tasks={{ task_filter }}&amp;competency={{ filter.value }}{% if show_archived %}&amp;archive=1{% endif %}">
                 {{ filter.label }} <span>{{ filter.count }}</span>
             </a>
         {% endfor %}
@@ -117,7 +137,18 @@
             {% for task in tasks %}
                 <tr>
                     <td><span class="task-number">{{ task.number }}</span></td>
-                    <td>{{ task.title }}</td>
+                    <td>
+                        <div class="task-title-cell">{{ task.title }}</div>
+                        <form method="post" action="{% url 'poker:task_competency_update' project.pk task.pk %}?tasks={{ task_filter }}&amp;competency={{ competency_filter }}{% if show_archived %}&amp;archive=1{% endif %}" class="task-competency-form">
+                            {% csrf_token %}
+                            <label class="visually-hidden" for="task-competency-{{ task.pk }}">Тип задачи {{ task.number }}</label>
+                            <select id="task-competency-{{ task.pk }}" name="competency" class="competency-select competency-select--{{ task.competency|default:'none' }}" onchange="this.form.submit()">
+                                {% for value, label in competency_choices %}
+                                    <option value="{{ value }}" {% if value == task.competency %}selected{% endif %}>{{ label }}</option>
+                                {% endfor %}
+                            </select>
+                        </form>
+                    </td>
                     <td>
                         {% if task.completed_at %}<span class="badge badge--success">Завершена</span>
                         {% elif task.in_sprint %}<span class="badge badge--active">В спринте</span>

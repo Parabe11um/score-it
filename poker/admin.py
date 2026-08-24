@@ -127,12 +127,13 @@ class TaskAdmin(admin.ModelAdmin):
     list_display = (
         "number",
         "title",
+        "competency",
         "project",
         "status",
         "estimate_display",
         "completed_at",
     )
-    list_filter = ("status", "project", "completed_at")
+    list_filter = ("competency", "status", "project", "completed_at")
     search_fields = ("number", "title")
 
 

@@ -26,6 +26,11 @@ urlpatterns = [
         name="task_reopen",
     ),
     path(
+        "projects/<int:pk>/tasks/<int:task_pk>/competency/",
+        views.task_competency_update,
+        name="task_competency_update",
+    ),
+    path(
         "projects/<int:pk>/tasks/<int:task_pk>/delete/",
         views.task_delete,
         name="task_delete",
