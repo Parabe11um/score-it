@@ -202,14 +202,33 @@ class JoinRoomForm(BootstrapFormMixin, forms.Form):
 class SprintForm(BootstrapFormMixin, forms.ModelForm):
     class Meta:
         model = Sprint
-        fields = ("name", "goal", "start_date", "end_date", "capacity")
+        fields = (
+            "name",
+            "goal",
+            "start_date",
+            "end_date",
+            "analysis_capacity",
+            "development_capacity",
+            "testing_capacity",
+        )
+        labels = {
+            "analysis_capacity": "Аналитика",
+            "development_capacity": "Разработка",
+            "testing_capacity": "Тестирование",
+        }
         widgets = {
             "name": forms.TextInput(attrs={"placeholder": "Например, Спринт 24"}),
             "goal": forms.TextInput(attrs={"placeholder": "Необязательно"}),
             "start_date": forms.DateInput(attrs={"type": "date"}),
             "end_date": forms.DateInput(attrs={"type": "date"}),
-            "capacity": forms.NumberInput(
-                attrs={"step": "0.01", "min": "0", "placeholder": "Например, 80"}
+            "analysis_capacity": forms.NumberInput(
+                attrs={"step": "0.01", "min": "0", "placeholder": "Например, 24"}
+            ),
+            "development_capacity": forms.NumberInput(
+                attrs={"step": "0.01", "min": "0", "placeholder": "Например, 60"}
+            ),
+            "testing_capacity": forms.NumberInput(
+                attrs={"step": "0.01", "min": "0", "placeholder": "Например, 32"}
             ),
         }
 
@@ -220,3 +239,29 @@ class SprintForm(BootstrapFormMixin, forms.ModelForm):
         if start_date and end_date and end_date < start_date:
             self.add_error("end_date", "Дата завершения не может быть раньше начала.")
         return cleaned
+
+
+class SprintCapacityForm(BootstrapFormMixin, forms.ModelForm):
+    class Meta:
+        model = Sprint
+        fields = (
+            "analysis_capacity",
+            "development_capacity",
+            "testing_capacity",
+        )
+        labels = {
+            "analysis_capacity": "Аналитика",
+            "development_capacity": "Разработка",
+            "testing_capacity": "Тестирование",
+        }
+        widgets = {
+            "analysis_capacity": forms.NumberInput(
+                attrs={"step": "0.01", "min": "0", "placeholder": "Не задана"}
+            ),
+            "development_capacity": forms.NumberInput(
+                attrs={"step": "0.01", "min": "0", "placeholder": "Не задана"}
+            ),
+            "testing_capacity": forms.NumberInput(
+                attrs={"step": "0.01", "min": "0", "placeholder": "Не задана"}
+            ),
+        }

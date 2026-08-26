@@ -19,6 +19,7 @@ from .forms import (
     JoinRoomForm,
     OrganizerRegistrationForm,
     ProjectForm,
+    SprintCapacityForm,
     SprintForm,
     VotingSessionForm,
 )
@@ -119,9 +120,34 @@ def _copy_name(name):
 
 def _warn_if_over_capacity(request, sprint):
     if sprint.is_over_capacity:
+        if sprint.uses_competency_capacities:
+            details = ", ".join(
+                f"{row['label']} +{row['overage_display']}"
+                for row in sprint.competency_capacity_rows
+                if row["is_over_capacity"]
+            )
+            messages.warning(request, f"Превышена ёмкость: {details} points.")
+        else:
+            messages.warning(
+                request,
+                f"Ёмкость спринта превышена на {sprint.capacity_overage_display} points.",
+            )
+
+    if sprint.uses_competency_capacities and sprint.unconfigured_capacity_rows:
+        details = ", ".join(
+            f"{row['label']} — {row['estimate_display']}"
+            for row in sprint.unconfigured_capacity_rows
+        )
         messages.warning(
             request,
-            f"Ёмкость спринта превышена на {sprint.capacity_overage_display} points.",
+            f"Не задана ёмкость для компетенций: {details} points.",
+        )
+
+    if sprint.uses_competency_capacities and sprint.untyped_estimate > 0:
+        messages.warning(
+            request,
+            f"Задачи без типа: {sprint.untyped_estimate_display} points. "
+            "Они не входят в ёмкость компетенций.",
         )
 
 
@@ -1566,12 +1592,25 @@ def sprint_create(request, pk):
         messages.success(request, f"Спринт «{sprint.name}» создан.")
         return redirect(sprint)
     messages.error(request, "Не удалось создать спринт: проверьте параметры.")
-    return redirect(project)
+    return render(
+        request,
+        "poker/project_detail.html",
+        _project_detail_context(project, sprint_form=form),
+        status=400,
+    )
 
 
 @login_required
 def sprint_detail(request, pk):
     sprint = _sprint_for_user(request.user, pk)
+    return render(
+        request,
+        "poker/sprint_detail.html",
+        _sprint_detail_context(sprint),
+    )
+
+
+def _sprint_detail_context(sprint, capacity_form=None):
     sprint_items = sprint.sprint_tasks.select_related("task", "transferred_to")
     planned_items = sprint_items.filter(status=SprintTask.Status.PLANNED)
     available_tasks = (
@@ -1587,17 +1626,43 @@ def sprint_detail(request, pk):
         archived_at__isnull=True,
         status__in=(Sprint.Status.PLANNING, Sprint.Status.ACTIVE),
     ).exclude(pk=sprint.pk)
-    return render(
-        request,
-        "poker/sprint_detail.html",
-        {
-            "sprint": sprint,
-            "sprint_items": sprint_items,
-            "planned_items": planned_items,
-            "available_tasks": available_tasks,
-            "transfer_targets": transfer_targets,
-        },
-    )
+    return {
+        "sprint": sprint,
+        "sprint_items": sprint_items,
+        "planned_items": planned_items,
+        "available_tasks": available_tasks,
+        "transfer_targets": transfer_targets,
+        "capacity_form": capacity_form or SprintCapacityForm(instance=sprint),
+    }
+
+
+@login_required
+@require_POST
+def sprint_capacity_update(request, pk):
+    sprint = _sprint_for_user(request.user, pk)
+    if sprint.archived_at is not None or sprint.status == Sprint.Status.COMPLETED:
+        messages.error(
+            request,
+            "Нельзя менять ёмкость завершённого или архивного спринта.",
+        )
+        return redirect(sprint)
+
+    form = SprintCapacityForm(request.POST, instance=sprint)
+    if not form.is_valid():
+        messages.error(request, "Проверьте значения ёмкости.")
+        return render(
+            request,
+            "poker/sprint_detail.html",
+            _sprint_detail_context(sprint, capacity_form=form),
+            status=400,
+        )
+
+    sprint = form.save(commit=False)
+    sprint.capacity = None
+    sprint.save()
+    messages.success(request, "Ёмкость по компетенциям обновлена.")
+    _warn_if_over_capacity(request, sprint)
+    return redirect(sprint)
 
 
 @login_required
@@ -1728,6 +1793,9 @@ def sprint_copy(request, pk):
             status=Sprint.Status.PLANNING,
             goal=source.goal,
             capacity=source.capacity,
+            analysis_capacity=source.analysis_capacity,
+            development_capacity=source.development_capacity,
+            testing_capacity=source.testing_capacity,
         )
         SprintTask.objects.bulk_create(
             [
@@ -1878,6 +1946,65 @@ def sprint_export(request, pk):
         sheet.column_dimensions[get_column_letter(index)].width = width
     sheet.freeze_panes = "A2"
     sheet.auto_filter.ref = f"A1:G{max(1, len(items) + 1)}"
+
+    capacity_sheet = workbook.create_sheet("Ёмкость")
+    capacity_sheet.append(
+        (
+            "Компетенция",
+            "Запланировано",
+            "Плановая ёмкость",
+            "Осталось",
+            "Превышение",
+        )
+    )
+    for cell in capacity_sheet[1]:
+        cell.font = Font(color="FFFFFF", bold=True)
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="center")
+
+    if sprint.uses_competency_capacities:
+        for row in sprint.competency_capacity_rows:
+            capacity_sheet.append(
+                (
+                    row["label"],
+                    float(row["estimate"]),
+                    float(row["capacity"])
+                    if row["capacity"] is not None
+                    else None,
+                    float(row["remaining"])
+                    if row["remaining"] is not None
+                    else None,
+                    float(row["overage"]),
+                )
+            )
+        capacity_sheet.append(
+            (
+                "Без типа",
+                float(sprint.untyped_estimate),
+                None,
+                None,
+                None,
+            )
+        )
+    else:
+        capacity_sheet.append(
+            (
+                "Общая ёмкость (старая версия)",
+                float(sprint.total_estimate),
+                float(sprint.capacity) if sprint.capacity is not None else None,
+                float(sprint.capacity_remaining)
+                if sprint.capacity_remaining is not None
+                else None,
+                float(sprint.capacity_overage),
+            )
+        )
+
+    for row in capacity_sheet.iter_rows(min_row=2, min_col=2, max_col=5):
+        for cell in row:
+            cell.number_format = "0.00"
+    for index, width in enumerate((32, 20, 22, 16, 16), start=1):
+        capacity_sheet.column_dimensions[get_column_letter(index)].width = width
+    capacity_sheet.freeze_panes = "A2"
 
     response = HttpResponse(
         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"

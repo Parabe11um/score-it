@@ -107,6 +107,27 @@ class OrganizerViewsTests(TestCase):
         self.assertContains(response, "Минимум голосов")
         self.assertContains(response, "checked")
 
+    def test_sprint_creation_accepts_competency_capacities(self):
+        self.client.force_login(self.user)
+        response = self.client.post(
+            reverse("poker:sprint_create", args=[self.project.pk]),
+            {
+                "name": "Спринт по компетенциям",
+                "goal": "Проверить лимиты команды",
+                "analysis_capacity": "24",
+                "development_capacity": "60.5",
+                "testing_capacity": "32",
+            },
+        )
+
+        sprint = Sprint.objects.get(name="Спринт по компетенциям")
+        self.assertRedirects(response, sprint.get_absolute_url())
+        self.assertEqual(sprint.analysis_capacity, Decimal("24"))
+        self.assertEqual(sprint.development_capacity, Decimal("60.5"))
+        self.assertEqual(sprint.testing_capacity, Decimal("32"))
+        self.assertIsNone(sprint.capacity)
+        self.assertEqual(sprint.capacity_total, Decimal("116.5"))
+
     def test_session_creation_adds_selected_tasks_to_ordered_queue(self):
         first = Task.objects.create(
             project=self.project, number="ABS-1", title="Первая"
@@ -279,6 +300,14 @@ class OrganizerViewsTests(TestCase):
             ),
             self.client.post(reverse("poker:session_delete", args=[voting_session.pk])),
             self.client.post(reverse("poker:sprint_delete", args=[sprint.pk])),
+            self.client.post(
+                reverse("poker:sprint_capacity_update", args=[sprint.pk]),
+                {
+                    "analysis_capacity": "8",
+                    "development_capacity": "20",
+                    "testing_capacity": "12",
+                },
+            ),
         )
         self.assertTrue(all(response.status_code == 404 for response in responses))
         self.assertTrue(Task.objects.filter(pk=task.pk).exists())
@@ -1182,11 +1211,117 @@ class SprintTests(TestCase):
         self.assertContains(response, "Превышение: 4.67 points")
         self.assertContains(response, "План превышает заданную ёмкость")
 
+    def test_competency_capacities_track_each_team_limit_separately(self):
+        sprint = Sprint.objects.create(
+            project=self.project,
+            name="Компетенческий спринт",
+            analysis_capacity=10,
+            development_capacity=10,
+            testing_capacity=6,
+        )
+        task_definitions = (
+            ("A-1", Task.Competency.ANALYSIS, 8),
+            ("D-1", Task.Competency.DEVELOPMENT, 12),
+            ("T-1", Task.Competency.TESTING, 4),
+            ("N-1", Task.Competency.NONE, 2),
+        )
+        for position, (number, competency, estimate) in enumerate(
+            task_definitions, start=1
+        ):
+            task = Task.objects.create(
+                project=self.project,
+                number=number,
+                title=f"Задача {number}",
+                competency=competency,
+                status=Task.Status.ESTIMATED,
+                estimate_sum=estimate,
+                estimate_count=1,
+            )
+            SprintTask.objects.create(
+                sprint=sprint,
+                task=task,
+                position=position,
+            )
+
+        sprint = Sprint.objects.get(pk=sprint.pk)
+        rows = {row["key"]: row for row in sprint.competency_capacity_rows}
+        self.assertEqual(sprint.total_estimate, Decimal("26"))
+        self.assertEqual(sprint.capacity_total, Decimal("26"))
+        self.assertEqual(sprint.untyped_estimate, Decimal("2"))
+        self.assertEqual(
+            rows[Task.Competency.ANALYSIS]["remaining"], Decimal("2")
+        )
+        self.assertEqual(
+            rows[Task.Competency.DEVELOPMENT]["overage"], Decimal("2")
+        )
+        self.assertEqual(
+            rows[Task.Competency.TESTING]["remaining"], Decimal("2")
+        )
+        self.assertTrue(sprint.is_over_capacity)
+        self.assertEqual(sprint.over_capacity_labels, ["Разработка"])
+
+        response = self.client.get(sprint.get_absolute_url())
+        self.assertContains(response, "Аналитика")
+        self.assertContains(response, "8 из 10 points")
+        self.assertContains(response, "12 из 10 points")
+        self.assertContains(response, "Превышение: 2 points")
+        self.assertContains(response, "Без типа: 2 points")
+
+        export = self.client.get(reverse("poker:sprint_export", args=[sprint.pk]))
+        workbook = load_workbook(BytesIO(export.content), data_only=False)
+        capacity_sheet = workbook["Ёмкость"]
+        self.assertEqual(capacity_sheet["A2"].value, "Аналитика")
+        self.assertEqual(capacity_sheet["B2"].value, 8)
+        self.assertEqual(capacity_sheet["C2"].value, 10)
+        self.assertEqual(capacity_sheet["A5"].value, "Без типа")
+        self.assertEqual(capacity_sheet["B5"].value, 2)
+
+    def test_capacity_update_converts_legacy_total_and_validates_values(self):
+        response = self.client.post(
+            reverse("poker:sprint_capacity_update", args=[self.sprint.pk]),
+            {
+                "analysis_capacity": "8",
+                "development_capacity": "20",
+                "testing_capacity": "12",
+            },
+        )
+
+        self.assertRedirects(response, self.sprint.get_absolute_url())
+        self.sprint.refresh_from_db()
+        self.assertIsNone(self.sprint.capacity)
+        self.assertEqual(self.sprint.analysis_capacity, Decimal("8"))
+        self.assertEqual(self.sprint.development_capacity, Decimal("20"))
+        self.assertEqual(self.sprint.testing_capacity, Decimal("12"))
+
+        invalid = self.client.post(
+            reverse("poker:sprint_capacity_update", args=[self.sprint.pk]),
+            {
+                "analysis_capacity": "-1",
+                "development_capacity": "20",
+                "testing_capacity": "12",
+            },
+        )
+        self.assertEqual(invalid.status_code, 400)
+        self.sprint.refresh_from_db()
+        self.assertEqual(self.sprint.analysis_capacity, Decimal("8"))
+
     def test_sprint_copy_keeps_planned_tasks_and_resets_dates(self):
         self.sprint.start_date = timezone.localdate()
         self.sprint.end_date = timezone.localdate() + timedelta(days=14)
         self.sprint.status = Sprint.Status.ACTIVE
-        self.sprint.save(update_fields=("start_date", "end_date", "status"))
+        self.sprint.analysis_capacity = 8
+        self.sprint.development_capacity = 20
+        self.sprint.testing_capacity = 12
+        self.sprint.save(
+            update_fields=(
+                "start_date",
+                "end_date",
+                "status",
+                "analysis_capacity",
+                "development_capacity",
+                "testing_capacity",
+            )
+        )
 
         response = self.client.post(
             reverse("poker:sprint_copy", args=[self.sprint.pk])
@@ -1198,6 +1333,11 @@ class SprintTests(TestCase):
         self.assertIsNone(copied.start_date)
         self.assertIsNone(copied.end_date)
         self.assertEqual(copied.capacity, self.sprint.capacity)
+        self.assertEqual(copied.analysis_capacity, self.sprint.analysis_capacity)
+        self.assertEqual(
+            copied.development_capacity, self.sprint.development_capacity
+        )
+        self.assertEqual(copied.testing_capacity, self.sprint.testing_capacity)
         self.assertEqual(
             list(
                 copied.sprint_tasks.values_list("task_id", "status", "position")
@@ -1255,3 +1395,6 @@ class SprintTests(TestCase):
         self.assertEqual(sheet["E2"].value, 14)
         self.assertEqual(sheet["F2"].value, 3)
         self.assertEqual(sheet["G2"].value, "Аналитика")
+        capacity_sheet = workbook["Ёмкость"]
+        self.assertEqual(capacity_sheet["A2"].value, "Общая ёмкость (старая версия)")
+        self.assertEqual(capacity_sheet["C2"].value, 20)

@@ -195,6 +195,9 @@ class SprintAdmin(admin.ModelAdmin):
         "start_date",
         "end_date",
         "capacity",
+        "analysis_capacity",
+        "development_capacity",
+        "testing_capacity",
         "archived_at",
     )
     list_filter = ("status", "archived_at")

@@ -92,7 +92,7 @@
         </form>
     </details>
 
-    <details class="card action-card">
+    <details class="card action-card" {% if sprint_form.errors %}open{% endif %}>
         <summary>
             <span class="action-card__number">3</span>
             <span><strong>Создать спринт</strong><small>Собрать оценённые задачи</small></span>
@@ -100,10 +100,25 @@
         <form method="post" action="{% url 'poker:sprint_create' project.pk %}" class="stack-form details-form">
             {% csrf_token %}
             {% for field in sprint_form %}
-                <div class="field field--compact">
-                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}
-                </div>
+                {% if field.name != "analysis_capacity" and field.name != "development_capacity" and field.name != "testing_capacity" %}
+                    <div class="field field--compact">
+                        <label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}
+                        {% for error in field.errors %}<div class="form-error">{{ error }}</div>{% endfor %}
+                    </div>
+                {% endif %}
             {% endfor %}
+            <fieldset class="capacity-inputs">
+                <legend>Ёмкость по компетенциям</legend>
+                <p>Укажите значения в тех же единицах, что и оценки: часы или story points.</p>
+                {% for field in sprint_form %}
+                    {% if field.name == "analysis_capacity" or field.name == "development_capacity" or field.name == "testing_capacity" %}
+                        <div class="capacity-input capacity-input--{{ field.name }}">
+                            <label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}
+                            {% for error in field.errors %}<div class="form-error">{{ error }}</div>{% endfor %}
+                        </div>
+                    {% endif %}
+                {% endfor %}
+            </fieldset>
             <button class="button button--primary" type="submit">Создать спринт</button>
         </form>
     </details>

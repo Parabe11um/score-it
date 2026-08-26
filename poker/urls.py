@@ -93,6 +93,11 @@ urlpatterns = [
         views.sprint_set_status,
         name="sprint_set_status",
     ),
+    path(
+        "sprints/<int:pk>/capacity/",
+        views.sprint_capacity_update,
+        name="sprint_capacity_update",
+    ),
     path("sprints/<int:pk>/archive/", views.sprint_archive, name="sprint_archive"),
     path("sprints/<int:pk>/restore/", views.sprint_restore, name="sprint_restore"),
     path("sprints/<int:pk>/delete/", views.sprint_delete, name="sprint_delete"),

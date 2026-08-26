@@ -42,13 +42,60 @@
     </section>
 {% endif %}
 
+{% if not sprint.archived_at and sprint.status != "completed" %}
+<details class="card capacity-editor" {% if capacity_form.errors %}open{% endif %}>
+    <summary class="section-heading">
+        <div><h2>Настроить ёмкость</h2><p>Лимиты аналитики, разработки и тестирования можно менять в течение планирования.</p></div>
+        <span class="pill">3</span>
+    </summary>
+    <form method="post" action="{% url 'poker:sprint_capacity_update' sprint.pk %}" class="capacity-editor__form">
+        {% csrf_token %}
+        <div class="capacity-inputs capacity-inputs--horizontal">
+            {% for field in capacity_form %}
+                <div class="capacity-input capacity-input--{{ field.name }}">
+                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}
+                    {% for error in field.errors %}<div class="form-error">{{ error }}</div>{% endfor %}
+                </div>
+            {% endfor %}
+        </div>
+        <button class="button button--primary" type="submit">Сохранить ёмкость</button>
+    </form>
+</details>
+{% endif %}
+
 <div class="sprint-metrics">
     <div class="metric-card"><span>Задач</span><strong>{{ sprint.active_task_count }}</strong></div>
     <div class="metric-card"><span>Запланировано</span><strong>{{ sprint.total_estimate_display }}</strong><small>points</small></div>
-    <div class="metric-card"><span>Ёмкость</span><strong>{{ sprint.capacity|default:"—" }}</strong><small>{% if sprint.capacity %}points{% endif %}</small></div>
+    <div class="metric-card"><span>Ёмкость</span><strong>{{ sprint.capacity_total_display }}</strong><small>{% if sprint.has_capacity %}points{% endif %}</small></div>
 </div>
 
-{% if sprint.capacity != None %}
+{% if sprint.uses_competency_capacities %}
+<section class="capacity-breakdown">
+    {% for row in sprint.competency_capacity_rows %}
+        <article class="card capacity-panel capacity-panel--competency capacity-panel--{{ row.css_class }} {% if row.is_over_capacity %}capacity-panel--over{% endif %} {% if not row.is_configured %}capacity-panel--unset{% endif %}">
+            <div class="capacity-panel__heading">
+                <div>
+                    <span class="competency-badge competency-badge--{{ row.css_class }}">{{ row.label }}</span>
+                    <strong>{{ row.estimate_display }}{% if row.is_configured %} из {{ row.capacity_display }}{% endif %} points</strong>
+                    <small>{% if row.is_configured %}Использование ёмкости компетенции{% else %}Плановая ёмкость не задана{% endif %}</small>
+                </div>
+                {% if row.is_over_capacity %}
+                    <span>Превышение: {{ row.overage_display }} points</span>
+                {% elif row.is_configured %}
+                    <span>Осталось: {{ row.remaining_display }} points</span>
+                {% else %}
+                    <span>Запланировано: {{ row.estimate_display }}</span>
+                {% endif %}
+            </div>
+            {% if row.is_configured %}<div class="capacity-track"><span style="width: {{ row.usage_percent }}%"></span></div>{% endif %}
+            {% if row.is_over_capacity %}<p>План по компетенции превышен. Уберите или перенесите часть задач.</p>{% endif %}
+        </article>
+    {% endfor %}
+</section>
+{% if sprint.untyped_estimate > 0 %}
+    <div class="capacity-untyped-warning"><strong>Без типа: {{ sprint.untyped_estimate_display }} points.</strong> Эти задачи не входят ни в одну компетенческую ёмкость. Назначьте им тип в бэклоге.</div>
+{% endif %}
+{% elif sprint.capacity != None %}
 <section class="card capacity-panel {% if sprint.is_over_capacity %}capacity-panel--over{% endif %}">
     <div class="capacity-panel__heading">
         <div><strong>{{ sprint.total_estimate_display }} из {{ sprint.capacity }} points</strong><small>Использование ёмкости спринта</small></div>
@@ -60,6 +107,7 @@
     </div>
     <div class="capacity-track"><span style="width: {{ sprint.capacity_usage_percent }}%"></span></div>
     {% if sprint.is_over_capacity %}<p>План превышает заданную ёмкость. Уберите или перенесите часть задач.</p>{% endif %}
+    <p>Это общая ёмкость из предыдущей версии. Сохраните значения выше, чтобы перейти на планирование по компетенциям.</p>
 </section>
 {% endif %}
 

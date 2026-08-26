@@ -484,6 +484,30 @@ class Sprint(models.Model):
     capacity = models.DecimalField(
         "Плановая ёмкость", max_digits=8, decimal_places=2, null=True, blank=True
     )
+    analysis_capacity = models.DecimalField(
+        "Ёмкость аналитики",
+        max_digits=8,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        validators=(MinValueValidator(Decimal("0")),),
+    )
+    development_capacity = models.DecimalField(
+        "Ёмкость разработки",
+        max_digits=8,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        validators=(MinValueValidator(Decimal("0")),),
+    )
+    testing_capacity = models.DecimalField(
+        "Ёмкость тестирования",
+        max_digits=8,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        validators=(MinValueValidator(Decimal("0")),),
+    )
     tasks = models.ManyToManyField(
         Task,
         through="SprintTask",
@@ -519,18 +543,161 @@ class Sprint(models.Model):
         rounded = self.total_estimate.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         return format(rounded.normalize(), "f")
 
+    @staticmethod
+    def _display_decimal(value):
+        if value is None:
+            return "—"
+        return format(
+            value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP).normalize(),
+            "f",
+        )
+
+    @cached_property
+    def estimates_by_competency(self):
+        estimates = {
+            Task.Competency.ANALYSIS: Decimal("0"),
+            Task.Competency.DEVELOPMENT: Decimal("0"),
+            Task.Competency.TESTING: Decimal("0"),
+            Task.Competency.NONE: Decimal("0"),
+        }
+        for item in self.sprint_tasks.select_related("task").filter(
+            status=SprintTask.Status.PLANNED
+        ):
+            if item.task.estimate is not None:
+                estimates[item.task.competency] += item.task.estimate
+        return estimates
+
+    @property
+    def uses_competency_capacities(self):
+        return any(
+            value is not None
+            for value in (
+                self.analysis_capacity,
+                self.development_capacity,
+                self.testing_capacity,
+            )
+        )
+
+    @cached_property
+    def competency_capacity_rows(self):
+        definitions = (
+            (
+                Task.Competency.ANALYSIS,
+                "Аналитика",
+                "analysis",
+                self.analysis_capacity,
+            ),
+            (
+                Task.Competency.DEVELOPMENT,
+                "Разработка",
+                "development",
+                self.development_capacity,
+            ),
+            (
+                Task.Competency.TESTING,
+                "Тестирование",
+                "testing",
+                self.testing_capacity,
+            ),
+        )
+        rows = []
+        for competency, label, css_class, capacity in definitions:
+            estimate = self.estimates_by_competency[competency]
+            remaining = (
+                max(capacity - estimate, Decimal("0"))
+                if capacity is not None
+                else None
+            )
+            overage = (
+                max(estimate - capacity, Decimal("0"))
+                if capacity is not None
+                else Decimal("0")
+            )
+            if capacity is None:
+                usage_percent = 0
+            elif capacity <= 0:
+                usage_percent = 100 if estimate > 0 else 0
+            else:
+                usage = (estimate / capacity) * Decimal("100")
+                usage_percent = min(
+                    int(usage.quantize(Decimal("1"), rounding=ROUND_HALF_UP)),
+                    100,
+                )
+            rows.append(
+                {
+                    "key": competency,
+                    "label": label,
+                    "css_class": css_class,
+                    "estimate": estimate,
+                    "estimate_display": self._display_decimal(estimate),
+                    "capacity": capacity,
+                    "capacity_display": self._display_decimal(capacity),
+                    "remaining": remaining,
+                    "remaining_display": self._display_decimal(remaining),
+                    "overage": overage,
+                    "overage_display": self._display_decimal(overage),
+                    "usage_percent": usage_percent,
+                    "is_configured": capacity is not None,
+                    "is_over_capacity": capacity is not None and estimate > capacity,
+                }
+            )
+        return rows
+
+    @property
+    def untyped_estimate(self):
+        return self.estimates_by_competency[Task.Competency.NONE]
+
+    @property
+    def untyped_estimate_display(self):
+        return self._display_decimal(self.untyped_estimate)
+
+    @property
+    def capacity_total(self):
+        if self.uses_competency_capacities:
+            return sum(
+                (
+                    row["capacity"]
+                    for row in self.competency_capacity_rows
+                    if row["capacity"] is not None
+                ),
+                Decimal("0"),
+            )
+        return self.capacity
+
+    @property
+    def capacity_total_display(self):
+        return self._display_decimal(self.capacity_total)
+
+    @property
+    def has_capacity(self):
+        return self.capacity_total is not None
+
     @property
     def active_task_count(self):
         return self.sprint_tasks.filter(status=SprintTask.Status.PLANNED).count()
 
     @property
     def capacity_remaining(self):
+        if self.uses_competency_capacities:
+            return sum(
+                (
+                    row["remaining"]
+                    for row in self.competency_capacity_rows
+                    if row["remaining"] is not None
+                ),
+                Decimal("0"),
+            )
         if self.capacity is None:
             return None
         return max(self.capacity - self.total_estimate, Decimal("0"))
 
     @property
     def capacity_overage(self):
+        if self.uses_competency_capacities:
+            return sum(
+                (row["overage"] for row in self.competency_capacity_rows),
+                Decimal("0"),
+            )
         if self.capacity is None:
             return Decimal("0")
         return max(self.total_estimate - self.capacity, Decimal("0"))
@@ -557,6 +724,25 @@ class Sprint(models.Model):
 
     @property
     def capacity_usage_percent(self):
+        if self.uses_competency_capacities:
+            configured = [
+                row
+                for row in self.competency_capacity_rows
+                if row["is_configured"]
+            ]
+            total_capacity = sum(
+                (row["capacity"] for row in configured), Decimal("0")
+            )
+            total_estimate = sum(
+                (row["estimate"] for row in configured), Decimal("0")
+            )
+            if total_capacity <= 0:
+                return 100 if total_estimate > 0 else 0
+            percent = (total_estimate / total_capacity) * Decimal("100")
+            return min(
+                int(percent.quantize(Decimal("1"), rounding=ROUND_HALF_UP)),
+                100,
+            )
         if self.capacity is None:
             return 0
         if self.capacity <= 0:
@@ -566,7 +752,32 @@ class Sprint(models.Model):
 
     @property
     def is_over_capacity(self):
+        if self.uses_competency_capacities:
+            return any(
+                row["is_over_capacity"]
+                for row in self.competency_capacity_rows
+            )
         return self.capacity is not None and self.total_estimate > self.capacity
+
+    @property
+    def over_capacity_labels(self):
+        if not self.uses_competency_capacities:
+            return []
+        return [
+            row["label"]
+            for row in self.competency_capacity_rows
+            if row["is_over_capacity"]
+        ]
+
+    @property
+    def unconfigured_capacity_rows(self):
+        if not self.uses_competency_capacities:
+            return []
+        return [
+            row
+            for row in self.competency_capacity_rows
+            if not row["is_configured"] and row["estimate"] > 0
+        ]
 
 
 class SprintTask(models.Model):
