@@ -452,6 +452,23 @@ class VotingFlowTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(Vote.objects.count(), 0)
 
+    def test_vote_accepts_one_hour_estimate(self):
+        participant = self.join_participant("Анна")
+        self.organizer.post(
+            reverse(
+                "poker:session_start_task",
+                args=[self.voting_session.pk, self.task.pk],
+            )
+        )
+
+        response = participant.post(
+            reverse("poker:room_vote", args=[self.voting_session.public_token]),
+            {"value": 1},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(Vote.objects.get().value, 1)
+
     def test_participant_room_explains_estimation_scale(self):
         participant = self.join_participant("Анна")
 
@@ -461,17 +478,18 @@ class VotingFlowTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Как оценивать?")
-        self.assertContains(response, "Оценивайте весь путь задачи")
+        self.assertContains(response, "ближайшее значение в часах")
         self.assertContains(response, "Не выбирайте 0")
         for label in (
             "Нет работы",
-            "Минимальная",
-            "Небольшая",
-            "Обычная",
-            "Средняя",
-            "Большая",
-            "Разбить",
-            "Эпик",
+            "1 час",
+            "2 часа",
+            "Полдня",
+            "1 рабочий день",
+            "1,5 рабочих дня",
+            "2,5 рабочих дня",
+            "4 рабочих дня",
+            "6,5 рабочих дней",
         ):
             self.assertContains(response, label)
 
@@ -1208,7 +1226,7 @@ class SprintTests(TestCase):
         self.assertEqual(sprint.capacity_overage_display, "4.67")
         self.assertEqual(sprint.capacity_remaining, Decimal("0"))
         response = self.client.get(sprint.get_absolute_url())
-        self.assertContains(response, "Превышение: 4.67 points")
+        self.assertContains(response, "Превышение: 4.67 ч")
         self.assertContains(response, "План превышает заданную ёмкость")
 
     def test_competency_capacities_track_each_team_limit_separately(self):
@@ -1262,14 +1280,16 @@ class SprintTests(TestCase):
 
         response = self.client.get(sprint.get_absolute_url())
         self.assertContains(response, "Аналитика")
-        self.assertContains(response, "8 из 10 points")
-        self.assertContains(response, "12 из 10 points")
-        self.assertContains(response, "Превышение: 2 points")
-        self.assertContains(response, "Без типа: 2 points")
+        self.assertContains(response, "8 из 10 ч")
+        self.assertContains(response, "12 из 10 ч")
+        self.assertContains(response, "Превышение: 2 ч")
+        self.assertContains(response, "Без типа: 2 ч")
 
         export = self.client.get(reverse("poker:sprint_export", args=[sprint.pk]))
         workbook = load_workbook(BytesIO(export.content), data_only=False)
         capacity_sheet = workbook["Ёмкость"]
+        self.assertEqual(capacity_sheet["B1"].value, "Запланировано, часы")
+        self.assertEqual(capacity_sheet["C1"].value, "Плановая ёмкость, часы")
         self.assertEqual(capacity_sheet["A2"].value, "Аналитика")
         self.assertEqual(capacity_sheet["B2"].value, 8)
         self.assertEqual(capacity_sheet["C2"].value, 10)
@@ -1390,6 +1410,8 @@ class SprintTests(TestCase):
 
         workbook = load_workbook(BytesIO(response.content), data_only=False)
         sheet = workbook["Задачи спринта"]
+        self.assertEqual(sheet["D1"].value, "Средняя оценка, часы")
+        self.assertEqual(sheet["E1"].value, "Сумма оценок, часы")
         self.assertEqual(sheet["B2"].value, "ABS-10")
         self.assertEqual(sheet["D2"].value, "=E2/F2")
         self.assertEqual(sheet["E2"].value, 14)

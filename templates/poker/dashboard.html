@@ -33,7 +33,7 @@
         <div class="section-heading"><div><h2>Активные спринты</h2><p>Текущий план и ёмкость.</p></div><span class="pill">{{ active_sprints|length }}</span></div>
         <div class="overview-list">
             {% for sprint in active_sprints %}
-                <a class="overview-item" href="{{ sprint.get_absolute_url }}"><div><strong>{{ sprint.name }}</strong><small>{{ sprint.project.name }} · {{ sprint.active_task_count }} задач</small></div><span>{% if sprint.has_capacity %}{{ sprint.total_estimate_display }} из {{ sprint.capacity_total_display }}{% else %}{{ sprint.total_estimate_display }} points{% endif %}</span></a>
+                <a class="overview-item" href="{{ sprint.get_absolute_url }}"><div><strong>{{ sprint.name }}</strong><small>{{ sprint.project.name }} · {{ sprint.active_task_count }} задач</small></div><span>{% if sprint.has_capacity %}{{ sprint.total_estimate_display }} из {{ sprint.capacity_total_display }} ч{% else %}{{ sprint.total_estimate_display }} ч{% endif %}</span></a>
             {% empty %}<div class="compact-empty">Активных спринтов нет.</div>{% endfor %}
         </div>
     </section>

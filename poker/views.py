@@ -126,11 +126,11 @@ def _warn_if_over_capacity(request, sprint):
                 for row in sprint.competency_capacity_rows
                 if row["is_over_capacity"]
             )
-            messages.warning(request, f"Превышена ёмкость: {details} points.")
+            messages.warning(request, f"Превышена ёмкость: {details} ч.")
         else:
             messages.warning(
                 request,
-                f"Ёмкость спринта превышена на {sprint.capacity_overage_display} points.",
+                f"Ёмкость спринта превышена на {sprint.capacity_overage_display} ч.",
             )
 
     if sprint.uses_competency_capacities and sprint.unconfigured_capacity_rows:
@@ -140,13 +140,13 @@ def _warn_if_over_capacity(request, sprint):
         )
         messages.warning(
             request,
-            f"Не задана ёмкость для компетенций: {details} points.",
+            f"Не задана ёмкость для компетенций: {details} ч.",
         )
 
     if sprint.uses_competency_capacities and sprint.untyped_estimate > 0:
         messages.warning(
             request,
-            f"Задачи без типа: {sprint.untyped_estimate_display} points. "
+            f"Задачи без типа: {sprint.untyped_estimate_display} ч. "
             "Они не входят в ёмкость компетенций.",
         )
 
@@ -1088,7 +1088,7 @@ def session_accept(request, pk):
     messages.success(
         request,
         f"Оценка задачи {voting_round.task.number} сохранена: "
-        f"{voting_round.task.estimate_display}."
+        f"{voting_round.task.estimate_display} ч."
         + (
             f" Следующая задача для проверки: {next_item.task.number}."
             if next_item
@@ -1905,8 +1905,8 @@ def sprint_export(request, pk):
         "№",
         "Номер задачи",
         "Название",
-        "Средняя оценка",
-        "Сумма голосов",
+        "Средняя оценка, часы",
+        "Сумма оценок, часы",
         "Количество голосов",
         "Тип задачи",
     )
@@ -1951,10 +1951,10 @@ def sprint_export(request, pk):
     capacity_sheet.append(
         (
             "Компетенция",
-            "Запланировано",
-            "Плановая ёмкость",
-            "Осталось",
-            "Превышение",
+            "Запланировано, часы",
+            "Плановая ёмкость, часы",
+            "Осталось, часы",
+            "Превышение, часы",
         )
     )
     for cell in capacity_sheet[1]:

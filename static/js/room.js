@@ -76,7 +76,7 @@
             const name = document.createElement("span");
             name.textContent = vote.name;
             const value = document.createElement("strong");
-            value.textContent = vote.value;
+            value.textContent = `${vote.value} ч`;
             row.append(name, value);
             votesList.append(row);
         });
@@ -169,7 +169,7 @@
         progress.textContent = `${queueLabel}голосов ${state.round.voted_count} из минимум ${state.round.minimum_participants}`;
         selectCard(state.round.my_vote);
         feedback.textContent = state.round.has_voted
-            ? `Ваш выбор: ${state.round.my_vote}. Можно перейти дальше или изменить голос.`
+            ? `Ваш выбор: ${state.round.my_vote} ч. Можно перейти дальше или изменить голос.`
             : "Можно изменить выбор до раскрытия.";
         showOnly(votingState);
     }
@@ -209,7 +209,7 @@
             });
             if (!response.ok) throw new Error("vote request failed");
             selectCard(value);
-            feedback.textContent = `Ваш выбор: ${value}. Голос сохранён — можно перейти дальше.`;
+            feedback.textContent = `Ваш выбор: ${value} ч. Голос сохранён — можно перейти дальше.`;
             await refresh();
         } catch (_error) {
             feedback.textContent = "Не удалось сохранить голос. Попробуйте ещё раз.";

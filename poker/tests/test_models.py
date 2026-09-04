@@ -1,7 +1,15 @@
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 
-from poker.models import Project, Task, Vote, VotingRound, VotingSession, Participant
+from poker.models import (
+    ESTIMATION_VALUES,
+    Participant,
+    Project,
+    Task,
+    Vote,
+    VotingRound,
+    VotingSession,
+)
 
 
 class TaskEstimateTests(TestCase):
@@ -35,3 +43,5 @@ class TaskEstimateTests(TestCase):
         self.assertEqual(self.task.estimate_display, "4.67")
         self.assertEqual(self.task.status, Task.Status.ESTIMATED)
 
+    def test_hour_estimation_scale_has_exact_values(self):
+        self.assertEqual(ESTIMATION_VALUES, (0, 1, 2, 4, 8, 12, 20, 32, 52))

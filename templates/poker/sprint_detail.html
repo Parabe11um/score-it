@@ -45,7 +45,7 @@
 {% if not sprint.archived_at and sprint.status != "completed" %}
 <details class="card capacity-editor" {% if capacity_form.errors %}open{% endif %}>
     <summary class="section-heading">
-        <div><h2>Настроить ёмкость</h2><p>Лимиты аналитики, разработки и тестирования можно менять в течение планирования.</p></div>
+        <div><h2>Настроить ёмкость в часах</h2><p>Доступные часы аналитики, разработки и тестирования можно менять в течение планирования.</p></div>
         <span class="pill">3</span>
     </summary>
     <form method="post" action="{% url 'poker:sprint_capacity_update' sprint.pk %}" class="capacity-editor__form">
@@ -65,8 +65,8 @@
 
 <div class="sprint-metrics">
     <div class="metric-card"><span>Задач</span><strong>{{ sprint.active_task_count }}</strong></div>
-    <div class="metric-card"><span>Запланировано</span><strong>{{ sprint.total_estimate_display }}</strong><small>points</small></div>
-    <div class="metric-card"><span>Ёмкость</span><strong>{{ sprint.capacity_total_display }}</strong><small>{% if sprint.has_capacity %}points{% endif %}</small></div>
+    <div class="metric-card"><span>Запланировано</span><strong>{{ sprint.total_estimate_display }}</strong><small>ч</small></div>
+    <div class="metric-card"><span>Ёмкость</span><strong>{{ sprint.capacity_total_display }}</strong><small>{% if sprint.has_capacity %}ч{% endif %}</small></div>
 </div>
 
 {% if sprint.uses_competency_capacities %}
@@ -76,15 +76,15 @@
             <div class="capacity-panel__heading">
                 <div>
                     <span class="competency-badge competency-badge--{{ row.css_class }}">{{ row.label }}</span>
-                    <strong>{{ row.estimate_display }}{% if row.is_configured %} из {{ row.capacity_display }}{% endif %} points</strong>
+                    <strong>{{ row.estimate_display }}{% if row.is_configured %} из {{ row.capacity_display }}{% endif %} ч</strong>
                     <small>{% if row.is_configured %}Использование ёмкости компетенции{% else %}Плановая ёмкость не задана{% endif %}</small>
                 </div>
                 {% if row.is_over_capacity %}
-                    <span>Превышение: {{ row.overage_display }} points</span>
+                    <span>Превышение: {{ row.overage_display }} ч</span>
                 {% elif row.is_configured %}
-                    <span>Осталось: {{ row.remaining_display }} points</span>
+                    <span>Осталось: {{ row.remaining_display }} ч</span>
                 {% else %}
-                    <span>Запланировано: {{ row.estimate_display }}</span>
+                    <span>Запланировано: {{ row.estimate_display }} ч</span>
                 {% endif %}
             </div>
             {% if row.is_configured %}<div class="capacity-track"><span style="width: {{ row.usage_percent }}%"></span></div>{% endif %}
@@ -93,16 +93,16 @@
     {% endfor %}
 </section>
 {% if sprint.untyped_estimate > 0 %}
-    <div class="capacity-untyped-warning"><strong>Без типа: {{ sprint.untyped_estimate_display }} points.</strong> Эти задачи не входят ни в одну компетенческую ёмкость. Назначьте им тип в бэклоге.</div>
+    <div class="capacity-untyped-warning"><strong>Без типа: {{ sprint.untyped_estimate_display }} ч.</strong> Эти задачи не входят ни в одну компетенческую ёмкость. Назначьте им тип в бэклоге.</div>
 {% endif %}
 {% elif sprint.capacity != None %}
 <section class="card capacity-panel {% if sprint.is_over_capacity %}capacity-panel--over{% endif %}">
     <div class="capacity-panel__heading">
-        <div><strong>{{ sprint.total_estimate_display }} из {{ sprint.capacity }} points</strong><small>Использование ёмкости спринта</small></div>
+        <div><strong>{{ sprint.total_estimate_display }} из {{ sprint.capacity }} ч</strong><small>Использование ёмкости спринта</small></div>
         {% if sprint.is_over_capacity %}
-            <span>Превышение: {{ sprint.capacity_overage_display }} points</span>
+            <span>Превышение: {{ sprint.capacity_overage_display }} ч</span>
         {% else %}
-            <span>Осталось: {{ sprint.capacity_remaining_display }} points</span>
+            <span>Осталось: {{ sprint.capacity_remaining_display }} ч</span>
         {% endif %}
     </div>
     <div class="capacity-track"><span style="width: {{ sprint.capacity_usage_percent }}%"></span></div>
@@ -115,7 +115,7 @@
     <div class="section-heading"><div><h2>Состав спринта</h2><p>Сумма считается из точных средних оценок.</p></div></div>
     <div class="table-wrap">
         <table>
-            <thead><tr><th>№</th><th>Задача</th><th>Статус</th><th class="align-right">Оценка</th><th></th></tr></thead>
+            <thead><tr><th>№</th><th>Задача</th><th>Статус</th><th class="align-right">Оценка, ч</th><th></th></tr></thead>
             <tbody>
             {% for item in sprint_items %}
                 <tr class="{% if item.status == 'transferred' %}sprint-task--transferred{% endif %}"><td>{{ forloop.counter }}</td><td><span class="task-number">{{ item.task.number }}</span>{% if item.task.competency %} <span class="competency-badge competency-badge--{{ item.task.competency }}">{{ item.task.get_competency_display }}</span>{% endif %}<div class="task-title-secondary">{{ item.task.title }}</div></td><td>{% if item.status == "transferred" %}<span class="badge">Перенесена{% if item.transferred_to %} → {{ item.transferred_to.name }}{% endif %}</span>{% else %}<span class="badge badge--active">Запланирована</span>{% endif %}</td><td class="align-right"><strong class="estimate-value">{{ item.task.estimate_display }}</strong></td><td class="align-right">{% if item.status == "planned" and not sprint.archived_at and sprint.status != "completed" %}<form method="post" action="{% url 'poker:sprint_remove_task' sprint.pk item.task.pk %}" onsubmit="return confirm('Убрать задачу {{ item.task.number|escapejs }} из спринта?');">{% csrf_token %}<button class="icon-button" type="submit" title="Убрать из спринта">×</button></form>{% endif %}</td></tr>
@@ -131,7 +131,7 @@
     <form method="post" action="{% url 'poker:sprint_transfer_tasks' sprint.pk %}" class="stack-form">
         {% csrf_token %}
         <div class="field"><label for="target-sprint">Новый спринт</label><select id="target-sprint" name="target_sprint" required>{% for target in transfer_targets %}<option value="{{ target.pk }}">{{ target.name }} · {{ target.get_status_display }}</option>{% endfor %}</select></div>
-        <div class="check-list">{% for item in planned_items %}<label class="check-item"><input type="checkbox" name="task_ids" value="{{ item.task_id }}"><span><strong>{{ item.task.number }}{% if item.task.competency %} · {{ item.task.get_competency_display }}{% endif %}</strong><small>{{ item.task.title }}</small></span><b>{{ item.task.estimate_display }}</b></label>{% endfor %}</div>
+        <div class="check-list">{% for item in planned_items %}<label class="check-item"><input type="checkbox" name="task_ids" value="{{ item.task_id }}"><span><strong>{{ item.task.number }}{% if item.task.competency %} · {{ item.task.get_competency_display }}{% endif %}</strong><small>{{ item.task.title }}</small></span><b>{{ item.task.estimate_display }} ч</b></label>{% endfor %}</div>
         <div class="section-footer"><button class="button button--primary" type="submit">Перенести выбранные</button></div>
     </form>
 </details>
@@ -144,7 +144,7 @@
         {% csrf_token %}
         <div class="check-list">
             {% for task in available_tasks %}
-                <label class="check-item"><input type="checkbox" name="task_ids" value="{{ task.pk }}"><span><strong>{{ task.number }}{% if task.competency %} · {{ task.get_competency_display }}{% endif %}</strong><small>{{ task.title }}</small></span><b>{{ task.estimate_display }}</b></label>
+                <label class="check-item"><input type="checkbox" name="task_ids" value="{{ task.pk }}"><span><strong>{{ task.number }}{% if task.competency %} · {{ task.get_competency_display }}{% endif %}</strong><small>{{ task.title }}</small></span><b>{{ task.estimate_display }} ч</b></label>
             {% empty %}<div class="compact-empty">Нет доступных оценённых задач.</div>{% endfor %}
         </div>
         {% if available_tasks %}<div class="section-footer"><button class="button button--primary" type="submit">Добавить выбранные</button></div>{% endif %}

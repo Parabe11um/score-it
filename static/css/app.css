@@ -285,7 +285,7 @@ select.competency-select { width: auto; min-height: 29px; padding: 4px 27px 4px 
 .connection-state--offline { color: var(--danger); background: var(--danger-soft); }
 .participant-stage { min-height: 520px; padding: clamp(24px,5vw,52px); display: grid; align-content: center; }
 .vote-prompt { margin-bottom: 17px; text-align: center; color: var(--muted); font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: .09em; }
-.card-grid { display: grid; grid-template-columns: repeat(8, minmax(60px,1fr)); gap: 11px; max-width: 900px; margin-inline: auto; }
+.card-grid { display: grid; grid-template-columns: repeat(9, minmax(60px,1fr)); gap: 11px; max-width: 1000px; margin-inline: auto; }
 .poker-card { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; aspect-ratio: .72; min-height: 105px; padding: 20px 5px 16px; color: var(--primary); background: white; border: 2px solid #c8d3ee; border-radius: 13px; box-shadow: 0 7px 16px rgba(31,63,140,.08); transition: .17s ease; }
 .poker-card::before, .poker-card::after { content: attr(data-value); position: absolute; color: #8fa3d4; font-size: 11px; font-weight: 800; }
 .poker-card::before { top: 7px; left: 8px; }
@@ -416,7 +416,7 @@ select.competency-select { width: auto; min-height: 29px; padding: 4px 27px 4px 
     .dashboard-overview { grid-template-columns: 1fr; }
     .dashboard-grid > .card { position: static; }
     .participant-list { grid-template-columns: repeat(auto-fit,minmax(190px,1fr)); }
-    .card-grid { grid-template-columns: repeat(4,1fr); }
+    .card-grid { grid-template-columns: repeat(3,1fr); }
     .capacity-breakdown { grid-template-columns: 1fr; }
 }
 
@@ -463,7 +463,7 @@ select.competency-select { width: auto; min-height: 29px; padding: 4px 27px 4px 
     .auth-card, .join-card { padding: 24px; }
     .scale-preview span { width: 38px; height: 50px; }
     .page-heading h1 { overflow-wrap: anywhere; }
-    .card-grid { grid-template-columns: repeat(4, minmax(48px,1fr)); }
+    .card-grid { grid-template-columns: repeat(3, minmax(48px,1fr)); }
     .poker-card { min-height: 92px; padding: 16px 3px 12px; border-radius: 10px; }
     .poker-card__value { font-size: 23px; }
     .poker-card__label { font-size: 9px; }

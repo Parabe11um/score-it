@@ -212,9 +212,9 @@ class SprintForm(BootstrapFormMixin, forms.ModelForm):
             "testing_capacity",
         )
         labels = {
-            "analysis_capacity": "Аналитика",
-            "development_capacity": "Разработка",
-            "testing_capacity": "Тестирование",
+            "analysis_capacity": "Аналитика, часы",
+            "development_capacity": "Разработка, часы",
+            "testing_capacity": "Тестирование, часы",
         }
         widgets = {
             "name": forms.TextInput(attrs={"placeholder": "Например, Спринт 24"}),
@@ -222,13 +222,13 @@ class SprintForm(BootstrapFormMixin, forms.ModelForm):
             "start_date": forms.DateInput(attrs={"type": "date"}),
             "end_date": forms.DateInput(attrs={"type": "date"}),
             "analysis_capacity": forms.NumberInput(
-                attrs={"step": "0.01", "min": "0", "placeholder": "Например, 24"}
+                attrs={"step": "0.01", "min": "0", "placeholder": "Например, 24 ч"}
             ),
             "development_capacity": forms.NumberInput(
-                attrs={"step": "0.01", "min": "0", "placeholder": "Например, 60"}
+                attrs={"step": "0.01", "min": "0", "placeholder": "Например, 60 ч"}
             ),
             "testing_capacity": forms.NumberInput(
-                attrs={"step": "0.01", "min": "0", "placeholder": "Например, 32"}
+                attrs={"step": "0.01", "min": "0", "placeholder": "Например, 32 ч"}
             ),
         }
 
@@ -250,9 +250,9 @@ class SprintCapacityForm(BootstrapFormMixin, forms.ModelForm):
             "testing_capacity",
         )
         labels = {
-            "analysis_capacity": "Аналитика",
-            "development_capacity": "Разработка",
-            "testing_capacity": "Тестирование",
+            "analysis_capacity": "Аналитика, часы",
+            "development_capacity": "Разработка, часы",
+            "testing_capacity": "Тестирование, часы",
         }
         widgets = {
             "analysis_capacity": forms.NumberInput(

@@ -83,12 +83,12 @@
                 </form>
             {% elif current_round.status == "revealed" %}
                 <div class="average-panel">
-                    <span>Средняя оценка</span>
+                    <span>Средняя оценка, часы</span>
                     <strong id="average-value">{{ average_display }}</strong>
-                    <small>{{ summary.sum }} / {{ summary.count }} голосов</small>
+                    <small>Сумма: {{ summary.sum }} ч · голосов: {{ summary.count }}</small>
                 </div>
                 <div class="revealed-votes" id="revealed-votes">
-                    {% for vote in current_round.votes.all %}<div><span>{{ vote.participant.name }}</span><strong>{{ vote.value }}</strong></div>{% endfor %}
+                    {% for vote in current_round.votes.all %}<div><span>{{ vote.participant.name }}</span><strong>{{ vote.value }} ч</strong></div>{% endfor %}
                 </div>
                 <div class="button-row button-row--center mobile-action-bar">
                     <form method="post" action="{% url 'poker:session_accept' voting_session.pk %}">{% csrf_token %}<button class="button button--primary" type="submit">{% if queue.has_next %}Сохранить и перейти к следующей{% else %}Сохранить оценку{% endif %}</button></form>
@@ -163,7 +163,7 @@
                 </div>
                 <span class="badge {% if item.status == 'completed' %}badge--success{% elif item.status == 'active' %}badge--active{% endif %}">{% if item.status == 'active' %}Открыта{% else %}{{ item.get_status_display }}{% endif %}</span>
                 <span class="queue-row__votes {% if item.vote_count >= voting_session.minimum_participants %}queue-row__votes--ready{% endif %}" data-queue-votes>{{ item.vote_count }} / {{ voting_session.minimum_participants }} голосов</span>
-                <span class="queue-row__estimate"><small>Сохранённая оценка</small><strong>{{ item.task.estimate_display }}</strong></span>
+                <span class="queue-row__estimate"><small>Сохранённая оценка, ч</small><strong>{{ item.task.estimate_display }}</strong></span>
             </div>
         {% empty %}<div class="compact-empty">Добавьте задачи в очередь ниже.</div>{% endfor %}
     </div>

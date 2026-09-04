@@ -165,7 +165,7 @@
             const name = document.createElement("span");
             name.textContent = vote.name;
             const value = document.createElement("strong");
-            value.textContent = vote.value;
+            value.textContent = `${vote.value} ч`;
             row.append(name, value);
             revealedVotes.append(row);
         });

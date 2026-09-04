@@ -108,8 +108,8 @@
                 {% endif %}
             {% endfor %}
             <fieldset class="capacity-inputs">
-                <legend>Ёмкость по компетенциям</legend>
-                <p>Укажите значения в тех же единицах, что и оценки: часы или story points.</p>
+                <legend>Ёмкость по компетенциям, часы</legend>
+                <p>Укажите доступное количество часов аналитики, разработки и тестирования.</p>
                 {% for field in sprint_form %}
                     {% if field.name == "analysis_capacity" or field.name == "development_capacity" or field.name == "testing_capacity" %}
                         <div class="capacity-input capacity-input--{{ field.name }}">
@@ -147,7 +147,7 @@
     </nav>
     <div class="table-wrap">
         <table>
-            <thead><tr><th>Номер</th><th>Название</th><th>Статус</th><th class="align-right">Оценка</th><th class="align-right">Действия</th></tr></thead>
+            <thead><tr><th>Номер</th><th>Название</th><th>Статус</th><th class="align-right">Оценка, ч</th><th class="align-right">Действия</th></tr></thead>
             <tbody>
             {% for task in tasks %}
                 <tr>
@@ -214,7 +214,7 @@
         <div class="item-list">
             {% for sprint in sprints %}
                 <a class="list-item" href="{{ sprint.get_absolute_url }}">
-                    <div><strong>{{ sprint.name }}</strong><small>{% if sprint.archived_at %}Архив · {% endif %}{{ sprint.get_status_display }} · {{ sprint.active_task_count }} задач · {{ sprint.total_estimate_display }} points</small></div>
+                    <div><strong>{{ sprint.name }}</strong><small>{% if sprint.archived_at %}Архив · {% endif %}{{ sprint.get_status_display }} · {{ sprint.active_task_count }} задач · {{ sprint.total_estimate_display }} ч</small></div>
                     <span>→</span>
                 </a>
             {% empty %}<div class="compact-empty">{% if show_archived %}В архиве спринтов нет.{% else %}Спринтов пока нет.{% endif %}</div>{% endfor %}

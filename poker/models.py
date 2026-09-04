@@ -17,39 +17,44 @@ ESTIMATION_GUIDE = (
         "description": "Уже сделано или изменение не требуется.",
     },
     {
+        "value": 1,
+        "label": "1 час",
+        "description": "Очень небольшая правка или быстрая проверка.",
+    },
+    {
         "value": 2,
-        "label": "Минимальная",
-        "description": "Локальное очевидное изменение без зависимостей.",
+        "label": "2 часа",
+        "description": "Локальная понятная работа без существенных зависимостей.",
     },
     {
         "value": 4,
-        "label": "Небольшая",
-        "description": "Понятная работа в одном компоненте и простая проверка.",
+        "label": "Полдня",
+        "description": "До половины рабочего дня на выполнение и проверку.",
     },
     {
         "value": 8,
-        "label": "Обычная",
-        "description": "Стандартная задача команды с полным циклом выполнения.",
+        "label": "1 рабочий день",
+        "description": "Один полный рабочий день одного специалиста.",
     },
     {
         "value": 12,
-        "label": "Средняя",
-        "description": "Несколько этапов или компонентов, есть неопределённость.",
+        "label": "1,5 рабочих дня",
+        "description": "Около полутора рабочих дней одного специалиста.",
     },
     {
         "value": 20,
-        "label": "Большая",
-        "description": "Много работы, зависимостей или рисков; лучше разделить.",
+        "label": "2,5 рабочих дня",
+        "description": "Несколько этапов работы общей длительностью около 20 часов.",
     },
     {
         "value": 32,
-        "label": "Разбить",
-        "description": "Слишком большая для спринта, требуется декомпозиция.",
+        "label": "4 рабочих дня",
+        "description": "Крупная задача примерно на четыре рабочих дня.",
     },
     {
         "value": 52,
-        "label": "Эпик",
-        "description": "Недостаточно проработана, оценивать целиком ещё рано.",
+        "label": "6,5 рабочих дней",
+        "description": "Очень крупная задача; стоит проверить возможность декомпозиции.",
     },
 )
 ESTIMATION_VALUES = tuple(item["value"] for item in ESTIMATION_GUIDE)
@@ -174,7 +179,9 @@ class Task(models.Model):
     status = models.CharField(
         "Статус", max_length=20, choices=Status.choices, default=Status.UNESTIMATED
     )
-    estimate_sum = models.PositiveIntegerField("Сумма голосов", null=True, blank=True)
+    estimate_sum = models.PositiveIntegerField(
+        "Сумма оценок, часы", null=True, blank=True
+    )
     estimate_count = models.PositiveIntegerField(
         "Количество голосов", null=True, blank=True
     )
@@ -444,7 +451,9 @@ class Vote(models.Model):
         related_name="votes",
         verbose_name="Участник",
     )
-    value = models.PositiveSmallIntegerField("Оценка", choices=ESTIMATION_CHOICES)
+    value = models.PositiveSmallIntegerField(
+        "Оценка, часы", choices=ESTIMATION_CHOICES
+    )
     created_at = models.DateTimeField("Проголосовал", auto_now_add=True)
     updated_at = models.DateTimeField("Изменил голос", auto_now=True)
 
@@ -482,10 +491,14 @@ class Sprint(models.Model):
     start_date = models.DateField("Дата начала", null=True, blank=True)
     end_date = models.DateField("Дата завершения", null=True, blank=True)
     capacity = models.DecimalField(
-        "Плановая ёмкость", max_digits=8, decimal_places=2, null=True, blank=True
+        "Плановая ёмкость, часы",
+        max_digits=8,
+        decimal_places=2,
+        null=True,
+        blank=True,
     )
     analysis_capacity = models.DecimalField(
-        "Ёмкость аналитики",
+        "Ёмкость аналитики, часы",
         max_digits=8,
         decimal_places=2,
         null=True,
@@ -493,7 +506,7 @@ class Sprint(models.Model):
         validators=(MinValueValidator(Decimal("0")),),
     )
     development_capacity = models.DecimalField(
-        "Ёмкость разработки",
+        "Ёмкость разработки, часы",
         max_digits=8,
         decimal_places=2,
         null=True,
@@ -501,7 +514,7 @@ class Sprint(models.Model):
         validators=(MinValueValidator(Decimal("0")),),
     )
     testing_capacity = models.DecimalField(
-        "Ёмкость тестирования",
+        "Ёмкость тестирования, часы",
         max_digits=8,
         decimal_places=2,
         null=True,

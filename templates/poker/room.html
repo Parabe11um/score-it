@@ -32,10 +32,10 @@
             <h2 id="room-task-title"></h2>
             <p id="room-progress"></p>
         </div>
-        <div class="vote-prompt">Выберите оценку</div>
+        <div class="vote-prompt">Выберите оценку в часах</div>
         <div class="card-grid" id="vote-cards">
             {% for option in estimation_guide %}
-                <button type="button" class="poker-card" data-value="{{ option.value }}" aria-label="{{ option.value }} — {{ option.label }}">
+                <button type="button" class="poker-card" data-value="{{ option.value }}" aria-label="{{ option.value }} ч — {{ option.label }}">
                     <span class="poker-card__value">{{ option.value }}</span>
                     <span class="poker-card__label">{{ option.label }}</span>
                 </button>
@@ -45,7 +45,7 @@
         <details class="estimation-guide">
             <summary>Как оценивать?</summary>
             <div class="estimation-guide__content">
-                <p>Оценивайте весь путь задачи до состояния «Готово»: анализ, разработку, тестирование, зависимости, риски и неопределённость.</p>
+                <p>Оцените трудозатраты одного специалиста на эту задачу. Выберите ближайшее значение в часах с учётом выполнения, проверки, зависимостей и рисков.</p>
                 <div class="estimation-guide__list">
                     {% for option in estimation_guide %}
                         <div class="estimation-guide__item">
@@ -61,7 +61,7 @@
 
     <div id="revealed-state" hidden>
         <div class="task-focus task-focus--participant"><span class="task-number" id="result-task-number"></span><span class="competency-badge" id="result-task-competency" hidden></span><h2 id="result-task-title"></h2></div>
-        <div class="average-panel average-panel--large"><span>Средняя оценка команды</span><strong id="room-average"></strong></div>
+        <div class="average-panel average-panel--large"><span>Средняя оценка команды</span><strong id="room-average"></strong><small>ч</small></div>
         <div class="revealed-votes revealed-votes--grid" id="room-votes"></div>
         <p class="centered muted" id="result-note">Голоса раскрыты. Можно перейти к другой задаче.</p>
     </div>

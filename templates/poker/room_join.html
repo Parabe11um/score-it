@@ -7,8 +7,8 @@
     <section class="join-hero">
         <span class="eyebrow">ВАС ПРИГЛАСИЛИ В КОМНАТУ</span>
         <h1>{{ voting_session.name }}</h1>
-        <p>{{ voting_session.project.name }}</p>
-        <div class="scale-preview scale-preview--large"><span>0</span><span>2</span><span>4</span><span>8</span><span>12</span><span>20</span><span>32</span><span>52</span></div>
+        <p>{{ voting_session.project.name }} · оценка в часах</p>
+        <div class="scale-preview scale-preview--large" aria-label="Шкала оценки в часах"><span>0</span><span>1</span><span>2</span><span>4</span><span>8</span><span>12</span><span>20</span><span>32</span><span>52</span></div>
     </section>
     <section class="card join-card">
         {% if voting_session.status == "finished" %}
