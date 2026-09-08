@@ -22,6 +22,7 @@ from .forms import (
     ProjectForm,
     SprintCapacityForm,
     SprintForm,
+    TaskFileImportForm,
     VotingSessionForm,
 )
 from .models import (
@@ -39,6 +40,7 @@ from .models import (
     VotingSessionTask,
     estimate_on_scale,
 )
+from .task_import import save_task_import
 
 
 def _format_decimal(value):
@@ -498,6 +500,7 @@ def _project_detail_context(
     competency_filter="all",
     show_archived=False,
     task_import_form=None,
+    task_file_import_form=None,
     session_form=None,
     sprint_form=None,
 ):
@@ -609,6 +612,7 @@ def _project_detail_context(
             + project.sprints.filter(archived_at__isnull=False).count()
         ),
         "task_import_form": task_import_form or BulkTaskImportForm(),
+        "task_file_import_form": task_file_import_form or TaskFileImportForm(),
         "session_form": session_form or VotingSessionForm(project=project),
         "sprint_form": sprint_form or SprintForm(),
     }
@@ -824,6 +828,36 @@ def task_import(request, pk):
     return redirect(project)
 
 
+def _file_import_message(parsed, saved):
+    return (
+        f"Импорт завершён. Строк в файле: {parsed.total_rows}. "
+        f"Добавлено: {saved.created}; обновлено: {saved.updated}; "
+        f"без изменений: {saved.unchanged}. "
+        f"Пропущено с оценкой в EVA: {parsed.skipped_estimated} "
+        f"(из них с нулевой: {parsed.skipped_zero}); "
+        f"уже оценённых или завершённых в score-it: {saved.skipped_local}; "
+        f"повторных строк: {parsed.duplicates}."
+    )
+
+
+@login_required
+@require_POST
+def task_import_file(request, pk):
+    project = _project_for_user(request.user, pk)
+    form = TaskFileImportForm(request.POST, request.FILES)
+    if not form.is_valid():
+        messages.error(request, "Файл не импортирован. Проверьте ошибки ниже.")
+        return render(
+            request,
+            "poker/project_detail.html",
+            _project_detail_context(project, task_file_import_form=form),
+            status=400,
+        )
+    saved = save_task_import(project, form.parsed_import)
+    messages.success(request, _file_import_message(form.parsed_import, saved))
+    return redirect(project)
+
+
 @login_required
 @require_POST
 def task_complete(request, pk, task_pk):
@@ -913,6 +947,12 @@ def session_create(request, pk):
 @login_required
 def session_manage(request, pk):
     voting_session = _session_for_user(request.user, pk)
+    return _session_manage_response(request, voting_session)
+
+
+def _session_manage_response(
+    request, voting_session, *, task_file_import_form=None, status=200
+):
     current_round = voting_session.current_round
     queue = _queue_context(voting_session)
     queued_task_ids = [item.task_id for item in queue["items"]]
@@ -940,6 +980,7 @@ def session_manage(request, pk):
         "poker/session_manage.html",
         {
             "voting_session": voting_session,
+            "task_file_import_form": task_file_import_form or TaskFileImportForm(),
             "queue": queue,
             "available_tasks": available_tasks,
             "current_round": current_round,
@@ -955,6 +996,7 @@ def session_manage(request, pk):
             else None,
             "public_url": public_url,
         },
+        status=status,
     )
 
 
@@ -1024,6 +1066,32 @@ def session_export_xlsx(request, pk):
     )
     workbook.save(response)
     return response
+
+
+@login_required
+@require_POST
+def session_import_file(request, pk):
+    voting_session = _session_for_user(request.user, pk)
+    if voting_session.status == VotingSession.Status.FINISHED:
+        messages.error(request, "В завершённую сессию нельзя добавлять задачи.")
+        return redirect(voting_session)
+    form = TaskFileImportForm(request.POST, request.FILES)
+    if not form.is_valid():
+        messages.error(request, "Файл не импортирован. Проверьте ошибки ниже.")
+        return _session_manage_response(
+            request, voting_session, task_file_import_form=form, status=400,
+        )
+    with transaction.atomic():
+        saved = save_task_import(voting_session.project, form.parsed_import)
+        queued = _add_tasks_to_queue(voting_session, saved.tasks)
+        if queued and voting_session.status == VotingSession.Status.ACTIVE:
+            _open_pending_queue_items(voting_session)
+    messages.success(
+        request,
+        _file_import_message(form.parsed_import, saved)
+        + f" В очередь добавлено: {len(queued)}.",
+    )
+    return redirect(voting_session)
 
 
 @login_required
@@ -1384,6 +1452,8 @@ def session_state(request, pk):
                 "title": voting_session.current_task.title,
                 "competency": voting_session.current_task.competency,
                 "competency_label": voting_session.current_task.get_competency_display(),
+                "description": voting_session.current_task.description,
+                "external_url": voting_session.current_task.external_url,
             }
             if voting_session.current_task
             else None,
@@ -1577,6 +1647,8 @@ def room_state(request, token):
         "title": queue_item.task.title,
         "competency": queue_item.task.competency,
         "competency_label": queue_item.task.get_competency_display(),
+        "description": queue_item.task.description,
+        "external_url": queue_item.task.external_url,
     }
     response["round"] = round_data
     return JsonResponse(response)

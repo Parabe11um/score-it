@@ -4,6 +4,7 @@ from django import forms
 from django.contrib.auth.forms import UserCreationForm
 
 from .models import Project, Sprint, Task, VotingSession
+from .task_import import parse_task_file
 
 
 class BootstrapFormMixin:
@@ -158,6 +159,19 @@ class BulkTaskImportForm(BootstrapFormMixin, forms.Form):
 
         self.parsed_tasks = parsed
         return value
+
+
+class TaskFileImportForm(BootstrapFormMixin, forms.Form):
+    task_file = forms.FileField(
+        label="Файл выгрузки EVA",
+        widget=forms.ClearableFileInput(attrs={"accept": ".csv,.xlsx"}),
+        help_text="CSV или XLSX, до 10 МБ и 5000 строк. В EVA выберите экспорт «все поля».",
+    )
+
+    def clean_task_file(self):
+        upload = self.cleaned_data["task_file"]
+        self.parsed_import = parse_task_file(upload)
+        return upload
 
 
 class VotingSessionForm(BootstrapFormMixin, forms.ModelForm):

@@ -12,6 +12,10 @@
     const resultTaskNumber = document.getElementById("result-task-number");
     const resultTaskTitle = document.getElementById("result-task-title");
     const resultTaskCompetency = document.getElementById("result-task-competency");
+    const taskDescription = document.getElementById("room-task-description");
+    const taskLink = document.getElementById("room-task-link");
+    const resultTaskDescription = document.getElementById("result-task-description");
+    const resultTaskLink = document.getElementById("result-task-link");
     const progress = document.getElementById("room-progress");
     const waitingProgress = document.getElementById("waiting-progress");
     const feedback = document.getElementById("vote-feedback");
@@ -97,6 +101,21 @@
         }
     }
 
+    function renderTaskDetails(description, link, task) {
+        if (description) {
+            const text = task.description || "";
+            const content = description.querySelector(".task-description__text");
+            if (content.textContent !== text) content.textContent = text;
+            description.hidden = !text;
+        }
+        if (link) {
+            const url = task.external_url || "";
+            link.hidden = !url;
+            if (url) link.href = url;
+            else link.removeAttribute("href");
+        }
+    }
+
     function render(state) {
         if (state.participant_completed) {
             window.location.reload();
@@ -152,6 +171,7 @@
             resultTaskNumber.textContent = state.current_task.number;
             resultTaskTitle.textContent = state.current_task.title;
             renderCompetency(resultTaskCompetency, state.current_task);
+            renderTaskDetails(resultTaskDescription, resultTaskLink, state.current_task);
             average.textContent = state.round.average ?? "—";
             if (finalEstimate) finalEstimate.textContent = state.round.final_estimate ?? "—";
             renderVotes(state.round.votes || []);
@@ -165,6 +185,7 @@
         taskNumber.textContent = state.current_task.number;
         taskTitle.textContent = state.current_task.title;
         renderCompetency(taskCompetency, state.current_task);
+        renderTaskDetails(taskDescription, taskLink, state.current_task);
         const queueLabel = state.queue?.current_position
             ? `Задача ${state.queue.current_position} из ${state.queue.total} · `
             : "";

@@ -23,6 +23,7 @@
             {% csrf_token %}<button class="button button--secondary" type="submit">Копировать</button>
         </form>
         {% if voting_session.status != "finished" %}
+            <a class="button button--secondary" href="#room-file-import" onclick="document.getElementById('room-file-import').open = true;">Импорт CSV/XLSX</a>
             <form method="post" action="{% url 'poker:session_finish' voting_session.pk %}" onsubmit="return confirm('Завершить сессию? Незакрытые раунды будут отменены.');">
                 {% csrf_token %}<button class="button button--danger-soft" type="submit">Завершить сессию</button>
             </form>
@@ -61,6 +62,8 @@
                 <span class="task-number">{{ voting_session.current_task.number }}</span>
                 {% if voting_session.current_task.competency %}<span class="competency-badge competency-badge--{{ voting_session.current_task.competency }}">{{ voting_session.current_task.get_competency_display }}</span>{% endif %}
                 <h2>{{ voting_session.current_task.title }}</h2>
+                {% if voting_session.current_task.description %}<div class="task-description"><strong>Описание</strong><div class="task-description__text">{{ voting_session.current_task.description }}</div></div>{% endif %}
+                {% if voting_session.current_task.external_url %}<a class="button button--secondary button--small task-external-link" href="{{ voting_session.current_task.external_url }}" target="_blank" rel="noopener noreferrer">Открыть задачу в EVA ↗</a>{% endif %}
                 <p>{% if queue.current_position %}Задача {{ queue.current_position }} из {{ queue.total }} · {% endif %}Раунд {{ current_round.number }}</p>
             </div>
             <nav class="organizer-task-navigation" aria-label="Переход между задачами">
@@ -142,6 +145,16 @@
         </div>
     </aside>
 </div>
+
+{% if voting_session.status != "finished" %}
+<details class="card section-card add-queue-card" id="room-file-import" {% if task_file_import_form.errors %}open{% endif %}>
+    <summary class="section-heading">
+        <div><h2>Загрузить задачи из файла</h2><p>CSV или XLSX из EVA — только задачи без оценки.</p></div>
+    </summary>
+    {% url 'poker:session_import_file' voting_session.pk as file_import_url %}
+    {% include 'poker/task_file_import_form.html' with file_import_button="Загрузить и добавить в очередь" %}
+</details>
+{% endif %}
 
 <section class="card section-card">
     <div class="section-heading">

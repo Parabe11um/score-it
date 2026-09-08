@@ -16,6 +16,11 @@ urlpatterns = [
     path("projects/<int:pk>/", views.project_detail, name="project_detail"),
     path("projects/<int:pk>/tasks/import/", views.task_import, name="task_import"),
     path(
+        "projects/<int:pk>/tasks/import/file/",
+        views.task_import_file,
+        name="task_import_file",
+    ),
+    path(
         "projects/<int:pk>/tasks/<int:task_pk>/complete/",
         views.task_complete,
         name="task_complete",
@@ -38,6 +43,11 @@ urlpatterns = [
     path("projects/<int:pk>/sessions/new/", views.session_create, name="session_create"),
     path("projects/<int:pk>/sprints/new/", views.sprint_create, name="sprint_create"),
     path("sessions/<int:pk>/", views.session_manage, name="session_manage"),
+    path(
+        "sessions/<int:pk>/import/file/",
+        views.session_import_file,
+        name="session_import_file",
+    ),
     path(
         "sessions/<int:pk>/export/csv/",
         views.session_export_csv,

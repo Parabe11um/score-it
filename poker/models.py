@@ -183,6 +183,10 @@ class Task(models.Model):
     )
     number = models.CharField("Номер", max_length=80)
     title = models.CharField("Название", max_length=500)
+    description = models.TextField("Описание", blank=True, default="")
+    external_url = models.URLField(
+        "Ссылка на задачу", max_length=500, blank=True, default=""
+    )
     competency = models.CharField(
         "Тип задачи",
         max_length=20,

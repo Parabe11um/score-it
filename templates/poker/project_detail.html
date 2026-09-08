@@ -23,8 +23,14 @@
     <details class="card action-card" open>
         <summary>
             <span class="action-card__number">1</span>
-            <span><strong>Добавить задачи</strong><small>Вставьте список целиком</small></span>
+            <span><strong>Добавить задачи</strong><small>Из файла CSV/XLSX или списком</small></span>
         </summary>
+        <div class="details-form">
+            {% url 'poker:task_import_file' project.pk as file_import_url %}
+            {% include 'poker/task_file_import_form.html' %}
+        </div>
+        <details class="text-task-import" {% if task_import_form.errors %}open{% endif %}>
+        <summary>Вставить задачи списком</summary>
         <form method="post" action="{% url 'poker:task_import' project.pk %}" class="stack-form details-form">
             {% csrf_token %}
             <div class="field">
@@ -44,6 +50,7 @@
             <div class="help-text">{{ task_import_form.tasks_text.help_text }}</div>
             <button class="button button--primary" type="submit">Импортировать задачи</button>
         </form>
+        </details>
     </details>
 
     <details class="card action-card" {% if session_form.errors %}open{% endif %}>

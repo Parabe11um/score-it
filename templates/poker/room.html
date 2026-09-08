@@ -30,6 +30,8 @@
             <span class="task-number" id="room-task-number"></span>
             <span class="competency-badge" id="room-task-competency" hidden></span>
             <h2 id="room-task-title"></h2>
+            <div class="task-description" id="room-task-description" hidden><strong>Описание</strong><div class="task-description__text"></div></div>
+            <a class="button button--secondary button--small task-external-link" id="room-task-link" target="_blank" rel="noopener noreferrer" hidden>Открыть задачу в EVA ↗</a>
             <p id="room-progress"></p>
         </div>
         <div class="vote-prompt">Выберите оценку в часах</div>
@@ -61,7 +63,13 @@
     </div>
 
     <div id="revealed-state" hidden>
-        <div class="task-focus task-focus--participant"><span class="task-number" id="result-task-number"></span><span class="competency-badge" id="result-task-competency" hidden></span><h2 id="result-task-title"></h2></div>
+        <div class="task-focus task-focus--participant">
+            <span class="task-number" id="result-task-number"></span>
+            <span class="competency-badge" id="result-task-competency" hidden></span>
+            <h2 id="result-task-title"></h2>
+            <div class="task-description" id="result-task-description" hidden><strong>Описание</strong><div class="task-description__text"></div></div>
+            <a class="button button--secondary button--small task-external-link" id="result-task-link" target="_blank" rel="noopener noreferrer" hidden>Открыть задачу в EVA ↗</a>
+        </div>
         <div class="average-panel average-panel--large">
             <span>Итог по шкале, ч</span><strong id="room-final-estimate"></strong>
             <small>Среднее голосов: <span id="room-average"></span> ч</small>
