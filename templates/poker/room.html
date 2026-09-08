@@ -55,13 +55,18 @@
                     {% endfor %}
                 </div>
                 <p class="estimation-guide__note"><strong>Не хватает информации?</strong> Не выбирайте 0 — сообщите организатору, что задачу нужно уточнить.</p>
+                <p>Итог — ближайшая карточка к среднему голосов. При равном расстоянии выбирается большая. Итог 0 получается только когда все проголосовавшие выбрали 0.</p>
             </div>
         </details>
     </div>
 
     <div id="revealed-state" hidden>
         <div class="task-focus task-focus--participant"><span class="task-number" id="result-task-number"></span><span class="competency-badge" id="result-task-competency" hidden></span><h2 id="result-task-title"></h2></div>
-        <div class="average-panel average-panel--large"><span>Средняя оценка команды</span><strong id="room-average"></strong><small>ч</small></div>
+        <div class="average-panel average-panel--large">
+            <span>Итог по шкале, ч</span><strong id="room-final-estimate"></strong>
+            <small>Среднее голосов: <span id="room-average"></span> ч</small>
+            <small>Ближайшая карточка; при равном расстоянии — большая.</small>
+        </div>
         <div class="revealed-votes revealed-votes--grid" id="room-votes"></div>
         <p class="centered muted" id="result-note">Голоса раскрыты. Можно перейти к другой задаче.</p>
     </div>

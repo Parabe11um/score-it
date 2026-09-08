@@ -85,9 +85,11 @@
                 </form>
             {% elif current_round.status == "revealed" %}
                 <div class="average-panel">
-                    <span>Средняя оценка, часы</span>
-                    <strong id="average-value">{{ average_display }}</strong>
+                    <span>Итог по шкале, ч</span>
+                    <strong id="final-estimate-value">{{ summary.final_estimate|default_if_none:"—" }}</strong>
+                    <small>Среднее голосов: <span id="average-value">{{ average_display }}</span> ч</small>
                     <small>Сумма: {{ summary.sum }} ч · голосов: {{ summary.count }}</small>
+                    <small>Ближайшая карточка; при равном расстоянии — большая.</small>
                 </div>
                 <div class="revealed-votes" id="revealed-votes">
                     {% for vote in current_round.votes.all %}<div><span>{{ vote.participant.name }}</span><strong>{{ vote.value }} ч</strong></div>{% endfor %}
@@ -165,7 +167,14 @@
                 </div>
                 <span class="badge {% if item.status == 'completed' %}badge--success{% elif item.status == 'active' %}badge--active{% endif %}">{% if item.status == 'active' %}Открыта{% else %}{{ item.get_status_display }}{% endif %}</span>
                 <span class="queue-row__votes {% if item.vote_count >= voting_session.minimum_participants %}queue-row__votes--ready{% endif %}" data-queue-votes>{{ item.vote_count }} / {{ voting_session.minimum_participants }} голосов</span>
-                <span class="queue-row__estimate"><small>Сохранённая оценка, ч</small><strong>{{ item.task.estimate_display }}</strong></span>
+                <span class="queue-row__estimate">
+                    {% if item.accepted_estimate is not None %}
+                        <small>Итог по шкале, ч</small><strong>{{ item.accepted_estimate }}</strong>
+                        <small>Среднее: {{ item.accepted_average_display }} ч</small>
+                    {% else %}
+                        <small>Сохранённая оценка, ч</small><strong>{{ item.task.estimate_display }}</strong>
+                    {% endif %}
+                </span>
             </div>
         {% empty %}<div class="compact-empty">Добавьте задачи в очередь ниже.</div>{% endfor %}
     </div>

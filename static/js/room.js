@@ -16,6 +16,7 @@
     const waitingProgress = document.getElementById("waiting-progress");
     const feedback = document.getElementById("vote-feedback");
     const average = document.getElementById("room-average");
+    const finalEstimate = document.getElementById("room-final-estimate");
     const votesList = document.getElementById("room-votes");
     const resultNote = document.getElementById("result-note");
     const connectionState = document.getElementById("connection-state");
@@ -152,6 +153,7 @@
             resultTaskTitle.textContent = state.current_task.title;
             renderCompetency(resultTaskCompetency, state.current_task);
             average.textContent = state.round.average ?? "—";
+            if (finalEstimate) finalEstimate.textContent = state.round.final_estimate ?? "—";
             renderVotes(state.round.votes || []);
             resultNote.textContent = state.round.status === "closed"
                 ? "Итоговая оценка сохранена. Можно перейти к другой задаче."

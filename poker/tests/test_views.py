@@ -399,7 +399,7 @@ class VotingFlowTests(TestCase):
         self.assertEqual(response.status_code, 302)
         return client
 
-    def test_complete_voting_flow_saves_exact_average(self):
+    def test_complete_voting_flow_keeps_average_and_uses_scale_for_final(self):
         first = self.join_participant("Анна")
         second = self.join_participant("Борис")
 
@@ -417,6 +417,18 @@ class VotingFlowTests(TestCase):
         self.assertEqual(first.post(vote_url, {"value": 2}).status_code, 200)
         self.assertEqual(second.post(vote_url, {"value": 8}).status_code, 200)
 
+        state_url = reverse(
+            "poker:room_state", args=[self.voting_session.public_token]
+        )
+        hidden_state = first.get(state_url).json()
+        self.assertIsNone(hidden_state["round"]["average"])
+        self.assertIsNone(hidden_state["round"]["final_estimate"])
+        self.assertEqual(hidden_state["round"]["votes"], [])
+        organizer_state_url = reverse(
+            "poker:session_state", args=[self.voting_session.pk]
+        )
+        self.assertIsNone(self.organizer.get(organizer_state_url).json()["summary"])
+
         self.organizer.post(
             reverse("poker:session_reveal", args=[self.voting_session.pk])
         )
@@ -425,7 +437,14 @@ class VotingFlowTests(TestCase):
         ).json()
         self.assertEqual(state["round"]["status"], VotingRound.Status.REVEALED)
         self.assertEqual(state["round"]["average"], "5")
+        self.assertEqual(state["round"]["final_estimate"], 4)
         self.assertEqual(len(state["round"]["votes"]), 2)
+        organizer_state = self.organizer.get(organizer_state_url).json()
+        self.assertEqual(organizer_state["summary"]["average"], "5")
+        self.assertEqual(organizer_state["summary"]["final_estimate"], 4)
+        page = self.organizer.get(self.voting_session.get_absolute_url())
+        self.assertContains(page, 'id="final-estimate-value">4</strong>')
+        self.assertContains(page, 'id="average-value">5</span>')
 
         self.organizer.post(
             reverse("poker:session_accept", args=[self.voting_session.pk])
@@ -435,8 +454,52 @@ class VotingFlowTests(TestCase):
 
         self.assertEqual(self.task.estimate_sum, 10)
         self.assertEqual(self.task.estimate_count, 2)
-        self.assertEqual(self.task.estimate_display, "5")
+        self.assertEqual(self.task.average_estimate_display, "5")
+        self.assertEqual(self.task.estimate_display, "4")
         self.assertIsNone(self.voting_session.current_task)
+        accepted_state = first.get(state_url).json()
+        self.assertEqual(accepted_state["round"]["status"], VotingRound.Status.CLOSED)
+        self.assertEqual(accepted_state["round"]["average"], "5")
+        self.assertEqual(accepted_state["round"]["final_estimate"], 4)
+        page = self.organizer.get(self.project.get_absolute_url())
+        self.assertContains(page, 'class="estimate-value">4</strong>')
+
+    def test_zero_and_small_positive_round_results_preserve_vote_history(self):
+        participants = [self.join_participant(f"Участник {index}") for index in range(4)]
+        self.organizer.post(
+            reverse(
+                "poker:session_start_task",
+                args=[self.voting_session.pk, self.task.pk],
+            )
+        )
+        vote_url = reverse("poker:room_vote", args=[self.voting_session.public_token])
+        state_url = reverse("poker:room_state", args=[self.voting_session.public_token])
+        for client in participants:
+            self.assertEqual(client.post(vote_url, {"value": 0}).status_code, 200)
+        self.organizer.post(reverse("poker:session_reveal", args=[self.voting_session.pk]))
+        state = participants[0].get(state_url).json()
+        self.assertEqual(state["round"]["average"], "0")
+        self.assertEqual(state["round"]["final_estimate"], 0)
+        page = self.organizer.get(self.voting_session.get_absolute_url())
+        self.assertContains(page, 'id="final-estimate-value">0</strong>')
+
+        self.organizer.post(reverse("poker:session_revote", args=[self.voting_session.pk]))
+        for client, value in zip(participants, (0, 0, 0, 1)):
+            self.assertEqual(client.post(vote_url, {"value": value}).status_code, 200)
+        self.organizer.post(reverse("poker:session_reveal", args=[self.voting_session.pk]))
+        state = participants[0].get(state_url).json()
+        self.assertEqual(state["round"]["average"], "0.25")
+        self.assertEqual(state["round"]["final_estimate"], 1)
+        self.organizer.post(reverse("poker:session_accept", args=[self.voting_session.pk]))
+        self.task.refresh_from_db()
+        self.assertEqual((self.task.estimate_sum, self.task.estimate_count), (1, 4))
+        self.assertEqual(self.task.estimate, 1)
+        self.assertEqual(Vote.objects.count(), 8)
+        response = self.organizer.get(
+            reverse("poker:session_export_csv", args=[self.voting_session.pk])
+        )
+        rows = list(csv.reader(StringIO(response.content.decode("utf-8-sig"))))
+        self.assertEqual(rows[1], [self.task.number, self.task.title, "1"])
 
     def test_room_exports_all_accepted_estimates_in_csv_and_xlsx(self):
         first_participant = Participant.objects.create(
@@ -465,6 +528,12 @@ class VotingFlowTests(TestCase):
                 "Проверить обработчик",
                 Task.Competency.TESTING,
                 (1, 2),
+            ),
+            (
+                "ABS-NONE-1",
+                "Работа не требуется",
+                Task.Competency.NONE,
+                (0, 0),
             ),
         )
         for position, (number, title, competency, values) in enumerate(
@@ -522,13 +591,24 @@ class VotingFlowTests(TestCase):
             session=self.voting_session,
             task=unfinished_task,
             current_round=unfinished_round,
-            position=4,
+            position=5,
             status=VotingSessionTask.Status.ACTIVE,
         )
 
+        tasks_before = list(self.project.tasks.values())
+        votes_before = list(Vote.objects.order_by("pk").values())
         room_page = self.organizer.get(self.voting_session.get_absolute_url())
-        self.assertContains(room_page, "Оценки CSV · 3")
-        self.assertContains(room_page, "Оценки XLSX · 3")
+        self.assertContains(room_page, "Оценки CSV · 4")
+        self.assertContains(room_page, "Оценки XLSX · 4")
+        self.assertEqual(
+            [
+                (item.accepted_average_display, item.accepted_estimate)
+                for item in room_page.context["queue"]["items"]
+            ],
+            [("26", 32), ("6", 8), ("1.5", 2), ("0", 0), (None, None)],
+        )
+        self.assertContains(room_page, "Среднее: 26 ч")
+        self.assertContains(room_page, "Среднее: 0 ч")
 
         csv_response = self.organizer.get(
             reverse("poker:session_export_csv", args=[self.voting_session.pk])
@@ -541,10 +621,11 @@ class VotingFlowTests(TestCase):
         self.assertEqual(
             csv_rows,
             [
-                ["Код задачи", "Наименование", "Средняя оценка, ч"],
-                ["ABS-SA-1", "Подготовить требования", "26"],
-                ["ABS-DEV-1", "Реализовать обработчик", "6"],
-                ["ABS-QA-1", "Проверить обработчик", "1.5"],
+                ["Код задачи", "Наименование", "Итоговая оценка, ч"],
+                ["ABS-SA-1", "Подготовить требования", "32"],
+                ["ABS-DEV-1", "Реализовать обработчик", "8"],
+                ["ABS-QA-1", "Проверить обработчик", "2"],
+                ["ABS-NONE-1", "Работа не требуется", "0"],
             ],
         )
 
@@ -561,15 +642,20 @@ class VotingFlowTests(TestCase):
         self.assertEqual(
             list(sheet.values),
             [
-                ("Код задачи", "Наименование", "Средняя оценка, ч"),
-                ("ABS-SA-1", "Подготовить требования", 26),
-                ("ABS-DEV-1", "Реализовать обработчик", 6),
-                ("ABS-QA-1", "Проверить обработчик", 1.5),
+                ("Код задачи", "Наименование", "Итоговая оценка, ч"),
+                ("ABS-SA-1", "Подготовить требования", 32),
+                ("ABS-DEV-1", "Реализовать обработчик", 8),
+                ("ABS-QA-1", "Проверить обработчик", 2),
+                ("ABS-NONE-1", "Работа не требуется", 0),
             ],
         )
         self.assertEqual(sheet.freeze_panes, "A2")
-        self.assertEqual(sheet.auto_filter.ref, "A1:C4")
+        self.assertEqual(sheet.auto_filter.ref, "A1:C5")
         self.assertFalse(sheet.sheet_view.showGridLines)
+        for row in sheet.iter_rows(min_row=2, min_col=3, max_col=3):
+            self.assertEqual(row[0].data_type, "n")
+        self.assertEqual(list(self.project.tasks.values()), tasks_before)
+        self.assertEqual(list(Vote.objects.order_by("pk").values()), votes_before)
 
     def test_other_organizer_cannot_export_room_estimates(self):
         other_user = get_user_model().objects.create_user(
@@ -1258,9 +1344,48 @@ class SprintTests(TestCase):
         SprintTask.objects.create(sprint=self.sprint, task=self.task, position=1)
         self.client.force_login(self.user)
 
-    def test_sprint_total_uses_exact_task_average(self):
+    def test_sprint_total_uses_task_estimate_on_scale(self):
         self.assertEqual(self.sprint.total_estimate, self.task.estimate)
-        self.assertEqual(self.sprint.total_estimate_display, "4.67")
+        self.assertEqual(self.sprint.total_estimate_display, "4")
+
+    def test_sprint_sums_rounded_tasks_for_each_competency_without_rounding_total(self):
+        Task.objects.filter(pk=self.task.pk).update(
+            competency=Task.Competency.ANALYSIS, estimate_sum=12, estimate_count=2
+        )
+        for position, (competency, total) in enumerate(
+            ((Task.Competency.ANALYSIS, 12), (Task.Competency.DEVELOPMENT, 3)),
+            start=2,
+        ):
+            task = Task.objects.create(
+                project=self.project,
+                number=f"SUM-{position}",
+                title="Проверить сумму итогов",
+                competency=competency,
+                estimate_sum=total,
+                estimate_count=2,
+                status=Task.Status.ESTIMATED,
+            )
+            SprintTask.objects.create(sprint=self.sprint, task=task, position=position)
+        Sprint.objects.filter(pk=self.sprint.pk).update(
+            analysis_capacity=12, development_capacity=4, testing_capacity=0
+        )
+        sprint = Sprint.objects.get(pk=self.sprint.pk)
+
+        self.assertEqual(sprint.total_estimate, Decimal("18"))  # 8 + 8 + 2
+        self.assertEqual(sprint.estimates_by_competency[Task.Competency.ANALYSIS], 16)
+        self.assertEqual(sprint.estimates_by_competency[Task.Competency.DEVELOPMENT], 2)
+        self.assertEqual(sprint.capacity_overage, Decimal("4"))
+        self.assertEqual(sprint.capacity_remaining, Decimal("2"))
+
+        response = self.client.get(reverse("poker:sprint_export", args=[sprint.pk]))
+        workbook = load_workbook(BytesIO(response.content), data_only=False)
+        sheet = workbook["Задачи спринта"]
+        self.assertEqual([sheet.cell(row, 4).value for row in range(2, 5)], [8, 8, 2])
+        self.assertEqual(sheet["D5"].value, "=SUM(D2:D4)")
+        capacity_sheet = workbook["Ёмкость"]
+        self.assertEqual(capacity_sheet["B2"].value, 16)
+        self.assertEqual(capacity_sheet["E2"].value, 4)
+        self.assertEqual(capacity_sheet["B3"].value, 2)
 
     def test_sprint_statuses_and_archive_lifecycle(self):
         self.assertEqual(self.sprint.status, Sprint.Status.PLANNING)
@@ -1353,7 +1478,7 @@ class SprintTests(TestCase):
 
     def test_capacity_shows_remaining_and_overage(self):
         self.sprint.refresh_from_db()
-        self.assertEqual(self.sprint.capacity_remaining_display, "15.33")
+        self.assertEqual(self.sprint.capacity_remaining_display, "16")
         self.assertFalse(self.sprint.is_over_capacity)
 
         large_task = Task.objects.create(
@@ -1370,10 +1495,10 @@ class SprintTests(TestCase):
         sprint = Sprint.objects.get(pk=self.sprint.pk)
 
         self.assertTrue(sprint.is_over_capacity)
-        self.assertEqual(sprint.capacity_overage_display, "4.67")
+        self.assertEqual(sprint.capacity_overage_display, "4")
         self.assertEqual(sprint.capacity_remaining, Decimal("0"))
         response = self.client.get(sprint.get_absolute_url())
-        self.assertContains(response, "Превышение: 4.67 ч")
+        self.assertContains(response, "Превышение: 4 ч")
         self.assertContains(response, "План превышает заданную ёмкость")
 
     def test_competency_capacities_track_each_team_limit_separately(self):
@@ -1538,12 +1663,12 @@ class SprintTests(TestCase):
         source = Sprint.objects.get(pk=self.sprint.pk)
         target = Sprint.objects.get(pk=target.pk)
         self.assertEqual(source.total_estimate, Decimal("0"))
-        self.assertEqual(target.total_estimate_display, "4.67")
+        self.assertEqual(target.total_estimate_display, "4")
         history_page = self.client.get(source.get_absolute_url())
         self.assertContains(history_page, "Перенесена")
         self.assertContains(history_page, target.name)
 
-    def test_excel_export_contains_average_formula(self):
+    def test_excel_export_contains_final_estimate_and_original_vote_totals(self):
         self.task.competency = Task.Competency.ANALYSIS
         self.task.save(update_fields=("competency",))
         response = self.client.get(
@@ -1557,13 +1682,15 @@ class SprintTests(TestCase):
 
         workbook = load_workbook(BytesIO(response.content), data_only=False)
         sheet = workbook["Задачи спринта"]
-        self.assertEqual(sheet["D1"].value, "Средняя оценка, часы")
+        self.assertEqual(sheet["D1"].value, "Итоговая оценка, ч")
         self.assertEqual(sheet["E1"].value, "Сумма оценок, часы")
         self.assertEqual(sheet["B2"].value, "ABS-10")
-        self.assertEqual(sheet["D2"].value, "=E2/F2")
+        self.assertEqual(sheet["D2"].value, 4)
+        self.assertEqual(sheet["D2"].data_type, "n")
         self.assertEqual(sheet["E2"].value, 14)
         self.assertEqual(sheet["F2"].value, 3)
         self.assertEqual(sheet["G2"].value, "Аналитика")
         capacity_sheet = workbook["Ёмкость"]
         self.assertEqual(capacity_sheet["A2"].value, "Общая ёмкость (старая версия)")
+        self.assertEqual(capacity_sheet["B2"].value, 4)
         self.assertEqual(capacity_sheet["C2"].value, 20)

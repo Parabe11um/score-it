@@ -61,6 +61,20 @@ ESTIMATION_VALUES = tuple(item["value"] for item in ESTIMATION_GUIDE)
 ESTIMATION_CHOICES = tuple((value, str(value)) for value in ESTIMATION_VALUES)
 
 
+def estimate_on_scale(total, count):
+    """Choose the nearest card from the exact vote totals; break ties upward."""
+    if total is None or not count:
+        return None
+    if total == 0:
+        return 0
+    # Compare integer distances before any display rounding. A positive vote
+    # total must never become the "no work" card.
+    return min(
+        (value for value in ESTIMATION_VALUES if value > 0),
+        key=lambda value: (abs(value * count - total), -value),
+    )
+
+
 def default_organizer_invitation_expiry():
     return timezone.now() + timedelta(days=7)
 
@@ -203,18 +217,27 @@ class Task(models.Model):
         return f"{self.number} — {self.title}"
 
     @property
-    def estimate(self):
+    def average_estimate(self):
         if self.estimate_sum is None or not self.estimate_count:
             return None
         return Decimal(self.estimate_sum) / Decimal(self.estimate_count)
 
     @property
-    def estimate_display(self):
-        value = self.estimate
+    def average_estimate_display(self):
+        value = self.average_estimate
         if value is None:
             return "—"
         rounded = value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         return format(rounded.normalize(), "f")
+
+    @property
+    def estimate(self):
+        return estimate_on_scale(self.estimate_sum, self.estimate_count)
+
+    @property
+    def estimate_display(self):
+        value = self.estimate
+        return str(value) if value is not None else "—"
 
     def capture_estimate(self, voting_round):
         summary = voting_round.summary()
@@ -435,7 +458,13 @@ class VotingRound(models.Model):
         total = sum(values)
         count = len(values)
         average = Decimal(total) / Decimal(count) if count else None
-        return {"values": values, "sum": total, "count": count, "average": average}
+        return {
+            "values": values,
+            "sum": total,
+            "count": count,
+            "average": average,
+            "final_estimate": estimate_on_scale(total, count),
+        }
 
 
 class Vote(models.Model):

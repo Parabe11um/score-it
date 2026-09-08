@@ -265,7 +265,7 @@ select.competency-select { width: auto; min-height: 29px; padding: 4px 27px 4px 
 .waiting-visual span:nth-child(3) { animation-delay: .28s; }
 @keyframes thinking { 0%,100% { transform: translateY(0); background:#b8c6ec; } 50% { transform: translateY(-8px); background:var(--primary); } }
 
-.average-panel { display: grid; justify-items: center; gap: 4px; margin: 4px auto 24px; padding: 20px 40px; color: #173e35; background: var(--success-soft); border: 1px solid #bfe7dc; border-radius: 16px; }
+.average-panel { display: grid; justify-items: center; gap: 4px; margin: 4px auto 24px; padding: 20px 40px; color: #173e35; background: var(--success-soft); border: 1px solid #bfe7dc; border-radius: 16px; text-align: center; }
 .average-panel span { color: #397767; font-size: 13px; font-weight: 700; }
 .average-panel strong { font-size: 48px; line-height: 1; letter-spacing: -.05em; }
 .average-panel small { color: #4c806f; }

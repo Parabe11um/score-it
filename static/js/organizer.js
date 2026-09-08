@@ -31,6 +31,7 @@
     const revealButton = document.getElementById("reveal-button");
     const revealedVotes = document.getElementById("revealed-votes");
     const averageValue = document.getElementById("average-value");
+    const finalEstimateValue = document.getElementById("final-estimate-value");
     const csrfToken = document.querySelector("#organizer-csrf [name=csrfmiddlewaretoken]")?.value;
 
     async function copyText(value) {
@@ -207,7 +208,10 @@
                     : `До раскрытия нужно ещё голосов: ${state.votes_remaining}`;
                 thresholdHint.classList.toggle("threshold-hint--ready", state.minimum_reached);
             }
-            if (state.summary && averageValue) averageValue.textContent = state.summary.average;
+            if (state.summary) {
+                if (averageValue) averageValue.textContent = state.summary.average ?? "—";
+                if (finalEstimateValue) finalEstimateValue.textContent = state.summary.final_estimate ?? "—";
+            }
             if (state.votes) renderRevealedVotes(state.votes);
             renderQueueProgress(state.queue_items, state.minimum_participants);
         } catch (_error) {

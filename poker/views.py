@@ -37,6 +37,7 @@ from .models import (
     VotingRound,
     VotingSession,
     VotingSessionTask,
+    estimate_on_scale,
 )
 
 
@@ -71,14 +72,13 @@ def _session_estimate_export_rows(voting_session):
     for item in queue_items:
         if not item.export_estimate_count:
             continue
-        average = Decimal(item.export_estimate_sum) / Decimal(
-            item.export_estimate_count
-        )
         rows.append(
             (
                 item.task.number,
                 item.task.title,
-                average.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
+                estimate_on_scale(
+                    item.export_estimate_sum, item.export_estimate_count
+                ),
             )
         )
     return rows
@@ -299,7 +299,8 @@ def _focus_next_open_item(voting_session, current_position):
 def _queue_context(voting_session):
     queue_items = list(
         voting_session.queue_items.select_related("task", "current_round").annotate(
-            vote_count=Count("current_round__votes")
+            vote_count=Count("current_round__votes"),
+            vote_sum=Sum("current_round__votes__value"),
         )
     )
     completed = sum(
@@ -325,6 +326,18 @@ def _queue_context(voting_session):
     for index, item in enumerate(queue_items, start=1):
         item.display_position = index
         item.is_current = item.task_id == voting_session.current_task_id
+        item.accepted_average_display = None
+        item.accepted_estimate = None
+        if (
+            item.status == VotingSessionTask.Status.COMPLETED
+            and item.current_round
+            and item.current_round.status == VotingRound.Status.CLOSED
+            and item.vote_count
+        ):
+            item.accepted_average_display = _format_decimal(
+                Decimal(item.vote_sum) / Decimal(item.vote_count)
+            )
+            item.accepted_estimate = estimate_on_scale(item.vote_sum, item.vote_count)
     focusable_items = [
         item for item in queue_items if item.status == VotingSessionTask.Status.ACTIVE
     ]
@@ -955,15 +968,15 @@ def session_export_csv(request, pk):
     )
     response.write("\ufeff")
     writer = csv.writer(response, lineterminator="\r\n")
-    writer.writerow(("Код задачи", "Наименование", "Средняя оценка, ч"))
-    for task_number, title, average in _session_estimate_export_rows(
+    writer.writerow(("Код задачи", "Наименование", "Итоговая оценка, ч"))
+    for task_number, title, final_estimate in _session_estimate_export_rows(
         voting_session
     ):
         writer.writerow(
             (
                 _safe_csv_text(task_number),
                 _safe_csv_text(title),
-                _format_decimal(average),
+                final_estimate,
             )
         )
     return response
@@ -983,7 +996,7 @@ def session_export_xlsx(request, pk):
     sheet = workbook.active
     sheet.title = "Оценённые задачи"
     sheet.sheet_view.showGridLines = False
-    sheet.append(("Код задачи", "Наименование", "Средняя оценка, ч"))
+    sheet.append(("Код задачи", "Наименование", "Итоговая оценка, ч"))
 
     header_fill = PatternFill("solid", fgColor="243B53")
     for cell in sheet[1]:
@@ -991,12 +1004,12 @@ def session_export_xlsx(request, pk):
         cell.fill = header_fill
         cell.alignment = Alignment(horizontal="center", vertical="center")
 
-    for row_number, (task_number, title, average) in enumerate(rows, start=2):
-        sheet.append((str(task_number), str(title), float(average)))
+    for row_number, (task_number, title, final_estimate) in enumerate(rows, start=2):
+        sheet.append((str(task_number), str(title), final_estimate))
         sheet.cell(row=row_number, column=1).data_type = "s"
         sheet.cell(row=row_number, column=2).data_type = "s"
         sheet.cell(row=row_number, column=2).alignment = Alignment(wrap_text=True)
-        sheet.cell(row=row_number, column=3).number_format = "0.##"
+        sheet.cell(row=row_number, column=3).number_format = "0"
 
     for index, width in enumerate((22, 72, 22), start=1):
         sheet.column_dimensions[get_column_letter(index)].width = width
@@ -1335,6 +1348,7 @@ def session_state(request, pk):
                 "count": round_summary["count"],
                 "sum": round_summary["sum"],
                 "average": _format_decimal(round_summary["average"]),
+                "final_estimate": round_summary["final_estimate"],
             }
 
     participant_progress = _participant_progress(voting_session, voted_ids)
@@ -1540,6 +1554,7 @@ def room_state(request, token):
         "minimum_reached": vote_count >= voting_session.minimum_participants,
         "votes": [],
         "average": None,
+        "final_estimate": None,
     }
     if voting_round.status in (
         VotingRound.Status.REVEALED,
@@ -1552,9 +1567,9 @@ def room_state(request, token):
             {"name": item.participant.name, "value": item.value}
             for item in revealed_votes
         ]
-        round_data["average"] = _format_decimal(
-            voting_round.summary()["average"]
-        )
+        summary = voting_round.summary()
+        round_data["average"] = _format_decimal(summary["average"])
+        round_data["final_estimate"] = summary["final_estimate"]
 
     response["current_task"] = {
         "id": queue_item.task_id,
@@ -2013,7 +2028,7 @@ def sprint_export(request, pk):
         "№",
         "Номер задачи",
         "Название",
-        "Средняя оценка, часы",
+        "Итоговая оценка, ч",
         "Сумма оценок, часы",
         "Количество голосов",
         "Тип задачи",
@@ -2033,13 +2048,13 @@ def sprint_export(request, pk):
                 row_number - 1,
                 task.number,
                 task.title,
-                f"=E{row_number}/F{row_number}" if task.estimate_count else None,
+                task.estimate,
                 task.estimate_sum,
                 task.estimate_count,
                 task.get_competency_display(),
             )
         )
-        sheet.cell(row=row_number, column=4).number_format = "0.00"
+        sheet.cell(row=row_number, column=4).number_format = "0"
 
     if items:
         total_row = len(items) + 2
@@ -2047,7 +2062,7 @@ def sprint_export(request, pk):
         sheet.cell(row=total_row, column=3).font = Font(bold=True)
         sheet.cell(row=total_row, column=4, value=f"=SUM(D2:D{total_row - 1})")
         sheet.cell(row=total_row, column=4).font = Font(bold=True)
-        sheet.cell(row=total_row, column=4).number_format = "0.00"
+        sheet.cell(row=total_row, column=4).number_format = "0"
 
     widths = (6, 20, 70, 20, 18, 22, 20)
     for index, width in enumerate(widths, start=1):
