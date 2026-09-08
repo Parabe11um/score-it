@@ -1,3 +1,4 @@
+import csv
 import uuid
 from decimal import Decimal, ROUND_HALF_UP
 
@@ -5,7 +6,7 @@ from django.contrib import messages
 from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
 from django.db import transaction
-from django.db.models import Count, Exists, Max, OuterRef, Q
+from django.db.models import Count, Exists, Max, OuterRef, Q, Sum
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -44,6 +45,43 @@ def _format_decimal(value):
         return None
     rounded = value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     return format(rounded.normalize(), "f")
+
+
+def _safe_csv_text(value):
+    text = str(value)
+    if text.lstrip().startswith(("=", "+", "-", "@")):
+        return f"'{text}"
+    return text
+
+
+def _session_estimate_export_rows(voting_session):
+    queue_items = (
+        voting_session.queue_items.select_related("task", "current_round")
+        .filter(
+            status=VotingSessionTask.Status.COMPLETED,
+            current_round__status=VotingRound.Status.CLOSED,
+        )
+        .annotate(
+            export_estimate_sum=Sum("current_round__votes__value"),
+            export_estimate_count=Count("current_round__votes"),
+        )
+        .order_by("position", "pk")
+    )
+    rows = []
+    for item in queue_items:
+        if not item.export_estimate_count:
+            continue
+        average = Decimal(item.export_estimate_sum) / Decimal(
+            item.export_estimate_count
+        )
+        rows.append(
+            (
+                item.task.number,
+                item.task.title,
+                average.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
+            )
+        )
+    return rows
 
 
 def _project_for_user(user, pk):
@@ -876,6 +914,7 @@ def session_manage(request, pk):
     participant_progress = _participant_progress(
         voting_session, current_round_voted_ids
     )
+    session_export_rows = _session_estimate_export_rows(voting_session)
     for participant in participant_progress:
         participant.resume_url = _participant_resume_url(
             request, voting_session, participant
@@ -897,12 +936,81 @@ def session_manage(request, pk):
                 item.progress_status == "completed"
                 for item in participant_progress
             ),
+            "session_export_count": len(session_export_rows),
             "average_display": _format_decimal(summary["average"])
             if summary
             else None,
             "public_url": public_url,
         },
     )
+
+
+@login_required
+@require_GET
+def session_export_csv(request, pk):
+    voting_session = _session_for_user(request.user, pk)
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = (
+        f'attachment; filename="session_{voting_session.pk}_estimates.csv"'
+    )
+    response.write("\ufeff")
+    writer = csv.writer(response, lineterminator="\r\n")
+    writer.writerow(("Код задачи", "Наименование", "Средняя оценка, ч"))
+    for task_number, title, average in _session_estimate_export_rows(
+        voting_session
+    ):
+        writer.writerow(
+            (
+                _safe_csv_text(task_number),
+                _safe_csv_text(title),
+                _format_decimal(average),
+            )
+        )
+    return response
+
+
+@login_required
+@require_GET
+def session_export_xlsx(request, pk):
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.utils import get_column_letter
+
+    voting_session = _session_for_user(request.user, pk)
+    rows = _session_estimate_export_rows(voting_session)
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Оценённые задачи"
+    sheet.sheet_view.showGridLines = False
+    sheet.append(("Код задачи", "Наименование", "Средняя оценка, ч"))
+
+    header_fill = PatternFill("solid", fgColor="243B53")
+    for cell in sheet[1]:
+        cell.font = Font(color="FFFFFF", bold=True)
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+
+    for row_number, (task_number, title, average) in enumerate(rows, start=2):
+        sheet.append((str(task_number), str(title), float(average)))
+        sheet.cell(row=row_number, column=1).data_type = "s"
+        sheet.cell(row=row_number, column=2).data_type = "s"
+        sheet.cell(row=row_number, column=2).alignment = Alignment(wrap_text=True)
+        sheet.cell(row=row_number, column=3).number_format = "0.##"
+
+    for index, width in enumerate((22, 72, 22), start=1):
+        sheet.column_dimensions[get_column_letter(index)].width = width
+    sheet.freeze_panes = "A2"
+    sheet.auto_filter.ref = f"A1:C{max(1, len(rows) + 1)}"
+
+    response = HttpResponse(
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    response["Content-Disposition"] = (
+        f'attachment; filename="session_{voting_session.pk}_estimates.xlsx"'
+    )
+    workbook.save(response)
+    return response
 
 
 @login_required

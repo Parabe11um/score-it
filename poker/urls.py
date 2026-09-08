@@ -38,6 +38,16 @@ urlpatterns = [
     path("projects/<int:pk>/sessions/new/", views.session_create, name="session_create"),
     path("projects/<int:pk>/sprints/new/", views.sprint_create, name="sprint_create"),
     path("sessions/<int:pk>/", views.session_manage, name="session_manage"),
+    path(
+        "sessions/<int:pk>/export/csv/",
+        views.session_export_csv,
+        name="session_export_csv",
+    ),
+    path(
+        "sessions/<int:pk>/export/xlsx/",
+        views.session_export_xlsx,
+        name="session_export_xlsx",
+    ),
     path("sessions/<int:pk>/start/", views.session_start, name="session_start"),
     path(
         "sessions/<int:pk>/navigate/<str:direction>/",

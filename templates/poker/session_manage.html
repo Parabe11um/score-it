@@ -17,6 +17,8 @@
         </div>
     </div>
     <div class="page-heading__actions">
+        <a class="button button--secondary" href="{% url 'poker:session_export_csv' voting_session.pk %}">Оценки CSV · {{ session_export_count }}</a>
+        <a class="button button--secondary" href="{% url 'poker:session_export_xlsx' voting_session.pk %}">Оценки XLSX · {{ session_export_count }}</a>
         <form method="post" action="{% url 'poker:session_copy' voting_session.pk %}" onsubmit="return confirm('Создать новую черновую комнату с такой же очередью?');">
             {% csrf_token %}<button class="button button--secondary" type="submit">Копировать</button>
         </form>

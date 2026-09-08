@@ -1,5 +1,6 @@
+import csv
 import uuid
-from io import BytesIO
+from io import BytesIO, StringIO
 from datetime import timedelta
 from decimal import Decimal
 
@@ -436,6 +437,152 @@ class VotingFlowTests(TestCase):
         self.assertEqual(self.task.estimate_count, 2)
         self.assertEqual(self.task.estimate_display, "5")
         self.assertIsNone(self.voting_session.current_task)
+
+    def test_room_exports_all_accepted_estimates_in_csv_and_xlsx(self):
+        first_participant = Participant.objects.create(
+            session=self.voting_session,
+            name="Анна",
+        )
+        second_participant = Participant.objects.create(
+            session=self.voting_session,
+            name="Борис",
+        )
+        task_specs = (
+            (
+                "ABS-SA-1",
+                "Подготовить требования",
+                Task.Competency.ANALYSIS,
+                (20, 32),
+            ),
+            (
+                "ABS-DEV-1",
+                "Реализовать обработчик",
+                Task.Competency.DEVELOPMENT,
+                (4, 8),
+            ),
+            (
+                "ABS-QA-1",
+                "Проверить обработчик",
+                Task.Competency.TESTING,
+                (1, 2),
+            ),
+        )
+        for position, (number, title, competency, values) in enumerate(
+            task_specs, start=1
+        ):
+            task = Task.objects.create(
+                project=self.project,
+                number=number,
+                title=title,
+                competency=competency,
+                status=Task.Status.ESTIMATED,
+                estimate_sum=52,
+                estimate_count=1,
+            )
+            voting_round = VotingRound.objects.create(
+                session=self.voting_session,
+                task=task,
+                status=VotingRound.Status.CLOSED,
+            )
+            Vote.objects.create(
+                voting_round=voting_round,
+                participant=first_participant,
+                value=values[0],
+            )
+            Vote.objects.create(
+                voting_round=voting_round,
+                participant=second_participant,
+                value=values[1],
+            )
+            VotingSessionTask.objects.create(
+                session=self.voting_session,
+                task=task,
+                current_round=voting_round,
+                position=position,
+                status=VotingSessionTask.Status.COMPLETED,
+                completed_at=timezone.now(),
+            )
+
+        unfinished_task = Task.objects.create(
+            project=self.project,
+            number="ABS-PENDING-1",
+            title="Ещё оценивается",
+        )
+        unfinished_round = VotingRound.objects.create(
+            session=self.voting_session,
+            task=unfinished_task,
+            status=VotingRound.Status.REVEALED,
+        )
+        Vote.objects.create(
+            voting_round=unfinished_round,
+            participant=first_participant,
+            value=12,
+        )
+        VotingSessionTask.objects.create(
+            session=self.voting_session,
+            task=unfinished_task,
+            current_round=unfinished_round,
+            position=4,
+            status=VotingSessionTask.Status.ACTIVE,
+        )
+
+        room_page = self.organizer.get(self.voting_session.get_absolute_url())
+        self.assertContains(room_page, "Оценки CSV · 3")
+        self.assertContains(room_page, "Оценки XLSX · 3")
+
+        csv_response = self.organizer.get(
+            reverse("poker:session_export_csv", args=[self.voting_session.pk])
+        )
+        self.assertEqual(csv_response.status_code, 200)
+        self.assertEqual(csv_response["Content-Type"], "text/csv; charset=utf-8")
+        csv_rows = list(
+            csv.reader(StringIO(csv_response.content.decode("utf-8-sig")))
+        )
+        self.assertEqual(
+            csv_rows,
+            [
+                ["Код задачи", "Наименование", "Средняя оценка, ч"],
+                ["ABS-SA-1", "Подготовить требования", "26"],
+                ["ABS-DEV-1", "Реализовать обработчик", "6"],
+                ["ABS-QA-1", "Проверить обработчик", "1.5"],
+            ],
+        )
+
+        xlsx_response = self.organizer.get(
+            reverse("poker:session_export_xlsx", args=[self.voting_session.pk])
+        )
+        self.assertEqual(xlsx_response.status_code, 200)
+        self.assertEqual(
+            xlsx_response["Content-Type"],
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        workbook = load_workbook(BytesIO(xlsx_response.content), data_only=False)
+        sheet = workbook["Оценённые задачи"]
+        self.assertEqual(
+            list(sheet.values),
+            [
+                ("Код задачи", "Наименование", "Средняя оценка, ч"),
+                ("ABS-SA-1", "Подготовить требования", 26),
+                ("ABS-DEV-1", "Реализовать обработчик", 6),
+                ("ABS-QA-1", "Проверить обработчик", 1.5),
+            ],
+        )
+        self.assertEqual(sheet.freeze_panes, "A2")
+        self.assertEqual(sheet.auto_filter.ref, "A1:C4")
+        self.assertFalse(sheet.sheet_view.showGridLines)
+
+    def test_other_organizer_cannot_export_room_estimates(self):
+        other_user = get_user_model().objects.create_user(
+            "other", password="secret"
+        )
+        other_organizer = Client()
+        other_organizer.force_login(other_user)
+
+        for route_name in ("session_export_csv", "session_export_xlsx"):
+            response = other_organizer.get(
+                reverse(f"poker:{route_name}", args=[self.voting_session.pk])
+            )
+            self.assertEqual(response.status_code, 404)
 
     def test_vote_rejects_value_outside_scale(self):
         participant = self.join_participant("Анна")
