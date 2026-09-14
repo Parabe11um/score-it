@@ -1,4 +1,4 @@
-"""Read EVA task exports without treating zero or another estimate field as empty."""
+"""Read EVA task exports, treating an empty hour estimate or numeric zero as unset."""
 
 import csv
 import re
@@ -67,6 +67,19 @@ def _normalise(value):
     return " ".join(_text(value).lstrip("\ufeff").split()).casefold()
 
 
+def _has_hour_estimate(value):
+    """Only blank values and finite numeric zeros are eligible for import."""
+    value = _text(value)
+    if not value:
+        return False
+    try:
+        estimate = Decimal(value.replace(",", "."))
+    except InvalidOperation:
+        # Formulas and unrecognised nonempty values must not bypass the filter.
+        return True
+    return not (estimate.is_finite() and estimate.is_zero())
+
+
 class _DescriptionText(HTMLParser):
     """Keep paragraphs and lists; never store executable source markup."""
 
@@ -120,7 +133,7 @@ class ParsedTaskImport:
     tasks: list[ImportedTask] = field(default_factory=list)
     total_rows: int = 0
     skipped_estimated: int = 0
-    skipped_zero: int = 0
+    zero_estimate_rows: int = 0
     duplicates: int = 0
 
 
@@ -264,9 +277,10 @@ def parse_task_file(upload):
         (n, row) for n, row in enumerate(rows[1:], 2)
         if any(_text(cell) for cell in row)
     ]
-    # A duplicate code with an estimate must not be reimported through a blank row.
+    # A filled nonzero/invalid estimate blocks duplicate blank and zero rows too.
     estimated_numbers = {
-        value(row, "number") for _, row in data_rows if value(row, "estimate")
+        value(row, "number") for _, row in data_rows
+        if _has_hour_estimate(value(row, "estimate"))
     }
     result = ParsedTaskImport(total_rows=len(data_rows))
     seen = {}
@@ -274,12 +288,11 @@ def parse_task_file(upload):
     for row_number, row in data_rows:
         number = value(row, "number")
         estimate = value(row, "estimate")
-        if estimate or number in estimated_numbers:
+        has_estimate = _has_hour_estimate(estimate)
+        if estimate and not has_estimate:
+            result.zero_estimate_rows += 1
+        if has_estimate or number in estimated_numbers:
             result.skipped_estimated += 1
-            try:
-                result.skipped_zero += int(Decimal(estimate.replace(",", ".")) == 0)
-            except InvalidOperation:
-                pass
             continue
         title = value(row, "title")
         type_name = value(row, "competency")

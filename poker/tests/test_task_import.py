@@ -60,13 +60,23 @@ class TaskFileParserTests(SimpleTestCase):
                 self.assertEqual(parsed.tasks[0].description, "Строка 1\nСтрока 2")
                 self.assertEqual(parsed.tasks[0].external_url, EVA_TASK_URL_PREFIX + IDENTIFIER)
 
-    def test_xlsx_skips_every_nonempty_hour_estimate_including_zero_and_formula(self):
-        estimates = [0, "0", "0.0", "0,00", 32, "5", "—", "=1-1", "неизвестно", None, "", "  "]
+    def test_csv_and_xlsx_import_blank_and_zero_but_skip_other_estimates(self):
+        zeros = [0, 0.0, "0", "0.0", "0,00", " 0 ", "+0", "-0.00", "0e0"]
+        blanks = [None, "", "  "]
+        filled = [32, "5", "0.01", "-1", "—", "=1-1", "=0", "неизвестно",
+                  "NaN", "sNaN", "Infinity", False]
+        estimates = zeros + blanks + filled
         rows = [task_row(f"ABS-{i}", estimate=value) for i, value in enumerate(estimates)]
-        parsed = parse_task_file(xlsx_upload(rows))
-        self.assertEqual(parsed.skipped_estimated, 9)
-        self.assertEqual(parsed.skipped_zero, 4)
-        self.assertEqual([task.number for task in parsed.tasks], ["ABS-9", "ABS-10", "ABS-11"])
+        for upload in (csv_upload, xlsx_upload):
+            with self.subTest(format=upload.__name__):
+                parsed = parse_task_file(upload(rows))
+                self.assertEqual(parsed.total_rows, len(estimates))
+                self.assertEqual(parsed.skipped_estimated, len(filled))
+                self.assertEqual(parsed.zero_estimate_rows, len(zeros))
+                self.assertEqual(
+                    [task.number for task in parsed.tasks],
+                    [f"ABS-{i}" for i in range(len(zeros) + len(blanks))],
+                )
 
     def test_uses_hour_field_and_exact_headers_in_any_order(self):
         row = task_row()
@@ -105,12 +115,27 @@ class TaskFileParserTests(SimpleTestCase):
         with self.assertRaisesMessage(ValidationError, "повторяется с разными данными"):
             parse_task_file(csv_upload([row, task_row(title="Другое название")]))
 
-    def test_estimated_duplicate_cannot_be_reimported_as_blank(self):
-        for rows in ([task_row(), task_row(estimate=0)], [task_row(estimate=32), task_row()]):
-            with self.subTest(rows=rows):
-                parsed = parse_task_file(csv_upload(rows))
-                self.assertEqual(parsed.tasks, [])
-                self.assertEqual(parsed.skipped_estimated, 2)
+    def test_estimated_duplicate_cannot_be_reimported_as_blank_or_zero(self):
+        for upload in (csv_upload, xlsx_upload):
+            for estimate in (32, "=0", "неизвестно"):
+                rows = [task_row(), task_row(estimate=0), task_row(estimate=estimate)]
+                for ordered_rows in (rows, list(reversed(rows))):
+                    with self.subTest(format=upload.__name__, rows=ordered_rows):
+                        parsed = parse_task_file(upload(ordered_rows))
+                        self.assertEqual(parsed.tasks, [])
+                        self.assertEqual(parsed.skipped_estimated, 3)
+                        self.assertEqual(parsed.zero_estimate_rows, 1)
+
+    def test_blank_and_zero_duplicates_import_one_task(self):
+        for upload in (csv_upload, xlsx_upload):
+            with self.subTest(format=upload.__name__):
+                parsed = parse_task_file(upload([
+                    task_row(), task_row(estimate=0), task_row(estimate="0,00"),
+                ]))
+                self.assertEqual([task.number for task in parsed.tasks], ["ABS-1"])
+                self.assertEqual(parsed.duplicates, 2)
+                self.assertEqual(parsed.skipped_estimated, 0)
+                self.assertEqual(parsed.zero_estimate_rows, 2)
 
     def test_unknown_type_and_invalid_identifier_give_row_errors(self):
         for row, error in ((task_row(competency="Дефект"), "неизвестный тип"), (task_row(), "идентификатор объекта")):
@@ -157,30 +182,35 @@ class TaskFileImportViewsTests(TestCase):
         self.client.force_login(self.owner)
         self.url = reverse("poker:task_import_file", args=[self.project.pk])
 
-    def test_project_import_skips_source_estimates_and_is_idempotent(self):
+    def test_project_import_accepts_zero_skips_source_estimates_and_is_idempotent(self):
         rows = [task_row(), task_row("ABS-2", estimate=0), task_row("ABS-3", estimate=32)]
         response = self.client.post(self.url, {"task_file": xlsx_upload(rows)}, follow=True)
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Добавлено: 1")
-        self.assertContains(response, "Пропущено с оценкой в EVA: 2 (из них с нулевой: 1)")
-        task = self.project.tasks.get()
-        self.assertEqual(task.number, "ABS-1")
-        self.assertEqual(task.competency, "analysis")
-        self.assertEqual(task.description, "Первая строка\nВторая строка")
-        self.assertIsNone(task.estimate)
-        self.assertIsNone(task.estimate_sum)
-        self.assertIsNone(task.estimate_count)
-        self.assertEqual(task.external_url, EVA_TASK_URL_PREFIX + IDENTIFIER)
+        self.assertContains(response, "Добавлено: 2")
+        self.assertContains(response, "Пропущено с оценкой в EVA: 1;")
+        self.assertContains(response, "строк с нулём вместо оценки в EVA: 1;")
+        self.assertContains(response, "числовым нулём")
+        self.assertEqual(self.project.tasks.count(), 2)
+        for number in ("ABS-1", "ABS-2"):
+            task = self.project.tasks.get(number=number)
+            self.assertEqual(task.competency, "analysis")
+            self.assertEqual(task.description, "Первая строка\nВторая строка")
+            self.assertIsNone(task.estimate)
+            self.assertIsNone(task.estimate_sum)
+            self.assertIsNone(task.estimate_count)
+            self.assertNotEqual(task.status, Task.Status.ESTIMATED)
+            self.assertEqual(task.external_url, EVA_TASK_URL_PREFIX + IDENTIFIER)
+        self.assertFalse(Vote.objects.exists())
         response = self.client.post(self.url, {"task_file": csv_upload(rows)}, follow=True)
-        self.assertContains(response, "без изменений: 1")
-        self.assertEqual(self.project.tasks.count(), 1)
+        self.assertContains(response, "без изменений: 2")
+        self.assertEqual(self.project.tasks.count(), 2)
 
     def test_import_updates_only_unestimated_tasks_and_preserves_existing_estimates(self):
         pending = Task.objects.create(project=self.project, number="ABS-1", title="Старое")
         zero = Task.objects.create(project=self.project, number="ABS-2", title="Нулевая", estimate_sum=0, estimate_count=4, status=Task.Status.ESTIMATED)
         estimated = Task.objects.create(project=self.project, number="ABS-3", title="Оценена", estimate_sum=116, estimate_count=4, status=Task.Status.ESTIMATED)
         completed = Task.objects.create(project=self.project, number="ABS-4", title="Закрытая", completed_at=timezone.now())
-        rows = [task_row(f"ABS-{i}", competency="Разработка АБС") for i in range(1, 5)]
+        rows = [task_row(f"ABS-{i}", estimate=0, competency="Разработка АБС") for i in range(1, 5)]
         response = self.client.post(self.url, {"task_file": csv_upload(rows)}, follow=True)
         self.assertContains(response, "обновлено: 1")
         self.assertContains(response, "уже оценённых или завершённых в score-it: 3")
@@ -223,18 +253,21 @@ class TaskFileImportViewsTests(TestCase):
         url = reverse("poker:session_import_file", args=[room.pk])
         rows = [task_row(), task_row("ABS-2", estimate=0)]
         response = self.client.post(url, {"task_file": csv_upload(rows)}, follow=True)
-        self.assertContains(response, "В очередь добавлено: 1")
-        self.assertEqual(room.queue_items.count(), 2)
-        imported = room.queue_items.get(position=2)
-        self.assertEqual(imported.task.number, "ABS-1")
-        self.assertEqual(imported.current_round.status, VotingRound.Status.VOTING)
+        self.assertContains(response, "В очередь добавлено: 2")
+        self.assertEqual(room.queue_items.count(), 3)
+        for position, number in ((2, "ABS-1"), (3, "ABS-2")):
+            imported = room.queue_items.get(position=position)
+            self.assertEqual(imported.task.number, number)
+            self.assertIsNone(imported.task.estimate)
+            self.assertEqual(imported.current_round.status, VotingRound.Status.VOTING)
+            self.assertFalse(imported.current_round.votes.exists())
         participant.refresh_from_db()
         self.assertIsNone(participant.completed_at)
         vote.refresh_from_db()
         self.assertEqual(vote.value, 12)
         self.client.post(url, {"task_file": csv_upload(rows)})
-        self.assertEqual(room.queue_items.count(), 2)
-        self.assertEqual(room.rounds.count(), 2)
+        self.assertEqual(room.queue_items.count(), 3)
+        self.assertEqual(room.rounds.count(), 3)
 
     def test_room_import_cannot_cross_owner_or_write_to_finished_room(self):
         room = VotingSession.objects.create(project=self.project, name="Закончена", status=VotingSession.Status.FINISHED)

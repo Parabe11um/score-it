@@ -6,6 +6,6 @@
         {% for error in task_file_import_form.task_file.errors %}<div class="form-error">{{ error }}</div>{% endfor %}
         <div class="help-text">{{ task_file_import_form.task_file.help_text }}</div>
     </div>
-    <p class="help-text">Загрузятся только задачи с пустым полем «Оценка задачи, час». Любая заполненная оценка, включая 0, означает пропуск. Уже оценённые задачи score-it тоже пропускаются.</p>
+    <p class="help-text">Загрузятся задачи с пустым полем «Оценка задачи, час» или числовым нулём (0, 0.0, 0,00). Ненулевые значения, формулы и некорректные оценки означают пропуск. Уже оценённые или завершённые задачи score-it тоже пропускаются.</p>
     <button class="button button--primary" type="submit">{{ file_import_button|default:"Загрузить задачи из файла" }}</button>
 </form>
