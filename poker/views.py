@@ -833,8 +833,8 @@ def _file_import_message(parsed, saved):
         f"Импорт завершён. Строк в файле: {parsed.total_rows}. "
         f"Добавлено: {saved.created}; обновлено: {saved.updated}; "
         f"без изменений: {saved.unchanged}. "
-        f"Пропущено с оценкой в EVA: {parsed.skipped_estimated} "
-        f"(из них с нулевой: {parsed.skipped_zero}); "
+        f"Пропущено с оценкой в EVA: {parsed.skipped_estimated}; "
+        f"строк с нулём вместо оценки в EVA: {parsed.zero_estimate_rows}; "
         f"уже оценённых или завершённых в score-it: {saved.skipped_local}; "
         f"повторных строк: {parsed.duplicates}."
     )
