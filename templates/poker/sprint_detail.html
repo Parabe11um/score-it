@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}{{ sprint.name }} — score it{% endblock %}
 
@@ -7,9 +8,10 @@
 <div class="page-heading page-heading--compact">
     <div><span class="eyebrow">ПЛАНИРОВАНИЕ СПРИНТА</span><h1>{{ sprint.name }}</h1><p>{{ sprint.get_status_display }}{% if sprint.archived_at %} · В архиве{% endif %}{% if sprint.start_date %} · {{ sprint.start_date|date:"d.m.Y" }}{% endif %}{% if sprint.end_date %} — {{ sprint.end_date|date:"d.m.Y" }}{% endif %}{% if sprint.goal %} · {{ sprint.goal }}{% endif %}</p></div>
     <div class="page-heading__actions">
-        <a class="button button--secondary" href="{% url 'poker:sprint_export' sprint.pk %}">Выгрузить Excel</a>
-        <form method="post" action="{% url 'poker:sprint_copy' sprint.pk %}" onsubmit="return confirm('Создать планируемую копию спринта с тем же составом?');">
-            {% csrf_token %}<button class="button button--secondary" type="submit">Копировать</button>
+        <a class="button button--primary" href="{% url 'poker:sprint_export_eva' sprint.pk %}">Excel для EVA</a>
+        <a class="button button--secondary" href="{% url 'poker:sprint_export' sprint.pk %}">Отчёт по ёмкости</a>
+        <form method="post" action="{% url 'poker:sprint_copy' sprint.pk %}" onsubmit="return confirm('Создать спринт с той же ёмкостью, без дат и задач?');">
+            {% csrf_token %}<button class="button button--secondary" type="submit">Копировать настройки</button>
         </form>
         {% if sprint.archived_at %}
             <form method="post" action="{% url 'poker:sprint_restore' sprint.pk %}">
@@ -43,6 +45,17 @@
 {% endif %}
 
 {% if not sprint.archived_at and sprint.status != "completed" %}
+<details class="card section-card" {% if import_form.errors or not available_tasks and not sprint_items %}open{% endif %}>
+    <summary class="section-heading"><div><h2>Импорт для планирования из EVA</h2><p>Загрузите CSV/XLSX производственной доски со всеми полями.</p></div></summary>
+    <form method="post" enctype="multipart/form-data" action="{% url 'poker:sprint_import' sprint.pk %}" class="stack-form">
+        {% csrf_token %}
+        <div class="field"><label for="{{ import_form.task_file.id_for_label }}">{{ import_form.task_file.label }}</label>{{ import_form.task_file }}<small>{{ import_form.task_file.help_text }}</small>
+            {% for error in import_form.task_file.errors %}<div class="form-error">{{ error }}</div>{% endfor %}
+        </div>
+        <p class="muted">Оценённые задачи аналитики, разработки и тестирования попадут в общий список доступных задач проекта. Закрытые, выполненные и задачи без оценки или с нулём пропускаются. Состав спринта выбирается отдельно.</p>
+        <div class="section-footer"><button class="button button--primary" type="submit">Загрузить доступные задачи</button></div>
+    </form>
+</details>
 <details class="card capacity-editor" {% if capacity_form.errors %}open{% endif %}>
     <summary class="section-heading">
         <div><h2>Настроить ёмкость в часах</h2><p>Доступные часы аналитики, разработки и тестирования можно менять в течение планирования.</p></div>
@@ -112,13 +125,13 @@
 {% endif %}
 
 <section class="card section-card">
-    <div class="section-heading"><div><h2>Состав спринта</h2><p>Загрузка — сумма итоговых оценок задач по шкале.</p></div></div>
+    <div class="section-heading"><div><h2>Состав спринта</h2><p>Загрузка — сумма итоговых оценок задач по шкале. «Excel для EVA» выгружает этот состав и название спринта; используйте такое же название в EVA.</p></div></div>
     <div class="table-wrap">
         <table>
             <thead><tr><th>№</th><th>Задача</th><th>Статус</th><th class="align-right">Итог, ч</th><th></th></tr></thead>
             <tbody>
             {% for item in sprint_items %}
-                <tr class="{% if item.status == 'transferred' %}sprint-task--transferred{% endif %}"><td>{{ forloop.counter }}</td><td><span class="task-number">{{ item.task.number }}</span>{% if item.task.competency %} <span class="competency-badge competency-badge--{{ item.task.competency }}">{{ item.task.get_competency_display }}</span>{% endif %}<div class="task-title-secondary">{{ item.task.title }}</div></td><td>{% if item.status == "transferred" %}<span class="badge">Перенесена{% if item.transferred_to %} → {{ item.transferred_to.name }}{% endif %}</span>{% else %}<span class="badge badge--active">Запланирована</span>{% endif %}</td><td class="align-right"><strong class="estimate-value">{{ item.task.estimate_display }}</strong></td><td class="align-right">{% if item.status == "planned" and not sprint.archived_at and sprint.status != "completed" %}<form method="post" action="{% url 'poker:sprint_remove_task' sprint.pk item.task.pk %}" onsubmit="return confirm('Убрать задачу {{ item.task.number|escapejs }} из спринта?');">{% csrf_token %}<button class="icon-button" type="submit" title="Убрать из спринта">×</button></form>{% endif %}</td></tr>
+                <tr class="{% if item.status == 'transferred' %}sprint-task--transferred{% endif %}"><td>{{ forloop.counter }}</td><td><span class="task-number">{{ item.task.number }}</span>{% if item.task.competency %} <span class="competency-badge competency-badge--{{ item.task.competency }}">{{ item.task.get_competency_display }}</span>{% endif %}<div class="task-title-secondary">{{ item.task.title }}</div>{% if item.task.eva_unavailable %}<small class="form-error">{{ item.task.get_eva_block_reason_display }}</small>{% endif %}</td><td>{% if item.status == "transferred" %}<span class="badge">Перенесена{% if item.transferred_to %} → {{ item.transferred_to.name }}{% endif %}</span>{% else %}<span class="badge badge--active">Запланирована</span>{% endif %}</td><td class="align-right"><strong class="estimate-value">{{ item.task.estimate_display }}</strong></td><td class="align-right">{% if item.status == "planned" and not sprint.archived_at and sprint.status != "completed" %}<form method="post" action="{% url 'poker:sprint_remove_task' sprint.pk item.task.pk %}" onsubmit="return confirm('Убрать задачу {{ item.task.number|escapejs }} из спринта?');">{% csrf_token %}<button class="icon-button" type="submit" title="Убрать из спринта">×</button></form>{% endif %}</td></tr>
             {% empty %}<tr><td colspan="5" class="table-empty">Добавьте оценённые задачи из списка ниже.</td></tr>{% endfor %}
             </tbody>
         </table>
@@ -138,17 +151,36 @@
 {% endif %}
 
 {% if not sprint.archived_at and sprint.status != "completed" %}
-<section class="card section-card">
-    <div class="section-heading"><div><h2>Доступные задачи</h2><p>Показаны оценённые задачи, ещё не добавленные в другие спринты.</p></div><span class="pill">{{ available_tasks|length }}</span></div>
-    <form method="post" action="{% url 'poker:sprint_add_tasks' sprint.pk %}">
+<section class="card section-card" id="available-tasks">
+    <div class="section-heading"><div><h2>Доступные задачи</h2><p>Общий остаток проекта: после добавления в спринт задачи исчезнут из этого списка во всех спринтах.</p></div><span class="pill">{{ available_tasks|length }}</span></div>
+    <form method="post" action="{% url 'poker:sprint_add_tasks' sprint.pk %}" data-task-picker data-sprint-picker>
         {% csrf_token %}
+        {% if available_tasks %}
+        <div class="planning-filters">
+            <label>Поиск<input class="form-control" type="search" data-task-search placeholder="Код или название"></label>
+            <label>Компетенция<select class="form-control" data-task-competency><option value="all">Все компетенции</option>{% for value, label in competencies %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></label>
+            <button class="button button--secondary button--small" type="button" data-task-select-all>Выбрать видимые</button>
+            <button class="button button--ghost button--small" type="button" data-task-select-none>Снять видимые</button>
+            <span data-task-count aria-live="polite"></span>
+        </div>
+        <div class="selection-capacity" data-capacity-preview aria-live="polite"></div>
+        {% endif %}
         <div class="check-list">
             {% for task in available_tasks %}
-                <label class="check-item"><input type="checkbox" name="task_ids" value="{{ task.pk }}"><span><strong>{{ task.number }}{% if task.competency %} · {{ task.get_competency_display }}{% endif %}</strong><small>{{ task.title }}</small></span><b>{{ task.estimate_display }} ч</b></label>
-            {% empty %}<div class="compact-empty">Нет доступных оценённых задач.</div>{% endfor %}
+                <label class="check-item" data-task-option data-search-text="{{ task.number|lower }} {{ task.title|lower }}" data-competency="{{ task.competency }}" data-estimate="{{ task.estimate }}">
+                    <input type="checkbox" name="task_ids" value="{{ task.pk }}">
+                    <span><strong>{{ task.number }}{% if task.competency %} · {{ task.get_competency_display }}{% endif %}</strong><small>{{ task.title }}</small>{% if task.eva_status %}<small>EVA: {{ task.eva_status }}</small>{% endif %}{% if task.external_url %}<a href="{{ task.external_url }}" target="_blank" rel="noopener noreferrer">Открыть в EVA ↗</a>{% endif %}</span><b>{{ task.estimate_display }} ч</b>
+                </label>
+            {% empty %}<div class="compact-empty">Нет доступных оценённых задач. Загрузите выгрузку EVA или оцените задачи в комнате.</div>{% endfor %}
         </div>
         {% if available_tasks %}<div class="section-footer"><button class="button button--primary" type="submit">Добавить выбранные</button></div>{% endif %}
     </form>
 </section>
 {% endif %}
+{% endblock %}
+
+{% block scripts %}
+{{ planning_preview|json_script:"sprint-planning-data" }}
+<script src="{% static 'js/task-picker.js' %}"></script>
+<script src="{% static 'js/sprint-planner.js' %}"></script>
 {% endblock %}

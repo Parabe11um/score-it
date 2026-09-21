@@ -5,6 +5,7 @@
         const selectAll = picker.querySelector("[data-task-select-all]");
         const selectNone = picker.querySelector("[data-task-select-none]");
         const counter = picker.querySelector("[data-task-count]");
+        const competency = picker.querySelector("[data-task-competency]");
 
         function checkboxFor(option) {
             return option.querySelector('input[type="checkbox"]');
@@ -13,18 +14,23 @@
         function updateCounter() {
             const selected = options.filter((option) => checkboxFor(option)?.checked).length;
             if (counter) counter.textContent = `${selected} выбрано`;
+            picker.dispatchEvent(new CustomEvent("taskpickerchange"));
         }
 
         function visibleOptions() {
             return options.filter((option) => !option.hidden);
         }
 
-        search?.addEventListener("input", () => {
-            const query = search.value.trim().toLocaleLowerCase("ru");
+        function filterOptions() {
+            const query = search?.value.trim().toLocaleLowerCase("ru") || "";
+            const type = competency ? competency.value : "all";
             options.forEach((option) => {
-                option.hidden = Boolean(query) && !option.dataset.searchText.includes(query);
+                option.hidden = (Boolean(query) && !option.dataset.searchText.includes(query)) ||
+                    (type !== "all" && option.dataset.competency !== type);
             });
-        });
+        }
+        search?.addEventListener("input", filterOptions);
+        competency?.addEventListener("change", filterOptions);
 
         selectAll?.addEventListener("click", () => {
             visibleOptions().forEach((option) => {

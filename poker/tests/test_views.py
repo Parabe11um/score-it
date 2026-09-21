@@ -1597,7 +1597,7 @@ class SprintTests(TestCase):
         self.sprint.refresh_from_db()
         self.assertEqual(self.sprint.analysis_capacity, Decimal("8"))
 
-    def test_sprint_copy_keeps_planned_tasks_and_resets_dates(self):
+    def test_sprint_copy_keeps_capacities_without_duplicate_assignments(self):
         self.sprint.start_date = timezone.localdate()
         self.sprint.end_date = timezone.localdate() + timedelta(days=14)
         self.sprint.status = Sprint.Status.ACTIVE
@@ -1634,7 +1634,7 @@ class SprintTests(TestCase):
             list(
                 copied.sprint_tasks.values_list("task_id", "status", "position")
             ),
-            [(self.task.pk, SprintTask.Status.PLANNED, 1)],
+            [],
         )
 
     def test_transfer_preserves_source_history_and_moves_capacity(self):

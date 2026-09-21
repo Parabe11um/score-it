@@ -34,6 +34,10 @@ HEADERS = {
     "estimate": (HOUR_ESTIMATE_HEADER, "Оценка задачи, ч", "Оценка задачи, часы"),
     "html_description": ("Текст", "Описание"),
     "plain_description": ("Текст без html", "Описание без html"),
+    # EVA also exports an unrelated bare «Статус» column. Never use it here.
+    "eva_status": ("Статус.Имя статуса", "Статус задачи"),
+    "eva_status_type": ("Кеш: Тип статуса", "Кэш: Тип статуса", "Тип статуса"),
+    "eva_sprints": ("Спринты", "Спринт", "Спринт.Название", "Спринт.Наименование"),
 }
 COMPETENCIES = {
     "системный анализ": Task.Competency.ANALYSIS,
@@ -247,7 +251,7 @@ def _xlsx_rows(data):
         workbook.close()
 
 
-def parse_task_file(upload):
+def read_task_file_rows(upload):
     extension = Path(upload.name).suffix.lower()
     if extension not in (".csv", ".xlsx"):
         raise ValidationError("Выберите файл CSV или XLSX.")
@@ -267,6 +271,42 @@ def parse_task_file(upload):
         ) from exc
     if not rows:
         raise ValidationError("Файл пуст.")
+    return rows
+
+
+def task_from_row(row, columns, row_number):
+    def value(key):
+        index = columns.get(key)
+        return _text(row[index]) if index is not None and index < len(row) else ""
+
+    number, title = value("number"), value("title")
+    type_name, identifier = value("competency"), value("identifier")
+    error = None
+    if len(row) <= max(columns.values()):
+        error = "недостаточно колонок; проверьте разделитель CSV"
+    elif not number or len(number) > 80:
+        error = "нужен код задачи длиной до 80 символов"
+    elif not title or len(title) > 500:
+        error = "нужно название задачи длиной до 500 символов"
+    elif _normalise(type_name) not in COMPETENCIES:
+        error = f"неизвестный тип «{type_name[:80]}»; укажите аналитику, разработку или тестирование"
+    elif not re.fullmatch(r"CmfTask:[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", identifier):
+        error = "нужен идентификатор объекта CmfTask:UUID для ссылки в EVA"
+    if error:
+        raise ValidationError(f"Строка {row_number}: {error}.")
+    html = value("html_description")
+    description = description_text(html) if html else value("plain_description")
+    if len(description) > 100000:
+        raise ValidationError(f"Строка {row_number}: описание превышает 100 000 символов.")
+    return ImportedTask(
+        number=number, title=title, competency=COMPETENCIES[_normalise(type_name)],
+        description=description,
+        external_url=f"{EVA_TASK_URL_PREFIX}CmfTask:{UUID(identifier.split(':', 1)[1])}",
+    )
+
+
+def parse_task_file(upload):
+    rows = read_task_file_rows(upload)
     columns = _column_mapping(rows[0])
 
     def value(row, key):
@@ -294,41 +334,11 @@ def parse_task_file(upload):
         if has_estimate or number in estimated_numbers:
             result.skipped_estimated += 1
             continue
-        title = value(row, "title")
-        type_name = value(row, "competency")
-        identifier = value(row, "identifier")
-        error = None
-        if len(row) <= max(columns.values()):
-            error = "недостаточно колонок; проверьте разделитель CSV"
-        elif not number or len(number) > 80:
-            error = "нужен код задачи длиной до 80 символов"
-        elif not title or len(title) > 500:
-            error = "нужно название задачи длиной до 500 символов"
-        elif _normalise(type_name) not in COMPETENCIES:
-            error = (
-                f"неизвестный тип «{type_name[:80]}»; "
-                "укажите аналитику, разработку или тестирование"
-            )
-        elif not re.fullmatch(
-            r"CmfTask:[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}",
-            identifier,
-        ):
-            error = "нужен идентификатор объекта CmfTask:UUID для ссылки в EVA"
-        if error:
-            errors.append(f"Строка {row_number}: {error}.")
+        try:
+            task = task_from_row(row, columns, row_number)
+        except ValidationError as exc:
+            errors.extend(exc.messages)
             continue
-        html = value(row, "html_description")
-        description = description_text(html) if html else value(row, "plain_description")
-        if len(description) > 100000:
-            errors.append(f"Строка {row_number}: описание превышает 100 000 символов.")
-            continue
-        task = ImportedTask(
-            number=number,
-            title=title,
-            competency=COMPETENCIES[_normalise(type_name)],
-            description=description,
-            external_url=f"{EVA_TASK_URL_PREFIX}CmfTask:{UUID(identifier.split(':', 1)[1])}",
-        )
         if number in seen:
             if seen[number] != task:
                 errors.append(f"Строка {row_number}: код {number} повторяется с разными данными.")

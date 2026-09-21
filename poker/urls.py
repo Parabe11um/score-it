@@ -108,6 +108,8 @@ urlpatterns = [
         name="room_complete",
     ),
     path("sprints/<int:pk>/", views.sprint_detail, name="sprint_detail"),
+    path("sprints/<int:pk>/import/", views.sprint_import, name="sprint_import"),
+    path("sprints/<int:pk>/export/eva/", views.sprint_export_eva, name="sprint_export_eva"),
     path(
         "sprints/<int:pk>/status/",
         views.sprint_set_status,
