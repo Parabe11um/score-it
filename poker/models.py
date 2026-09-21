@@ -2,6 +2,7 @@ import uuid
 from datetime import timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from functools import cached_property
+from urllib.parse import parse_qs, urlparse
 
 from django.conf import settings
 from django.core.validators import MaxValueValidator, MinValueValidator
@@ -203,6 +204,17 @@ class Task(models.Model):
     estimate_count = models.PositiveIntegerField(
         "Количество голосов", null=True, blank=True
     )
+    imported_estimate = models.PositiveSmallIntegerField(
+        "Оценка из EVA, часы", choices=ESTIMATION_CHOICES, null=True, blank=True
+    )
+    eva_status = models.CharField("Статус в выгрузке EVA", max_length=200, blank=True)
+    eva_sprints = models.TextField("Спринты в выгрузке EVA", blank=True)
+    eva_block_reason = models.CharField(
+        "Причина недоступности по выгрузке EVA", max_length=20, blank=True, default="",
+        choices=(("", "Доступна"), ("closed", "Закрыта или выполнена"),
+                 ("eva_assigned", "Указан спринт EVA"), ("unestimated", "Нет оценки EVA"),
+                 ("invalid_estimate", "Некорректная оценка EVA")),
+    )
     completed_at = models.DateTimeField("Завершена", null=True, blank=True)
     created_at = models.DateTimeField("Создана", auto_now_add=True)
     updated_at = models.DateTimeField("Изменена", auto_now=True)
@@ -236,7 +248,23 @@ class Task(models.Model):
 
     @property
     def estimate(self):
+        if self.imported_estimate is not None:
+            return self.imported_estimate
         return estimate_on_scale(self.estimate_sum, self.estimate_count)
+
+    @property
+    def eva_identifier(self):
+        value = parse_qs(urlparse(self.external_url).query).get("popup", [""])[0]
+        if not value.startswith("CmfTask:"):
+            return ""
+        try:
+            return f"CmfTask:{uuid.UUID(value.split(':', 1)[1])}"
+        except ValueError:
+            return ""
+
+    @property
+    def eva_unavailable(self):
+        return bool(self.eva_block_reason)
 
     @property
     def estimate_display(self):
@@ -249,9 +277,12 @@ class Task(models.Model):
             raise ValueError("Нельзя сохранить оценку без голосов")
         self.estimate_sum = summary["sum"]
         self.estimate_count = summary["count"]
+        self.imported_estimate = None
+        if self.eva_block_reason in ("unestimated", "invalid_estimate"):
+            self.eva_block_reason = ""
         self.status = self.Status.ESTIMATED
         self.save(
-            update_fields=("estimate_sum", "estimate_count", "status", "updated_at")
+            update_fields=("estimate_sum", "estimate_count", "imported_estimate", "eva_block_reason", "status", "updated_at")
         )
 
 

@@ -489,3 +489,10 @@ select.competency-select { width: auto; min-height: 29px; padding: 4px 27px 4px 
     .participant-task-navigation { grid-template-columns: 1fr 1fr; }
     .participant-task-navigation span { grid-column: 1 / -1; grid-row: 1; }
 }
+
+/* Sprint planning from EVA */
+.planning-filters { display: flex; align-items: end; flex-wrap: wrap; gap: 12px; padding: 20px; }
+.planning-filters label { flex: 1 1 220px; display: grid; gap: 6px; }
+.selection-capacity { display: grid; gap: 7px; padding: 16px 20px; background: #f5f8fc; font-size: .9rem; }
+.selection-capacity--over { color: #b54708; font-weight: 700; }
+.check-item[hidden] { display: none; }

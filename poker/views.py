@@ -21,6 +21,7 @@ from .forms import (
     OrganizerRegistrationForm,
     ProjectForm,
     SprintCapacityForm,
+    SprintFileImportForm,
     SprintForm,
     TaskFileImportForm,
     VotingSessionForm,
@@ -41,6 +42,7 @@ from .models import (
     estimate_on_scale,
 )
 from .task_import import save_task_import
+from .sprint_import import available_sprint_tasks, save_sprint_import
 
 
 def _format_decimal(value):
@@ -1805,18 +1807,10 @@ def sprint_detail(request, pk):
     )
 
 
-def _sprint_detail_context(sprint, capacity_form=None):
+def _sprint_detail_context(sprint, capacity_form=None, import_form=None):
     sprint_items = sprint.sprint_tasks.select_related("task", "transferred_to")
     planned_items = sprint_items.filter(status=SprintTask.Status.PLANNED)
-    available_tasks = (
-        sprint.project.tasks.filter(
-            status=Task.Status.ESTIMATED,
-            completed_at__isnull=True,
-        )
-        .exclude(sprint_items__sprint=sprint)
-        .exclude(sprint_items__status=SprintTask.Status.PLANNED)
-        .distinct()
-    )
+    available_tasks = available_sprint_tasks(sprint.project)
     transfer_targets = sprint.project.sprints.filter(
         archived_at__isnull=True,
         status__in=(Sprint.Status.PLANNING, Sprint.Status.ACTIVE),
@@ -1828,7 +1822,54 @@ def _sprint_detail_context(sprint, capacity_form=None):
         "available_tasks": available_tasks,
         "transfer_targets": transfer_targets,
         "capacity_form": capacity_form or SprintCapacityForm(instance=sprint),
+        "import_form": import_form or SprintFileImportForm(),
+        "competencies": Task.Competency.choices,
+        "planning_preview": {
+            "total": sprint.total_estimate,
+            "capacity": sprint.capacity if not sprint.uses_competency_capacities else None,
+            "competencies": [
+                {"key": row["key"], "label": row["label"], "used": row["estimate"],
+                 "capacity": row["capacity"]} for row in sprint.competency_capacity_rows
+            ],
+        },
     }
+
+
+@login_required
+@require_POST
+def sprint_import(request, pk):
+    sprint = _sprint_for_user(request.user, pk)
+    if sprint.archived_at or sprint.status == Sprint.Status.COMPLETED:
+        messages.error(request, "Импорт доступен в планируемом или активном спринте.")
+        return redirect(sprint)
+    form = SprintFileImportForm(request.POST, request.FILES)
+    if not form.is_valid():
+        return render(request, "poker/sprint_detail.html",
+                      _sprint_detail_context(sprint, import_form=form), status=400)
+    parsed = form.parsed_import
+    saved = save_sprint_import(sprint.project, parsed)
+    p, s = parsed.counts, saved.counts
+    messages.success(request,
+        f"Импорт для планирования завершён. Строк: {p['total']}. "
+        f"Добавлено: {s['created']}; обновлено: {s['updated']}; без изменений: {s['unchanged']}. "
+        f"Пропущено: без оценки или с нулём — {p['unestimated']}; закрытых/выполненных — {p['closed']}; "
+        f"с указанным спринтом EVA — {p['eva_assigned'] + s['eva_assigned']}; других типов — {p['other_type']}; "
+        f"с некорректной оценкой или вне шкалы — {p['invalid_estimate']}; "
+        f"повторных строк — {p['duplicates']}; уже запланированных/завершённых в score-it — {s['planned_or_completed']}; "
+        f"на голосовании — {s['voting']}; конфликтов — {s['conflicts']}. "
+        "Выберите задачи в разделе «Доступные задачи»."
+    )
+    issues = parsed.issues + saved.issues
+    for issue in issues[:10]:
+        messages.warning(request, issue)
+    if len(issues) > 10:
+        messages.warning(request, f"Показаны первые 10 из {len(issues)} замечаний к строкам.")
+    if not parsed.has_sprints_column:
+        messages.info(request,
+            "В файле нет колонки «Спринты»: назначения в EVA проверить нельзя. "
+            "Задачи, уже запланированные в score-it, исключаются автоматически."
+        )
+    return redirect(sprint.get_absolute_url() + "#available-tasks")
 
 
 @login_required
@@ -1870,26 +1911,18 @@ def sprint_add_tasks(request, pk):
             "Нельзя менять состав завершённого или архивного спринта.",
         )
         return redirect(sprint)
-    task_ids = request.POST.getlist("task_ids")
-    tasks = sprint.project.tasks.filter(
-        pk__in=task_ids,
-        status=Task.Status.ESTIMATED,
-        completed_at__isnull=True,
-    ).exclude(sprint_items__sprint=sprint).exclude(
-        sprint_items__status=SprintTask.Status.PLANNED
-    ).distinct()
-    position = (
-        sprint.sprint_tasks.aggregate(value=Max("position"))["value"] or 0
-    )
+    task_ids = [value for value in request.POST.getlist("task_ids") if value.isdecimal()]
     created = 0
     with transaction.atomic():
+        Project.objects.select_for_update().get(pk=sprint.project_id)
+        tasks = available_sprint_tasks(sprint.project).filter(pk__in=task_ids)
+        position = sprint.sprint_tasks.aggregate(value=Max("position"))["value"] or 0
         for task in tasks:
             position += 1
-            SprintTask.objects.create(
-                sprint=sprint,
-                task=task,
-                position=position,
-                status=SprintTask.Status.PLANNED,
+            SprintTask.objects.update_or_create(
+                sprint=sprint, task=task,
+                defaults={"position": position, "status": SprintTask.Status.PLANNED,
+                          "transferred_to": None, "transferred_at": None},
             )
             created += 1
     messages.success(request, f"В спринт добавлено задач: {created}.")
@@ -1992,22 +2025,9 @@ def sprint_copy(request, pk):
             development_capacity=source.development_capacity,
             testing_capacity=source.testing_capacity,
         )
-        SprintTask.objects.bulk_create(
-            [
-                SprintTask(
-                    sprint=copied,
-                    task=item.task,
-                    position=item.position,
-                    status=SprintTask.Status.PLANNED,
-                )
-                for item in source.sprint_tasks.select_related("task").filter(
-                    status=SprintTask.Status.PLANNED
-                )
-            ]
-        )
     messages.success(
         request,
-        f"Создан планируемый спринт «{copied.name}» без дат.",
+        f"Создан спринт «{copied.name}» с той же ёмкостью, без дат и задач. Выберите свободные задачи.",
     )
     _warn_if_over_capacity(request, copied)
     return redirect(copied)
@@ -2033,39 +2053,30 @@ def sprint_transfer_tasks(request, pk):
         return redirect(source)
 
     task_ids = request.POST.getlist("task_ids")
-    source_items = list(
-        source.sprint_tasks.select_related("task").filter(
-            task_id__in=task_ids,
-            status=SprintTask.Status.PLANNED,
-        )
-    )
-    position = target.sprint_tasks.aggregate(value=Max("position"))["value"] or 0
     transferred = 0
     now = timezone.now()
     with transaction.atomic():
+        Project.objects.select_for_update().get(pk=source.project_id)
+        source_items = source.sprint_tasks.select_related("task").filter(
+            task_id__in=[value for value in task_ids if value.isdecimal()],
+            status=SprintTask.Status.PLANNED,
+        )
+        position = target.sprint_tasks.aggregate(value=Max("position"))["value"] or 0
         for source_item in source_items:
-            target_item = target.sprint_tasks.filter(task=source_item.task).first()
-            if target_item is None:
-                position += 1
-                SprintTask.objects.create(
-                    sprint=target,
-                    task=source_item.task,
-                    position=position,
-                    status=SprintTask.Status.PLANNED,
-                )
-            elif target_item.status != SprintTask.Status.PLANNED:
-                target_item.status = SprintTask.Status.PLANNED
-                target_item.transferred_to = None
-                target_item.transferred_at = None
-                target_item.save(
-                    update_fields=("status", "transferred_to", "transferred_at")
-                )
-
+            if source_item.task.sprint_items.filter(status=SprintTask.Status.PLANNED).exclude(
+                sprint_id__in=(source.pk, target.pk)
+            ).exists():
+                messages.warning(request, f"{source_item.task.number}: задача уже запланирована ещё в одном спринте.")
+                continue
             source_item.status = SprintTask.Status.TRANSFERRED
             source_item.transferred_to = target
             source_item.transferred_at = now
-            source_item.save(
-                update_fields=("status", "transferred_to", "transferred_at")
+            source_item.save(update_fields=("status", "transferred_to", "transferred_at"))
+            position += 1
+            SprintTask.objects.update_or_create(
+                sprint=target, task=source_item.task,
+                defaults={"position": position, "status": SprintTask.Status.PLANNED,
+                          "transferred_to": None, "transferred_at": None},
             )
             transferred += 1
 
@@ -2078,6 +2089,66 @@ def sprint_transfer_tasks(request, pk):
     else:
         messages.info(request, "Выберите задачи для переноса.")
     return redirect(source)
+
+
+@login_required
+@require_GET
+@never_cache
+def sprint_export_eva(request, pk):
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.utils import get_column_letter
+
+    sprint = _sprint_for_user(request.user, pk)
+    items = list(sprint.sprint_tasks.select_related("task").filter(status=SprintTask.Status.PLANNED))
+    if not items:
+        messages.error(request, "Сначала добавьте задачи в состав спринта.")
+        return redirect(sprint)
+    duplicates = SprintTask.objects.filter(
+        task_id__in=[item.task_id for item in items], status=SprintTask.Status.PLANNED,
+    ).exclude(sprint=sprint).exists()
+    if duplicates:
+        messages.error(request, "В составе есть задачи, одновременно запланированные в другом спринте. Уберите повторные назначения перед выгрузкой в EVA.")
+        return redirect(sprint)
+    unavailable = [item.task.number for item in items if item.task.eva_unavailable or item.task.estimate is None]
+    if unavailable:
+        messages.error(request, "Проверьте недоступные или неоценённые задачи перед выгрузкой: " + ", ".join(unavailable[:10]))
+        return redirect(sprint)
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "План для EVA"
+    sheet.append((
+        "Код задачи", "Наименование", "Тип задачи", "Итоговая оценка, ч",
+        "Идентификатор объекта", "Ссылка на задачу", "Спринт",
+        "Дата начала", "Дата завершения", "Проект score-it", "ID спринта score-it",
+    ))
+    for item in items:
+        task = item.task
+        sheet.append((
+            task.number, task.title, task.get_competency_display(), task.estimate,
+            task.eva_identifier, task.external_url, sprint.name,
+            sprint.start_date, sprint.end_date, sprint.project.name, sprint.pk,
+        ))
+    for row in sheet:
+        for cell in row:
+            if isinstance(cell.value, str):
+                cell.data_type = "s"
+            cell.alignment = Alignment(vertical="top", wrap_text=True)
+    for cell in sheet[1]:
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill("solid", fgColor="243B53")
+    for row in sheet.iter_rows(min_row=2, min_col=8, max_col=9):
+        for cell in row:
+            cell.number_format = "dd.mm.yyyy"
+    for index, width in enumerate((20, 65, 20, 22, 48, 40, 30, 18, 18, 24, 22), 1):
+        sheet.column_dimensions[get_column_letter(index)].width = width
+    sheet.freeze_panes = "C2"
+    sheet.auto_filter.ref = sheet.dimensions
+    response = HttpResponse(content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    response["Content-Disposition"] = f'attachment; filename="sprint_{sprint.pk}_eva.xlsx"'
+    workbook.save(response)
+    workbook.close()
+    return response
 
 
 @login_required
@@ -2127,6 +2198,8 @@ def sprint_export(request, pk):
             )
         )
         sheet.cell(row=row_number, column=4).number_format = "0"
+        for column in (2, 3, 7):
+            sheet.cell(row=row_number, column=column).data_type = "s"
 
     if items:
         total_row = len(items) + 2

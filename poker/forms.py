@@ -174,6 +174,15 @@ class TaskFileImportForm(BootstrapFormMixin, forms.Form):
         return upload
 
 
+class SprintFileImportForm(TaskFileImportForm):
+    def clean_task_file(self):
+        from .sprint_import import parse_sprint_file
+
+        upload = self.cleaned_data["task_file"]
+        self.parsed_import = parse_sprint_file(upload)
+        return upload
+
+
 class VotingSessionForm(BootstrapFormMixin, forms.ModelForm):
     task_ids = TaskMultipleChoiceField(
         label="Задачи для оценки",
