@@ -5,6 +5,7 @@ from functools import cached_property
 from urllib.parse import parse_qs, urlparse
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.urls import reverse
@@ -536,6 +537,10 @@ class Vote(models.Model):
 
 
 class Sprint(models.Model):
+    class CapacitySource(models.TextChoices):
+        MANUAL = "manual", "Ввести вручную"
+        TEAM = "team", "Рассчитать по сотрудникам"
+
     class Status(models.TextChoices):
         PLANNING = "planning", "Планируется"
         ACTIVE = "active", "Активен"
@@ -554,6 +559,19 @@ class Sprint(models.Model):
     goal = models.CharField("Цель спринта", max_length=500, blank=True)
     start_date = models.DateField("Дата начала", null=True, blank=True)
     end_date = models.DateField("Дата завершения", null=True, blank=True)
+    capacity_source = models.CharField(
+        "Расчёт ёмкости", max_length=10,
+        choices=CapacitySource.choices, default=CapacitySource.MANUAL,
+    )
+    working_days_override = models.PositiveSmallIntegerField(
+        "Рабочих дней по календарю", null=True, blank=True,
+        help_text="Оставьте пустым для расчёта по пн–пт. Укажите точное число с учётом праздников и рабочих суббот.",
+    )
+    reserve_percent = models.DecimalField(
+        "Резерв, %", max_digits=5, decimal_places=2, default=0,
+        validators=(MinValueValidator(0), MaxValueValidator(100)),
+        help_text="Доля времени на дефекты, операционные и другие задачи вне этого плана. Вычитается один раз.",
+    )
     capacity = models.DecimalField(
         "Плановая ёмкость, часы",
         max_digits=8,
@@ -605,6 +623,48 @@ class Sprint(models.Model):
     def get_absolute_url(self):
         return reverse("poker:sprint_detail", args=[self.pk])
 
+    @property
+    def working_days(self):
+        if not self.start_date or not self.end_date or self.end_date < self.start_date:
+            return None
+        if self.working_days_override is not None:
+            return self.working_days_override
+        weeks, remainder = divmod((self.end_date - self.start_date).days + 1, 7)
+        return weeks * 5 + sum(
+            (self.start_date.weekday() + offset) % 7 < 5
+            for offset in range(remainder)
+        )
+
+    @property
+    def uses_team_capacity(self):
+        return self.capacity_source == self.CapacitySource.TEAM
+
+    @cached_property
+    def resource_rows(self):
+        return list(self.resources.all())
+
+    @cached_property
+    def team_capacities(self):
+        competencies = (Task.Competency.ANALYSIS, Task.Competency.DEVELOPMENT, Task.Competency.TESTING)
+        if self.working_days is None or not self.resource_rows:
+            return dict.fromkeys(competencies)
+        totals = dict.fromkeys(competencies, Decimal("0"))
+        for resource in self.resource_rows:
+            # Use this sprint instance; all calculation inputs belong to the snapshot.
+            resource.sprint = self
+            totals[resource.competency] += resource.capacity_hours
+        return totals
+
+    @property
+    def team_gross_capacity(self):
+        if self.working_days is None or not self.resource_rows:
+            return None
+        total = Decimal("0")
+        for resource in self.resource_rows:
+            resource.sprint = self
+            total += resource.gross_hours
+        return total
+
     @cached_property
     def total_estimate(self):
         total = Decimal("0")
@@ -646,7 +706,7 @@ class Sprint(models.Model):
 
     @property
     def uses_competency_capacities(self):
-        return any(
+        return self.uses_team_capacity or any(
             value is not None
             for value in (
                 self.analysis_capacity,
@@ -679,6 +739,8 @@ class Sprint(models.Model):
         )
         rows = []
         for competency, label, css_class, capacity in definitions:
+            if self.uses_team_capacity:
+                capacity = self.team_capacities[competency]
             estimate = self.estimates_by_competency[competency]
             remaining = (
                 max(capacity - estimate, Decimal("0"))
@@ -731,6 +793,8 @@ class Sprint(models.Model):
     @property
     def capacity_total(self):
         if self.uses_competency_capacities:
+            if all(row["capacity"] is None for row in self.competency_capacity_rows):
+                return None
             return sum(
                 (
                     row["capacity"]
@@ -755,6 +819,8 @@ class Sprint(models.Model):
 
     @property
     def capacity_remaining(self):
+        if self.capacity_total is None:
+            return None
         if self.uses_competency_capacities:
             return sum(
                 (
@@ -855,6 +921,90 @@ class Sprint(models.Model):
             for row in self.competency_capacity_rows
             if not row["is_configured"] and row["estimate"] > 0
         ]
+
+
+class ProjectMember(models.Model):
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="members")
+    full_name = models.CharField("ФИО", max_length=160)
+    competency = models.CharField(
+        "Компетенция", max_length=20,
+        choices=[choice for choice in Task.Competency.choices if choice[0]],
+    )
+    allocation_percent = models.DecimalField(
+        "Аллокация, %", max_digits=5, decimal_places=2, default=100,
+        validators=(MinValueValidator(0), MaxValueValidator(100)),
+    )
+    hours_per_day = models.DecimalField(
+        "Часов в день", max_digits=4, decimal_places=2, default=8,
+        validators=(MinValueValidator(Decimal("0.01")), MaxValueValidator(24)),
+    )
+    is_active = models.BooleanField("В команде", default=True)
+
+    class Meta:
+        ordering = ("full_name", "pk")
+        verbose_name = "Сотрудник проекта"
+        verbose_name_plural = "Команда проекта"
+
+    def __str__(self):
+        return self.full_name
+
+
+class SprintResource(models.Model):
+    sprint = models.ForeignKey(Sprint, on_delete=models.CASCADE, related_name="resources")
+    member = models.ForeignKey(
+        ProjectMember, on_delete=models.SET_NULL, null=True, related_name="sprint_resources",
+    )
+    full_name = models.CharField("ФИО в спринте", max_length=160)
+    competency = models.CharField(
+        "Компетенция", max_length=20,
+        choices=[choice for choice in Task.Competency.choices if choice[0]],
+    )
+    allocation_percent = models.DecimalField(
+        "Аллокация, %", max_digits=5, decimal_places=2, default=100,
+        validators=(MinValueValidator(0), MaxValueValidator(100)),
+    )
+    hours_per_day = models.DecimalField(
+        "Часов в день", max_digits=4, decimal_places=2, default=8,
+        validators=(MinValueValidator(Decimal("0.01")), MaxValueValidator(24)),
+    )
+    absence_days = models.DecimalField(
+        "Рабочих дней отсутствия", max_digits=7, decimal_places=2, default=0,
+        validators=(MinValueValidator(0),),
+    )
+
+    class Meta:
+        ordering = ("full_name", "pk")
+        constraints = [models.UniqueConstraint(fields=("sprint", "member"), name="unique_member_in_sprint")]
+        verbose_name = "Сотрудник в спринте"
+        verbose_name_plural = "Сотрудники в спринте"
+
+    def __str__(self):
+        return f"{self.full_name} — {self.sprint}"
+
+    def clean(self):
+        super().clean()
+        if self.member_id and self.sprint_id and self.member.project_id != self.sprint.project_id:
+            raise ValidationError("Сотрудник должен принадлежать проекту спринта.")
+        if self.sprint_id and self.sprint.working_days is not None and self.absence_days is not None:
+            if self.absence_days > self.sprint.working_days:
+                raise ValidationError({"absence_days": "Отсутствие не может превышать число рабочих дней спринта."})
+
+    @property
+    def gross_hours(self):
+        days = self.sprint.working_days
+        if days is None:
+            return None
+        return (max(Decimal("0"), Decimal(days) - self.absence_days)
+                * self.hours_per_day * self.allocation_percent / 100)
+
+    @property
+    def capacity_hours(self):
+        gross = self.gross_hours
+        if gross is None:
+            return None
+        return (gross * (100 - self.sprint.reserve_percent) / 100).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
 
 
 class SprintTask(models.Model):

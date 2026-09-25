@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Команда — {{ project.name }} — score it{% endblock %}
+{% block content %}
+<nav class="breadcrumbs"><a href="{% url 'poker:dashboard' %}">Проекты</a><span>›</span><a href="{{ project.get_absolute_url }}">{{ project.name }}</a><span>›</span><span>Команда</span></nav>
+<div class="page-heading page-heading--compact"><div><span class="eyebrow">{{ project.name }}</span><h1>Команда проекта</h1><p>Сотрудники и их обычная доступность для новых спринтов.</p></div></div>
+{% include 'poker/project_nav.html' with active='team' %}
+<div class="team-layout">
+    <section class="card section-card">
+        <div class="section-heading"><div><h2>{% if member %}Изменить сотрудника{% else %}Добавить сотрудника{% endif %}</h2></div></div>
+        <form method="post" class="stack-form">
+            {% csrf_token %}{% include 'poker/form_fields.html' with form=member_form %}
+            <button class="button button--primary" type="submit">Сохранить сотрудника</button>
+            {% if member %}<a class="button button--ghost" href="{% url 'poker:project_team' project.pk %}">Отмена</a>{% endif %}
+        </form>
+        <p class="help-text">Снимите «В команде», чтобы не добавлять сотрудника в новые спринты. История и параметры существующих спринтов сохранятся.</p>
+    </section>
+    <section class="card section-card">
+        <div class="section-heading"><div><h2>Сотрудники</h2><p>Аллокация — доля рабочего времени на этот проект, от 0 до 100%.</p></div><span class="pill">{{ members|length }}</span></div>
+        <div class="table-wrap"><table>
+            <thead><tr><th>ФИО</th><th>Компетенция</th><th class="align-right">Аллокация</th><th class="align-right">Часов в день</th><th></th></tr></thead>
+            <tbody>{% for item in members %}<tr>
+                <td><strong>{{ item.full_name }}</strong>{% if not item.is_active %}<div class="muted">Не в команде</div>{% endif %}</td>
+                <td>{{ item.get_competency_display }}</td><td class="align-right">{{ item.allocation_percent|floatformat:"-2" }}%</td><td class="align-right">{{ item.hours_per_day|floatformat:"-2" }}</td>
+                <td><a href="{% url 'poker:project_member_edit' project.pk item.pk %}" aria-label="Изменить {{ item.full_name }}">Изменить</a></td>
+            </tr>{% empty %}<tr><td colspan="5" class="table-empty">Добавьте сотрудников, чтобы рассчитывать ёмкость спринтов по команде.</td></tr>{% endfor %}</tbody>
+        </table></div>
+        <p class="help-text">Команда планирования и участники голосования учитываются отдельно. Вход в комнату по ссылке остаётся доступным.</p>
+    </section>
+</div>
+{% endblock %}

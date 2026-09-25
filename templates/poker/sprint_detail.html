@@ -10,7 +10,7 @@
     <div class="page-heading__actions">
         <a class="button button--primary" href="{% url 'poker:sprint_export_eva' sprint.pk %}">Excel для EVA</a>
         <a class="button button--secondary" href="{% url 'poker:sprint_export' sprint.pk %}">Отчёт по ёмкости</a>
-        <form method="post" action="{% url 'poker:sprint_copy' sprint.pk %}" onsubmit="return confirm('Создать спринт с той же ёмкостью, без дат и задач?');">
+        <form method="post" action="{% url 'poker:sprint_copy' sprint.pk %}" onsubmit="return confirm('Создать спринт без дат и задач с текущей командой проекта?');">
             {% csrf_token %}<button class="button button--secondary" type="submit">Копировать настройки</button>
         </form>
         {% if sprint.archived_at %}
@@ -28,6 +28,10 @@
     </div>
 </div>
 
+{% include 'poker/sprint_nav.html' with active='plan' %}
+{% if sprint.uses_team_capacity %}
+<div class="message message--info">Ёмкость рассчитана по сотрудникам с резервом {{ sprint.reserve_percent|floatformat:"-2" }}%. <a href="{% url 'poker:sprint_team' sprint.pk %}">Изменить команду и календарь</a>.{% if not sprint.has_capacity %} Укажите обе даты и добавьте сотрудников для расчёта.{% endif %}</div>
+{% endif %}
 {% if sprint.archived_at %}
     <div class="archive-notice">Спринт находится в архиве с {{ sprint.archived_at|date:"d.m.Y H:i" }}.</div>
 {% else %}
@@ -56,6 +60,7 @@
         <div class="section-footer"><button class="button button--primary" type="submit">Загрузить доступные задачи</button></div>
     </form>
 </details>
+{% if not sprint.uses_team_capacity %}
 <details class="card capacity-editor" {% if capacity_form.errors %}open{% endif %}>
     <summary class="section-heading">
         <div><h2>Настроить ёмкость в часах</h2><p>Доступные часы аналитики, разработки и тестирования можно менять в течение планирования.</p></div>
@@ -74,6 +79,7 @@
         <button class="button button--primary" type="submit">Сохранить ёмкость</button>
     </form>
 </details>
+{% endif %}
 {% endif %}
 
 <div class="sprint-metrics">

@@ -19,6 +19,7 @@
     {% endif %}
 </div>
 
+{% include 'poker/project_nav.html' with active='tasks' %}
 <div class="three-column-actions">
     <details class="card action-card" open>
         <summary>
@@ -104,17 +105,18 @@
             <span class="action-card__number">3</span>
             <span><strong>Создать спринт</strong><small>Собрать оценённые задачи</small></span>
         </summary>
-        <form method="post" action="{% url 'poker:sprint_create' project.pk %}" class="stack-form details-form">
+        <form method="post" action="{% url 'poker:sprint_create' project.pk %}" class="stack-form details-form" data-capacity-source-form>
             {% csrf_token %}
             {% for field in sprint_form %}
                 {% if field.name != "analysis_capacity" and field.name != "development_capacity" and field.name != "testing_capacity" %}
                     <div class="field field--compact">
                         <label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}
+                        {% if field.help_text %}<small class="help-text">{{ field.help_text }}</small>{% endif %}
                         {% for error in field.errors %}<div class="form-error">{{ error }}</div>{% endfor %}
                     </div>
                 {% endif %}
             {% endfor %}
-            <fieldset class="capacity-inputs">
+            <fieldset class="capacity-inputs" data-manual-capacity>
                 <legend>Ёмкость по компетенциям, часы</legend>
                 <p>Укажите доступное количество часов аналитики, разработки и тестирования.</p>
                 {% for field in sprint_form %}
@@ -131,7 +133,7 @@
     </details>
 </div>
 
-<section class="card section-card">
+<section class="card section-card" id="tasks">
     <div class="section-heading">
         <div><h2>Бэклог</h2><p>Новые задачи ещё не добавлялись ни в одну комнату.</p></div>
         <span class="pill">{{ tasks|length }}</span>
@@ -205,7 +207,7 @@
 </section>
 
 <div class="split-grid">
-    <section class="card section-card">
+    <section class="card section-card" id="rooms">
         <div class="section-heading"><div><h2>{% if show_archived %}Архивные комнаты{% else %}Комнаты{% endif %}</h2><p>Сессии Planning Poker.</p></div></div>
         <div class="item-list">
             {% for item in sessions %}
@@ -216,7 +218,7 @@
             {% empty %}<div class="compact-empty">{% if show_archived %}В архиве комнат нет.{% else %}Комнат пока нет.{% endif %}</div>{% endfor %}
         </div>
     </section>
-    <section class="card section-card">
+    <section class="card section-card" id="sprints">
         <div class="section-heading"><div><h2>{% if show_archived %}Архивные спринты{% else %}Спринты{% endif %}</h2><p>Планы из оценённых задач.</p></div></div>
         <div class="item-list">
             {% for sprint in sprints %}
@@ -230,4 +232,4 @@
 </div>
 {% endblock %}
 
-{% block scripts %}<script src="{% static 'js/task-picker.js' %}" defer></script>{% endblock %}
+{% block scripts %}<script src="{% static 'js/task-picker.js' %}" defer></script><script src="{% static 'js/capacity-source.js' %}" defer></script>{% endblock %}

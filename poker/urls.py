@@ -1,6 +1,6 @@
 from django.urls import path
 
-from . import views
+from . import team_views, views
 
 
 app_name = "poker"
@@ -14,6 +14,8 @@ urlpatterns = [
     path("", views.dashboard, name="dashboard"),
     path("projects/new/", views.project_create, name="project_create"),
     path("projects/<int:pk>/", views.project_detail, name="project_detail"),
+    path("projects/<int:pk>/team/", team_views.project_team, name="project_team"),
+    path("projects/<int:pk>/team/<int:member_pk>/", team_views.project_team, name="project_member_edit"),
     path("projects/<int:pk>/tasks/import/", views.task_import, name="task_import"),
     path(
         "projects/<int:pk>/tasks/import/file/",
@@ -108,6 +110,10 @@ urlpatterns = [
         name="room_complete",
     ),
     path("sprints/<int:pk>/", views.sprint_detail, name="sprint_detail"),
+    path("sprints/<int:pk>/team/", team_views.sprint_team, name="sprint_team"),
+    path("sprints/<int:pk>/team/add/", team_views.sprint_members_add, name="sprint_members_add"),
+    path("sprints/<int:pk>/team/<int:resource_pk>/", team_views.sprint_resource_update, name="sprint_resource_update"),
+    path("sprints/<int:pk>/team/<int:resource_pk>/remove/", team_views.sprint_resource_remove, name="sprint_resource_remove"),
     path("sprints/<int:pk>/import/", views.sprint_import, name="sprint_import"),
     path("sprints/<int:pk>/export/eva/", views.sprint_export_eva, name="sprint_export_eva"),
     path(

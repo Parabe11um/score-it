@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Команда и ёмкость — {{ sprint.name }} — score it{% endblock %}
+{% block content %}
+<nav class="breadcrumbs"><a href="{{ sprint.project.get_absolute_url }}">{{ sprint.project.name }}</a><span>›</span><a href="{{ sprint.get_absolute_url }}">{{ sprint.name }}</a><span>›</span><span>Команда и ёмкость</span></nav>
+<div class="page-heading page-heading--compact">
+    <div><span class="eyebrow">{{ sprint.get_status_display }}</span><h1>{{ sprint.name }}</h1><p>Доступность сотрудников и часы для планирования.</p></div>
+    <a class="button button--secondary" href="{% url 'poker:sprint_export' sprint.pk %}">Отчёт по ёмкости</a>
+</div>
+{% include 'poker/sprint_nav.html' with active='team' %}
+{% if is_locked %}<div class="archive-notice">Команда и параметры расчёта сохранены. Для изменения откройте спринт на вкладке «План».</div>{% endif %}
+{% if sprint.uses_team_capacity and not sprint.has_capacity %}<div class="message message--warning">Для расчёта нужны обе даты и хотя бы один сотрудник. Пока ёмкость не определена.</div>{% endif %}
+{% if not sprint.uses_team_capacity %}<div class="message message--info">В плане используется ёмкость, введённая вручную. Чтобы применить состав команды, выберите «Рассчитать по сотрудникам» и сохраните параметры.</div>{% endif %}
+<div class="sprint-metrics">
+    <div class="metric-card"><span>Рабочих дней</span><strong>{{ sprint.working_days|default_if_none:"—" }}</strong><small>{% if sprint.working_days_override != None %}По заданному календарю{% else %}Понедельник — пятница{% endif %}</small></div>
+    <div class="metric-card"><span>Часы команды до резерва</span><strong>{{ sprint.team_gross_capacity|floatformat:"-2"|default_if_none:"—"|default:"—" }}</strong><small>С учётом аллокации и отсутствия</small></div>
+    <div class="metric-card"><span>Ёмкость для плана</span><strong>{{ sprint.capacity_total_display }}</strong><small>{% if sprint.uses_team_capacity %}Резерв {{ sprint.reserve_percent|floatformat:"-2" }}%{% else %}Введена вручную{% endif %}</small></div>
+</div>
+<div class="team-layout">
+    <section class="card section-card">
+        <div class="section-heading"><div><h2>Календарь и расчёт</h2></div></div>
+        {% if is_locked %}
+            <dl class="resource-facts"><dt>Способ расчёта</dt><dd>{{ sprint.get_capacity_source_display }}</dd><dt>Начало</dt><dd>{{ sprint.start_date|date:"d.m.Y"|default:"—" }}</dd><dt>Завершение</dt><dd>{{ sprint.end_date|date:"d.m.Y"|default:"—" }}</dd><dt>Резерв</dt><dd>{{ sprint.reserve_percent|floatformat:"-2" }}%</dd></dl>
+        {% else %}
+            <form method="post" class="stack-form">{% csrf_token %}
+                {% include 'poker/form_fields.html' with form=settings_form %}
+                <button class="button button--primary" type="submit">Сохранить параметры</button>
+            </form>
+        {% endif %}
+        <p class="help-text">Часы сотрудника = (рабочие дни − дни отсутствия) × часы в день × аллокация. Из полученного времени один раз вычитается резерв.</p>
+        <p class="help-text">Учитывайте только рабочие дни отсутствия внутри спринта. Полдня можно указать как 0,5.</p>
+    </section>
+    <div class="resource-list">
+        <section class="card section-card">
+            <div class="section-heading"><div><h2>Состав команды</h2><p>Параметры действуют только в этом спринте.</p></div><span class="pill">{{ resource_forms|length }}</span></div>
+            <a href="{% url 'poker:project_team' sprint.project.pk %}">Справочник сотрудников проекта</a>
+            {% if not is_locked and available_members %}
+            <form method="post" action="{% url 'poker:sprint_members_add' sprint.pk %}" class="resource-add-form">
+                {% csrf_token %}<label class="field" for="add-member">Сотрудник<select class="form-control" name="member_id" id="add-member">{% for member in available_members %}<option value="{{ member.pk }}">{{ member.full_name }} — {{ member.get_competency_display }}</option>{% endfor %}</select></label>
+                <button class="button button--secondary" type="submit">Добавить</button>
+                <button class="button button--ghost" type="submit" name="all" value="1">Добавить всю команду</button>
+            </form>
+            {% endif %}
+        </section>
+        {% for resource, form in resource_forms %}
+        <article class="card section-card">
+            <div class="resource-heading"><div><strong>{{ resource.full_name }}</strong><div><span class="competency-badge competency-badge--{{ resource.competency }}">{{ resource.get_competency_display }}</span></div></div><div class="resource-hours"><strong>{{ resource.capacity_hours|floatformat:"-2"|default:"—" }}</strong><span>ч после резерва</span></div></div>
+            <p class="muted">Аллокация {{ resource.allocation_percent|floatformat:"-2" }}% · {{ resource.hours_per_day|floatformat:"-2" }} ч/день · отсутствие {{ resource.absence_days|floatformat:"-2" }} дн.</p>
+            {% if not is_locked %}
+            <details {% if form.errors %}open{% endif %}><summary>Изменить параметры</summary>
+                <form method="post" action="{% url 'poker:sprint_resource_update' sprint.pk resource.pk %}" class="stack-form resource-edit-form">
+                    {% csrf_token %}<div class="resource-fields">{% include 'poker/form_fields.html' %}</div>
+                    <button class="button button--primary" type="submit">Сохранить сотрудника в спринте</button>
+                </form>
+                <form method="post" action="{% url 'poker:sprint_resource_remove' sprint.pk resource.pk %}" class="resource-remove-form" onsubmit="return confirm('Исключить {{ resource.full_name|escapejs }} из этого спринта?');">
+                    {% csrf_token %}<button class="button button--danger-soft button--small" type="submit">Исключить из спринта</button>
+                </form>
+            </details>
+            {% endif %}
+        </article>
+        {% empty %}<div class="card section-card compact-empty">В спринте пока нет сотрудников. Добавьте их из команды проекта.</div>{% endfor %}
+    </div>
+</div>
+{% endblock %}
