@@ -3,7 +3,7 @@ import re
 from django import forms
 from django.contrib.auth.forms import UserCreationForm
 
-from .models import Project, Sprint, Task, VotingSession
+from .models import Project, ProjectMember, Sprint, SprintResource, Task, VotingSession
 from .task_import import parse_task_file
 
 
@@ -223,6 +223,11 @@ class JoinRoomForm(BootstrapFormMixin, forms.Form):
 
 
 class SprintForm(BootstrapFormMixin, forms.ModelForm):
+    capacity_source = forms.ChoiceField(
+        label="Расчёт ёмкости", choices=Sprint.CapacitySource.choices, required=False,
+        help_text="Для расчёта по сотрудникам заполните команду проекта и обе даты. Календарь и резерв можно уточнить внутри спринта.",
+    )
+
     class Meta:
         model = Sprint
         fields = (
@@ -230,6 +235,7 @@ class SprintForm(BootstrapFormMixin, forms.ModelForm):
             "goal",
             "start_date",
             "end_date",
+            "capacity_source",
             "analysis_capacity",
             "development_capacity",
             "testing_capacity",
@@ -242,8 +248,8 @@ class SprintForm(BootstrapFormMixin, forms.ModelForm):
         widgets = {
             "name": forms.TextInput(attrs={"placeholder": "Например, Спринт 24"}),
             "goal": forms.TextInput(attrs={"placeholder": "Необязательно"}),
-            "start_date": forms.DateInput(attrs={"type": "date"}),
-            "end_date": forms.DateInput(attrs={"type": "date"}),
+            "start_date": forms.DateInput(format="%Y-%m-%d", attrs={"type": "date"}),
+            "end_date": forms.DateInput(format="%Y-%m-%d", attrs={"type": "date"}),
             "analysis_capacity": forms.NumberInput(
                 attrs={"step": "0.01", "min": "0", "placeholder": "Например, 24 ч"}
             ),
@@ -255,12 +261,30 @@ class SprintForm(BootstrapFormMixin, forms.ModelForm):
             ),
         }
 
+    def __init__(self, *args, project=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.project = project
+        if project is not None and not self.is_bound:
+            self.initial["capacity_source"] = (
+                Sprint.CapacitySource.TEAM if project.members.filter(is_active=True).exists()
+                else Sprint.CapacitySource.MANUAL
+            )
+
+    def clean_capacity_source(self):
+        return self.cleaned_data.get("capacity_source") or Sprint.CapacitySource.MANUAL
+
     def clean(self):
         cleaned = super().clean()
         start_date = cleaned.get("start_date")
         end_date = cleaned.get("end_date")
         if start_date and end_date and end_date < start_date:
             self.add_error("end_date", "Дата завершения не может быть раньше начала.")
+        if cleaned.get("capacity_source") == Sprint.CapacitySource.TEAM:
+            for field in ("start_date", "end_date"):
+                if not cleaned.get(field):
+                    self.add_error(field, "Укажите дату для расчёта ёмкости команды.")
+            if self.project is None or not self.project.members.filter(is_active=True).exists():
+                self.add_error("capacity_source", "Сначала добавьте сотрудников в команду проекта.")
         return cleaned
 
 
@@ -287,4 +311,61 @@ class SprintCapacityForm(BootstrapFormMixin, forms.ModelForm):
             "testing_capacity": forms.NumberInput(
                 attrs={"step": "0.01", "min": "0", "placeholder": "Не задана"}
             ),
+        }
+
+
+class ProjectMemberForm(BootstrapFormMixin, forms.ModelForm):
+    class Meta:
+        model = ProjectMember
+        fields = ("full_name", "competency", "allocation_percent", "hours_per_day", "is_active")
+        widgets = {
+            "allocation_percent": forms.NumberInput(attrs={"min": 0, "max": 100, "step": "0.01"}),
+            "hours_per_day": forms.NumberInput(attrs={"min": "0.01", "max": 24, "step": "0.01"}),
+        }
+
+    def clean_full_name(self):
+        return " ".join(self.cleaned_data["full_name"].split())
+
+
+class SprintSettingsForm(BootstrapFormMixin, forms.ModelForm):
+    class Meta:
+        model = Sprint
+        fields = ("capacity_source", "start_date", "end_date", "working_days_override", "reserve_percent")
+        widgets = {
+            "start_date": forms.DateInput(format="%Y-%m-%d", attrs={"type": "date"}),
+            "end_date": forms.DateInput(format="%Y-%m-%d", attrs={"type": "date"}),
+            "working_days_override": forms.NumberInput(attrs={"min": 0, "step": 1}),
+            "reserve_percent": forms.NumberInput(attrs={"min": 0, "max": 100, "step": "0.01"}),
+        }
+
+    def clean(self):
+        cleaned = super().clean()
+        start, end = cleaned.get("start_date"), cleaned.get("end_date")
+        override = cleaned.get("working_days_override")
+        if cleaned.get("capacity_source") == Sprint.CapacitySource.TEAM:
+            for field in ("start_date", "end_date"):
+                if not cleaned.get(field):
+                    self.add_error(field, "Укажите дату для расчёта ёмкости команды.")
+            if not self.instance.resources.exists():
+                self.add_error("capacity_source", "Добавьте хотя бы одного сотрудника в спринт.")
+        if start and end:
+            if end < start:
+                self.add_error("end_date", "Дата завершения не может быть раньше начала.")
+            elif override is not None and override > (end - start).days + 1:
+                self.add_error("working_days_override", "Рабочих дней не может быть больше календарных.")
+            else:
+                days = Sprint(start_date=start, end_date=end, working_days_override=override).working_days
+                if self.instance.resources.filter(absence_days__gt=days).exists():
+                    self.add_error("end_date", "В новом периоде отсутствие сотрудника превышает число рабочих дней. Сначала уменьшите дни отсутствия.")
+        return cleaned
+
+
+class SprintResourceForm(BootstrapFormMixin, forms.ModelForm):
+    class Meta:
+        model = SprintResource
+        fields = ("competency", "allocation_percent", "hours_per_day", "absence_days")
+        widgets = {
+            "allocation_percent": forms.NumberInput(attrs={"min": 0, "max": 100, "step": "0.01"}),
+            "hours_per_day": forms.NumberInput(attrs={"min": "0.01", "max": 24, "step": "0.01"}),
+            "absence_days": forms.NumberInput(attrs={"min": 0, "step": "0.5"}),
         }

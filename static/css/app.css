@@ -16,6 +16,34 @@
     --radius: 18px;
 }
 
+.workspace-tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 24px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+.workspace-tabs a { padding: 10px 16px; border-radius: 10px; font-weight: 700; font-size: 14px; color: var(--muted); }
+.workspace-tabs a[aria-current="page"] { background: var(--primary-soft); color: var(--primary-dark); }
+.workspace-tabs a:hover { color: var(--primary); }
+.team-layout { display: grid; grid-template-columns: minmax(280px, 340px) minmax(0, 1fr); gap: 24px; align-items: start; }
+.team-layout .section-card { margin-bottom: 0; }
+.team-layout .help-text { margin-top: 16px; }
+.team-layout a:not(.button) { color: var(--primary); }
+.team-layout table { font-size: 13px; }
+.resource-list { display: grid; gap: 16px; min-width: 0; }
+.resource-heading { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
+.resource-heading .competency-badge { margin-top: 8px; }
+.resource-hours { text-align: right; white-space: nowrap; }
+.resource-hours strong { display: block; font-size: 28px; }
+.resource-hours span { font-size: 12px; color: var(--muted); }
+.resource-list article > p { margin-top: 16px; margin-bottom: 12px; font-size: 13px; }
+.resource-list details > summary { cursor: pointer; color: var(--primary); font-size: 14px; font-weight: 700; }
+.resource-edit-form { margin-top: 16px; }
+.resource-remove-form { margin-top: 12px; }
+.resource-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.resource-add-form { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin-top: 20px; }
+.resource-add-form .field { flex: 1 1 100%; font-size: 13px; font-weight: 700; }
+.resource-facts { display: grid; gap: 6px; margin: 0; }
+.resource-facts dt { color: var(--muted); font-size: 13px; margin-top: 8px; }
+.resource-facts dd { margin: 0; }
+@media (max-width: 850px) { .team-layout { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 480px) { .resource-fields { grid-template-columns: minmax(0, 1fr); } .workspace-tabs a { padding: 9px 10px; } }
+
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 html { min-height: 100%; background: var(--bg); }

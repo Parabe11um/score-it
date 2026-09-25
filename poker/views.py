@@ -43,6 +43,7 @@ from .models import (
 )
 from .task_import import save_task_import
 from .sprint_import import available_sprint_tasks, save_sprint_import
+from .team import add_project_members
 
 
 def _format_decimal(value):
@@ -616,7 +617,7 @@ def _project_detail_context(
         "task_import_form": task_import_form or BulkTaskImportForm(),
         "task_file_import_form": task_file_import_form or TaskFileImportForm(),
         "session_form": session_form or VotingSessionForm(project=project),
-        "sprint_form": sprint_form or SprintForm(),
+        "sprint_form": sprint_form or SprintForm(project=project),
     }
 
 
@@ -1781,11 +1782,13 @@ def room_complete(request, token):
 @require_POST
 def sprint_create(request, pk):
     project = _project_for_user(request.user, pk)
-    form = SprintForm(request.POST)
+    form = SprintForm(request.POST, project=project)
     if form.is_valid():
-        sprint = form.save(commit=False)
-        sprint.project = project
-        sprint.save()
+        with transaction.atomic():
+            sprint = form.save(commit=False)
+            sprint.project = project
+            sprint.save()
+            add_project_members(sprint)
         messages.success(request, f"Спринт «{sprint.name}» создан.")
         return redirect(sprint)
     messages.error(request, "Не удалось создать спринт: проверьте параметры.")
@@ -1876,6 +1879,9 @@ def sprint_import(request, pk):
 @require_POST
 def sprint_capacity_update(request, pk):
     sprint = _sprint_for_user(request.user, pk)
+    if sprint.uses_team_capacity:
+        messages.error(request, "Ёмкость рассчитывается по сотрудникам. Измените параметры на вкладке «Команда и ёмкость».")
+        return redirect("poker:sprint_team", pk=sprint.pk)
     if sprint.archived_at is not None or sprint.status == Sprint.Status.COMPLETED:
         messages.error(
             request,
@@ -2024,10 +2030,13 @@ def sprint_copy(request, pk):
             analysis_capacity=source.analysis_capacity,
             development_capacity=source.development_capacity,
             testing_capacity=source.testing_capacity,
+            capacity_source=source.capacity_source,
+            reserve_percent=source.reserve_percent,
         )
+        add_project_members(copied)
     messages.success(
         request,
-        f"Создан спринт «{copied.name}» с той же ёмкостью, без дат и задач. Выберите свободные задачи.",
+        f"Создан спринт «{copied.name}» без дат и задач. Команда взята из текущего состава проекта, отсутствие сброшено. Укажите даты и проверьте ёмкость.",
     )
     _warn_if_over_capacity(request, copied)
     return redirect(copied)
@@ -2273,6 +2282,45 @@ def sprint_export(request, pk):
     for index, width in enumerate((32, 20, 22, 16, 16), start=1):
         capacity_sheet.column_dimensions[get_column_letter(index)].width = width
     capacity_sheet.freeze_panes = "A2"
+
+    if sprint.resources.exists():
+        team_sheet = workbook.create_sheet("Команда")
+        team_sheet.append((
+            "ФИО", "Компетенция", "Аллокация", "Рабочих дней",
+            "Дней отсутствия", "Часов в день", "Часы до резерва", "Резерв", "Часы после резерва",
+        ))
+        for resource in sprint.resources.all():
+            resource.sprint = sprint
+            team_sheet.append((
+                resource.full_name, resource.get_competency_display(),
+                float(resource.allocation_percent / 100), sprint.working_days,
+                float(resource.absence_days), float(resource.hours_per_day),
+                float(resource.gross_hours) if resource.gross_hours is not None else None,
+                float(sprint.reserve_percent / 100),
+                float(resource.capacity_hours) if resource.capacity_hours is not None else None,
+            ))
+            team_sheet.cell(row=team_sheet.max_row, column=1).data_type = "s"
+        for row in team_sheet.iter_rows(min_row=2, min_col=3, max_col=9):
+            for cell in row:
+                cell.number_format = "0.00%" if cell.column in (3, 8) else "0.00"
+        for index, width in enumerate((30, 22, 14, 16, 18, 16, 22, 14, 24), start=1):
+            team_sheet.column_dimensions[get_column_letter(index)].width = width
+        team_sheet["K1"], team_sheet["L1"] = "Параметр", "Значение"
+        for row, (label, value) in enumerate((
+            ("Расчёт ёмкости", sprint.get_capacity_source_display()),
+            ("Дата начала", sprint.start_date), ("Дата завершения", sprint.end_date),
+            ("Рабочие дни", "Заданы вручную" if sprint.working_days_override is not None else "Пн–пт"),
+        ), start=2):
+            team_sheet.cell(row=row, column=11, value=label)
+            team_sheet.cell(row=row, column=12, value=value)
+        team_sheet["L3"].number_format = team_sheet["L4"].number_format = "dd.mm.yyyy"
+        team_sheet.column_dimensions["K"].width = 24
+        team_sheet.column_dimensions["L"].width = 30
+        for cell in list(team_sheet[1][:9]) + [team_sheet["K1"], team_sheet["L1"]]:
+            cell.font = Font(color="FFFFFF", bold=True)
+            cell.fill = header_fill
+            cell.alignment = Alignment(horizontal="center")
+        team_sheet.freeze_panes = "A2"
 
     response = HttpResponse(
         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"

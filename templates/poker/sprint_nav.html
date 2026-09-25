@@ -1,0 +1,4 @@
+<nav class="workspace-tabs" aria-label="Разделы спринта">
+    <a href="{{ sprint.get_absolute_url }}" {% if active == "plan" %}aria-current="page"{% endif %}>План</a>
+    <a href="{% url 'poker:sprint_team' sprint.pk %}" {% if active == "team" %}aria-current="page"{% endif %}>Команда и ёмкость</a>
+</nav>
