@@ -163,6 +163,7 @@
                     <td><span class="task-number">{{ task.number }}</span></td>
                     <td>
                         <div class="task-title-cell">{{ task.title }}</div><small>Квота: {{ task.quota|default:"Не указана" }}</small>
+                        {% if task.eva_readiness.message and not task.completed_at %}<p class="help-text">{{ task.eva_readiness.message }}</p>{% endif %}
                         <form method="post" action="{% url 'poker:task_competency_update' project.pk task.pk %}?tasks={{ task_filter }}&amp;competency={{ competency_filter }}{% if show_archived %}&amp;archive=1{% endif %}" class="task-competency-form">
                             {% csrf_token %}
                             <label class="visually-hidden" for="task-competency-{{ task.pk }}">Тип задачи {{ task.number }}</label>

@@ -172,11 +172,12 @@
             <div class="queue-row queue-row--{{ item.status }} {% if item.is_current %}queue-row--current{% endif %}" data-queue-item="{{ item.pk }}">
                 <span class="queue-row__position">{{ item.display_position }}</span>
                 <div class="queue-row__task">
-                    {% if item.status == 'active' %}
+                    {% if item.status == 'active' or item.status != 'completed' and item.task.eva_readiness.allowed %}
                         <form class="inline-form" method="post" action="{% url 'poker:session_start_task' voting_session.pk item.task.pk %}">{% csrf_token %}<button class="task-number task-jump" type="submit">{{ item.task.number }}</button></form>
                     {% else %}<span class="task-number">{{ item.task.number }}</span>{% endif %}
                     {% if item.task.competency %}<span class="competency-badge competency-badge--{{ item.task.competency }}">{{ item.task.get_competency_display }}</span>{% endif %}
                     <strong>{{ item.task.title }}</strong>
+                    {% if not item.task.eva_readiness.allowed %}<p class="help-text">{{ item.task.eva_readiness.message }}</p>{% endif %}
                 </div>
                 <span class="badge {% if item.status == 'completed' %}badge--success{% elif item.status == 'active' %}badge--active{% endif %}">{% if item.status == 'active' %}Открыта{% else %}{{ item.get_status_display }}{% endif %}</span>
                 <span class="queue-row__votes {% if item.vote_count >= voting_session.minimum_participants %}queue-row__votes--ready{% endif %}" data-queue-votes>{{ item.vote_count }} / {{ voting_session.minimum_participants }} голосов</span>
@@ -219,6 +220,12 @@
         </div>
         <button class="button button--secondary" type="submit">Добавить выбранные в очередь</button>
     </form>
+</details>
+{% endif %}
+{% if voting_session.status != "finished" and waiting_tasks %}
+<details class="card section-card">
+    <summary class="section-heading"><div><h2>Ожидают аналитики</h2><p>Задачи сохранены в бэклоге. Для допуска импортируйте актуальные статусы аналитики из EVA.</p></div><span class="pill">{{ waiting_tasks|length }}</span></summary>
+    {% for task in waiting_tasks %}<div class="queue-row"><div><strong>{{ task.number }} — {{ task.title }}</strong><p class="help-text">{{ task.eva_readiness.message }}</p></div></div>{% endfor %}
 </details>
 {% endif %}
 {% endblock %}

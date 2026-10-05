@@ -33,4 +33,5 @@ class EvaMigrationTests(TransactionTestCase):
             self.assertIsNone(result_sprint.development_abs_capacity)
             self.assertEqual(new.get_model('poker','SprintTask').objects.get(pk=link.pk).status, 'planned')
         finally:
-            MigrationExecutor(connection).migrate(after)
+            executor = MigrationExecutor(connection)
+            executor.migrate(executor.loader.graph.leaf_nodes())

@@ -166,11 +166,14 @@ class SprintPlanningTests(TestCase):
         self.assertEqual(task.estimate, 5)
         self.assertEqual(task.estimate_count, 2)
 
-    def test_real_zero_vote_result_stays_available_when_eva_exports_zero(self):
+    def test_eva_zero_marks_previously_zero_vote_result_unestimated(self):
         task = Task.objects.create(project=self.project, number='ABS-SA-1', title='Ноль',
                                    status='estimated', estimate_sum=0, estimate_count=2)
         self.load([row(estimate=0)])
-        self.assertIn(task, available_sprint_tasks(self.project))
+        task.refresh_from_db()
+        self.assertIsNone(task.estimate)
+        self.assertEqual(task.status, Task.Status.UNESTIMATED)
+        self.assertNotIn(task, available_sprint_tasks(self.project))
 
     def test_closed_assigned_and_unestimated_snapshots_remove_previously_available_tasks(self):
         for status, estimate, sprints in [('Закрыта', 12, ''), ('Открыта', 12, 'Другой')]:

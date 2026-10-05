@@ -216,6 +216,10 @@ class Task(models.Model):
     )
     quota = models.CharField("Тип квоты", max_length=200, blank=True, default="")
     eva_status = models.CharField("Статус в выгрузке EVA", max_length=200, blank=True)
+    eva_parent_title = models.CharField("Родительская задача EVA", max_length=500, blank=True, default="")
+    eva_project_name = models.CharField("Проект EVA", max_length=500, blank=True, default="")
+    eva_epic_title = models.CharField("Эпик EVA", max_length=500, blank=True, default="")
+    eva_readiness_stale = models.BooleanField("Готовность EVA требует повторного импорта", default=False)
     eva_sprints = models.TextField("Спринты в выгрузке EVA", blank=True)
     eva_block_reason = models.CharField(
         "Причина недоступности по выгрузке EVA", max_length=20, blank=True, default="",

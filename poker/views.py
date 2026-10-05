@@ -44,6 +44,7 @@ from .models import (
 from .task_import import save_task_import
 from .sprint_import import available_sprint_tasks, save_sprint_import
 from .team import add_project_members
+from .eva_readiness import EvaReadiness
 
 
 def _format_decimal(value):
@@ -204,6 +205,7 @@ def _participant_from_request(request, voting_session):
 
 
 def _add_tasks_to_queue(voting_session, tasks):
+    readiness = EvaReadiness.for_project(voting_session.project)
     existing_ids = set(
         voting_session.queue_items.values_list("task_id", flat=True)
     )
@@ -212,7 +214,7 @@ def _add_tasks_to_queue(voting_session, tasks):
     )
     queue_items = []
     for task in tasks:
-        if task.pk in existing_ids:
+        if task.pk in existing_ids or task.completed_at or not readiness.check(task).allowed:
             continue
         position += 1
         queue_items.append(
@@ -263,6 +265,8 @@ def _open_pending_queue_items(voting_session):
             )
         )
     )
+    readiness = EvaReadiness.for_project(voting_session.project)
+    queue_items = [item for item in queue_items if not item.task.completed_at and readiness.check(item.task).allowed]
     for queue_item in queue_items:
         _create_round_for_item(voting_session, queue_item)
 
@@ -571,6 +575,9 @@ def _project_detail_context(
     filtered_tasks = tasks_by_status.filter(
         competency_queries[competency_filter]
     )
+    readiness = EvaReadiness.for_project(project)
+    for task in filtered_tasks:
+        task.eva_readiness = readiness.check(task)
 
     sessions = project.voting_sessions.select_related("current_task").filter(
         archived_at__isnull=not show_archived
@@ -830,6 +837,7 @@ def _file_import_message(parsed, saved):
         f"Добавлено: {s['created']}; обновлено: {s['updated']}; без изменений: {s['unchanged']}. "
         f"Изменено назначений: {s['assignments']}; создано спринтов: {s['sprints_created']}. "
         f"Конфликтов: {s['conflicts']}; на голосовании: {s['voting']}; "
+        f"ожидают аналитики: {s['waiting_analysis']}; "
         f"некорректных оценок: {p['invalid_estimate']}; неизвестных типов: {p['other_type']}; "
         f"повторных строк: {p['duplicates']}."
     )
@@ -964,9 +972,14 @@ def _session_manage_response(
     current_round = voting_session.current_round
     queue = _queue_context(voting_session)
     queued_task_ids = [item.task_id for item in queue["items"]]
-    available_tasks = voting_session.project.tasks.filter(
-        completed_at__isnull=True
-    ).exclude(pk__in=queued_task_ids)
+    readiness = EvaReadiness.for_project(voting_session.project)
+    candidates = list(voting_session.project.tasks.filter(completed_at__isnull=True).exclude(pk__in=queued_task_ids))
+    for task in candidates:
+        task.eva_readiness = readiness.check(task)
+    available_tasks = [task for task in candidates if task.eva_readiness.allowed]
+    waiting_tasks = [task for task in candidates if not task.eva_readiness.allowed]
+    for item in queue["items"]:
+        item.task.eva_readiness = readiness.check(item.task)
     public_url = request.build_absolute_uri(voting_session.get_public_url())
     summary = current_round.summary() if current_round else None
     current_round_voted_ids = set(
@@ -991,6 +1004,7 @@ def _session_manage_response(
             "task_file_import_form": task_file_import_form or TaskFileImportForm(),
             "queue": queue,
             "available_tasks": available_tasks,
+            "waiting_tasks": waiting_tasks,
             "current_round": current_round,
             "summary": summary,
             "participant_progress": participant_progress,
@@ -1115,6 +1129,11 @@ def session_queue_add(request, pk):
     tasks = voting_session.project.tasks.filter(
         pk__in=task_ids, completed_at__isnull=True
     )
+    readiness = EvaReadiness.for_project(voting_session.project)
+    for task in tasks:
+        result = readiness.check(task)
+        if not result.allowed:
+            messages.warning(request, f"{task.number}: {result.message}")
     with transaction.atomic():
         created_items = _add_tasks_to_queue(voting_session, tasks)
         if voting_session.status == VotingSession.Status.ACTIVE:
@@ -1134,10 +1153,6 @@ def session_start(request, pk):
     if voting_session.status == VotingSession.Status.FINISHED:
         messages.error(request, "Завершённую сессию нельзя продолжить.")
         return redirect(voting_session)
-    if voting_session.status == VotingSession.Status.ACTIVE:
-        messages.info(request, "Голосование уже открыто для всех задач очереди.")
-        return redirect(voting_session)
-
     with transaction.atomic():
         opened_items = _open_pending_queue_items(voting_session)
     if not opened_items and not voting_session.queue_items.filter(
@@ -1200,6 +1215,10 @@ def session_start_task(request, pk, task_pk):
     if voting_session.status == VotingSession.Status.FINISHED:
         messages.error(request, "Завершённую сессию нельзя продолжить.")
         return redirect(voting_session)
+    readiness = EvaReadiness.for_project(voting_session.project).check(task)
+    if task.completed_at or not readiness.allowed:
+        messages.warning(request, readiness.message or "Задача уже завершена.")
+        return redirect(voting_session)
     with transaction.atomic():
         queue_item = voting_session.queue_items.filter(task=task).first()
         if queue_item is None:
@@ -1248,6 +1267,11 @@ def session_revote(request, pk):
     voting_round = voting_session.current_round
     if not voting_round or voting_round.status != VotingRound.Status.REVEALED:
         messages.error(request, "Повторное голосование сейчас недоступно.")
+        return redirect(voting_session)
+
+    readiness = EvaReadiness.for_project(voting_session.project).check(voting_round.task)
+    if voting_round.task.completed_at or not readiness.allowed:
+        messages.warning(request, readiness.message or "Задача уже завершена.")
         return redirect(voting_session)
 
     with transaction.atomic():
@@ -1363,16 +1387,9 @@ def session_copy(request, pk):
             name=_copy_name(source.name),
             minimum_participants=source.minimum_participants,
         )
-        VotingSessionTask.objects.bulk_create(
-            [
-                VotingSessionTask(
-                    session=copied,
-                    task=item.task,
-                    position=item.position,
-                )
-                for item in source.queue_items.select_related("task")
-            ]
-        )
+        queued = _add_tasks_to_queue(copied, [item.task for item in source.queue_items.select_related("task")])
+    if len(queued) < source.queue_items.count():
+        messages.warning(request, "В копию вошли только незавершённые задачи, доступные для оценки. Проверьте готовность аналитики в бэклоге.")
     messages.success(
         request,
         f"Создана копия комнаты «{copied.name}» без участников и голосов.",
