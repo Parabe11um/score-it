@@ -193,7 +193,7 @@ class VotingSessionForm(BootstrapFormMixin, forms.ModelForm):
         label="Задачи для оценки",
         queryset=Task.objects.none(),
         widget=forms.CheckboxSelectMultiple,
-        help_text="Неоценённые задачи выбраны автоматически.",
+        help_text="Только неоценённые задачи, доступные для оценки и не включённые в спринт.",
     )
 
     class Meta:
@@ -214,7 +214,7 @@ class VotingSessionForm(BootstrapFormMixin, forms.ModelForm):
         tasks = estimation_tasks(project)
         self.fields["task_ids"].queryset = tasks
         if not self.is_bound:
-            self.initial["task_ids"] = tasks.filter(status=Task.Status.UNESTIMATED)
+            self.initial["task_ids"] = tasks
 
 
 class JoinRoomForm(BootstrapFormMixin, forms.Form):

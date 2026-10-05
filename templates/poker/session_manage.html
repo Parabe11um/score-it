@@ -195,13 +195,18 @@
 </section>
 
 {% if voting_session.status != "finished" and available_tasks %}
-<details class="card section-card add-queue-card" data-task-picker>
+<details class="card section-card add-queue-card" data-task-picker data-task-visible-selection>
     <summary class="section-heading">
         <div><h2>Добавить задачи в очередь</h2><p>Подходит и для уже созданных комнат.</p></div>
         <span class="pill">{{ available_tasks|length }}</span>
     </summary>
     <form method="post" action="{% url 'poker:session_queue_add' voting_session.pk %}" class="stack-form">
         {% csrf_token %}
+        <label for="queue-competency">Компетенция</label>
+        <select id="queue-competency" class="form-control" data-task-competency>
+            <option value="all">Все компетенции</option>
+            {% for value, label in competency_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+        </select>
         <div class="picker-tools">
             <input type="search" placeholder="Найти задачу" aria-label="Найти задачу" data-task-search>
             <div class="button-row">
@@ -212,13 +217,15 @@
         <div class="picker-heading"><span>Доступные задачи</span><strong data-task-count>0 выбрано</strong></div>
         <div class="queue-picker" data-task-options>
             {% for task in available_tasks %}
-                <label class="queue-picker__item" data-task-option data-search-text="{{ task.number|lower }} {{ task.title|lower }} {{ task.get_competency_display|lower }}">
+                <label class="queue-picker__item" data-task-option data-search-text="{{ task.number|lower }} {{ task.title|lower }} {{ task.get_competency_display|lower }}" data-competency="{{ task.competency }}">
                     <input type="checkbox" name="task_ids" value="{{ task.pk }}" checked>
                     <span><strong>{{ task.number }}</strong>{% if task.competency %} <span class="competency-badge competency-badge--{{ task.competency }}">{{ task.get_competency_display }}</span>{% endif %} — {{ task.title }}</span>
                 </label>
             {% endfor %}
         </div>
-        <button class="button button--secondary" type="submit">Добавить выбранные в очередь</button>
+        <div class="compact-empty" data-task-empty hidden>По выбранным фильтрам задач нет.</div>
+        <p class="help-text">Только неоценённые задачи, доступные для оценки и не включённые в спринт. Добавятся отмеченные задачи, видимые по фильтру.</p>
+        <button class="button button--secondary" type="submit" data-task-submit>Добавить выбранные в очередь</button>
     </form>
 </details>
 {% endif %}

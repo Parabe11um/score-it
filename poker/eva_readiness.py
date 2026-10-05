@@ -8,7 +8,7 @@ import re
 from collections import defaultdict
 from dataclasses import dataclass
 
-from .models import Task
+from .models import SprintTask, Task
 
 
 GATED_COMPETENCIES = {
@@ -96,8 +96,18 @@ class EvaReadiness:
         return Readiness(True, "Аналитика выполнена: " + ", ".join(item.number for item in analysis) + ". Сопоставлено по названию.")
 
 
+def unestimated_tasks(project):
+    """Candidates for a new estimation queue; a local accepted zero is an estimate."""
+    tasks = project.tasks.filter(status=Task.Status.UNESTIMATED, completed_at__isnull=True).exclude(
+        sprint_items__status=SprintTask.Status.PLANNED
+    )
+    return tasks.filter(pk__in=[task.pk for task in tasks.only(
+        "pk", "estimate_sum", "estimate_count", "imported_estimate"
+    ) if task.estimate is None])
+
+
 def estimation_tasks(project):
     """Keep a QuerySet for ModelMultipleChoiceField's server-side validation."""
-    tasks = list(project.tasks.only(*READINESS_FIELDS))
-    readiness = EvaReadiness(tasks)
-    return project.tasks.filter(pk__in=[task.pk for task in tasks if not task.completed_at and readiness.check(task).allowed])
+    readiness = EvaReadiness.for_project(project)
+    tasks = unestimated_tasks(project)
+    return tasks.filter(pk__in=[task.pk for task in tasks.only(*READINESS_FIELDS) if readiness.check(task).allowed])

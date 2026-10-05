@@ -44,7 +44,7 @@ from .models import (
 from .task_import import save_task_import
 from .sprint_import import available_sprint_tasks, save_sprint_import
 from .team import add_project_members
-from .eva_readiness import EvaReadiness
+from .eva_readiness import EvaReadiness, unestimated_tasks
 
 
 def _format_decimal(value):
@@ -973,7 +973,7 @@ def _session_manage_response(
     queue = _queue_context(voting_session)
     queued_task_ids = [item.task_id for item in queue["items"]]
     readiness = EvaReadiness.for_project(voting_session.project)
-    candidates = list(voting_session.project.tasks.filter(completed_at__isnull=True).exclude(pk__in=queued_task_ids))
+    candidates = list(unestimated_tasks(voting_session.project).exclude(pk__in=queued_task_ids))
     for task in candidates:
         task.eva_readiness = readiness.check(task)
     available_tasks = [task for task in candidates if task.eva_readiness.allowed]
@@ -1005,6 +1005,7 @@ def _session_manage_response(
             "queue": queue,
             "available_tasks": available_tasks,
             "waiting_tasks": waiting_tasks,
+            "competency_choices": Task.Competency.choices,
             "current_round": current_round,
             "summary": summary,
             "participant_progress": participant_progress,
@@ -1126,9 +1127,7 @@ def session_queue_add(request, pk):
         return redirect(voting_session)
 
     task_ids = request.POST.getlist("task_ids")
-    tasks = voting_session.project.tasks.filter(
-        pk__in=task_ids, completed_at__isnull=True
-    )
+    tasks = unestimated_tasks(voting_session.project).filter(pk__in=task_ids)
     readiness = EvaReadiness.for_project(voting_session.project)
     for task in tasks:
         result = readiness.check(task)
