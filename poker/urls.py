@@ -112,6 +112,7 @@ urlpatterns = [
     path("sprints/<int:pk>/", views.sprint_detail, name="sprint_detail"),
     path("sprints/<int:pk>/team/", team_views.sprint_team, name="sprint_team"),
     path("sprints/<int:pk>/team/add/", team_views.sprint_members_add, name="sprint_members_add"),
+    path("sprints/<int:pk>/team/new/", team_views.sprint_resource_create, name="sprint_resource_create"),
     path("sprints/<int:pk>/team/<int:resource_pk>/", team_views.sprint_resource_update, name="sprint_resource_update"),
     path("sprints/<int:pk>/team/<int:resource_pk>/remove/", team_views.sprint_resource_remove, name="sprint_resource_remove"),
     path("sprints/<int:pk>/import/", views.sprint_import, name="sprint_import"),

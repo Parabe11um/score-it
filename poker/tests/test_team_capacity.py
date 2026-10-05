@@ -47,7 +47,7 @@ class TeamCapacityTests(TestCase):
 
     def update_resource(self, resource=None, **changes):
         resource = resource or self.resource
-        values = {"competency": "development", "allocation_percent": "75",
+        values = {"full_name": resource.full_name, "competency": "development", "allocation_percent": "75",
                   "hours_per_day": "8", "absence_days": "2"}
         values.update(changes)
         return self.client.post(reverse("poker:sprint_resource_update", args=[resource.sprint_id, resource.pk]), values)
@@ -136,6 +136,84 @@ class TeamCapacityTests(TestCase):
         self.assertEqual(self.sprint.development_capacity, Decimal("123.45"))
         self.assertEqual(self.sprint.capacity_total, Decimal("38.40"))
 
+    def test_manual_correction_on_team_page_and_return_to_team_calculation(self):
+        url = reverse("poker:sprint_team", args=[self.sprint.pk])
+        response = self.client.post(url, {
+            "action": "capacity", "analysis_capacity": "0", "development_abs_capacity": "120.50",
+            "development_be_capacity": "20", "development_fe_capacity": "30",
+            "testing_capacity": "40", "defect_capacity": "10",
+        }, follow=True)
+        self.assertRedirects(response, url)
+        sprint = Sprint.objects.get(pk=self.sprint.pk)
+        self.assertEqual(sprint.capacity_source, "manual")
+        self.assertEqual(sprint.capacity_total, Decimal("220.50"))
+        self.assertEqual(sprint.analysis_capacity, 0)
+        self.assertIsNone(sprint.development_capacity)
+        self.assertContains(response, 'value="120.50"')
+        self.assertEqual(sprint.resources.count(), 1)
+        self.client.post(url, self.settings())
+        sprint = Sprint.objects.get(pk=self.sprint.pk)
+        self.assertEqual(sprint.capacity_total, Decimal("38.40"))
+        self.assertEqual(sprint.development_abs_capacity, Decimal("120.50"))
+
+    def test_invalid_manual_correction_preserves_values_and_source(self):
+        url = reverse("poker:sprint_team", args=[self.sprint.pk])
+        for value in ("-1", "no", "9999999", "1.234"):
+            with self.subTest(value=value):
+                response = self.client.post(url, {"action": "capacity", "development_capacity": value})
+                self.assertEqual(response.status_code, 400)
+                sprint = Sprint.objects.get(pk=self.sprint.pk)
+                self.assertEqual(sprint.capacity_source, "team")
+                self.assertEqual(sprint.development_capacity, Decimal("123.45"))
+                self.assertEqual(sprint.capacity_total, Decimal("38.40"))
+                self.assertContains(response, 'action="' + url + '"', status_code=400)
+
+    def test_temporary_resource_create_edit_remove_recalculates_only_this_sprint(self):
+        other_sprint = Sprint.objects.create(project=self.project, name="Another", capacity_source="team",
+                                             start_date=self.sprint.start_date, end_date=self.sprint.end_date)
+        add_project_members(other_sprint)
+        response = self.client.post(reverse("poker:sprint_resource_create", args=[self.sprint.pk]), {
+            "full_name": "  Временный   участник ", "competency": "development_be",
+            "allocation_percent": "50", "hours_per_day": "8", "absence_days": "0.5",
+        }, follow=True)
+        self.assertEqual(response.status_code, 200)
+        resource = self.sprint.resources.get(member__isnull=True)
+        self.assertEqual(resource.full_name, "Временный участник")
+        self.assertEqual(resource.capacity_hours, Decimal("30.40"))
+        self.assertEqual(Sprint.objects.get(pk=self.sprint.pk).capacity_total, Decimal("68.80"))
+        self.assertEqual(self.project.members.count(), 1)
+        self.assertEqual(self.update_resource(resource, full_name="Новое имя", competency="testing",
+                                              allocation_percent="100", absence_days="0").status_code, 302)
+        resource.refresh_from_db()
+        self.assertEqual(resource.full_name, "Новое имя")
+        self.assertEqual(resource.capacity_hours, 64)
+        self.assertEqual(Sprint.objects.get(pk=self.sprint.pk).team_capacities["testing"], 64)
+        self.assertEqual(Sprint.objects.get(pk=other_sprint.pk).capacity_total, 60)
+        self.client.post(reverse("poker:sprint_resource_remove", args=[self.sprint.pk, resource.pk]))
+        self.assertEqual(Sprint.objects.get(pk=self.sprint.pk).capacity_total, Decimal("38.40"))
+
+    def test_invalid_new_resource_keeps_bound_form_and_does_not_create_member(self):
+        url = reverse("poker:sprint_resource_create", args=[self.sprint.pk])
+        for changes in ({"full_name": " "}, {"absence_days": "11"}, {"allocation_percent": "101"}):
+            values = {"full_name": "New", "competency": "analysis", "allocation_percent": "100",
+                      "hours_per_day": "8", "absence_days": "0"}
+            values.update(changes)
+            response = self.client.post(url, values)
+            self.assertEqual(response.status_code, 400)
+            self.assertTrue(response.context["new_resource_form"].errors)
+            self.assertEqual(self.sprint.resources.count(), 1)
+            self.assertEqual(self.project.members.count(), 1)
+
+    def test_resource_edit_keeps_project_member_and_other_sprint_snapshot(self):
+        other_sprint = Sprint.objects.create(project=self.project, name="Another")
+        add_project_members(other_sprint)
+        self.assertEqual(self.update_resource(full_name="Исправленное имя", competency="development_abs").status_code, 302)
+        self.member.refresh_from_db()
+        self.assertEqual(self.member.full_name, "Тестовый сотрудник")
+        self.assertEqual(other_sprint.resources.get().full_name, "Тестовый сотрудник")
+        response = self.client.post(reverse("poker:sprint_resource_update", args=[self.sprint.pk, other_sprint.resources.get().pk]), {})
+        self.assertEqual(response.status_code, 404)
+
     def test_role_overload_is_not_hidden_by_another_roles_free_hours(self):
         SprintResource.objects.create(sprint=self.sprint, full_name="Analyst", competency="analysis")
         task = Task.objects.create(project=self.project, number="DEV-1", title="Work",
@@ -196,9 +274,17 @@ class TeamCapacityTests(TestCase):
             self.sprint.save()
             self.client.post(reverse("poker:sprint_team", args=[self.sprint.pk]), self.settings(reserve_percent="90"))
             self.client.post(reverse("poker:sprint_members_add", args=[self.sprint.pk]), {"all": "1"})
+            self.client.post(reverse("poker:sprint_resource_create", args=[self.sprint.pk]), {
+                "full_name": "New", "competency": "analysis", "allocation_percent": "100",
+                "hours_per_day": "8", "absence_days": "0",
+            })
+            self.client.post(reverse("poker:sprint_team", args=[self.sprint.pk]), {
+                "action": "capacity", "development_capacity": "999",
+            })
             self.update_resource(allocation_percent="0")
             self.client.post(reverse("poker:sprint_resource_remove", args=[self.sprint.pk, self.resource.pk]))
             self.assertEqual(Sprint.objects.get(pk=self.sprint.pk).capacity_total, Decimal("38.40"))
+            self.assertEqual(self.sprint.resources.count(), 1)
             response = self.client.get(reverse("poker:sprint_team", args=[self.sprint.pk]))
             self.assertNotContains(response, "Сохранить параметры")
 
@@ -212,6 +298,7 @@ class TeamCapacityTests(TestCase):
         for name, args in (("project_team", [self.project.pk]), ("sprint_team", [self.sprint.pk]),
                            ("sprint_resource_update", [self.sprint.pk, self.resource.pk]),
                            ("sprint_resource_remove", [self.sprint.pk, self.resource.pk]),
+                           ("sprint_resource_create", [self.sprint.pk]),
                            ("sprint_members_add", [self.sprint.pk])):
             self.assertEqual(self.client.post(reverse(f"poker:{name}", args=args), self.settings()).status_code, 404)
 
