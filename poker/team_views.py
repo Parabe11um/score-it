@@ -5,8 +5,8 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.http import require_http_methods, require_POST
 
-from .forms import ProjectMemberForm, SprintResourceForm, SprintSettingsForm
-from .models import Project, ProjectMember, Sprint
+from .forms import ProjectMemberForm, SprintCapacityForm, SprintResourceForm, SprintSettingsForm
+from .models import Project, ProjectMember, Sprint, SprintResource
 from .team import add_project_members
 
 
@@ -49,7 +49,8 @@ def _check_editable(request, sprint):
     return None
 
 
-def _render_team(request, sprint, settings_form=None, resource_form=None, status=200):
+def _render_team(request, sprint, settings_form=None, resource_form=None,
+                 capacity_form=None, new_resource_form=None, status=200):
     resources = sprint.resource_rows
     forms = []
     for resource in resources:
@@ -63,6 +64,9 @@ def _render_team(request, sprint, settings_form=None, resource_form=None, status
     return render(request, "poker/sprint_team.html", {
         "sprint": sprint, "resource_forms": forms, "available_members": available,
         "settings_form": settings_form or SprintSettingsForm(instance=sprint),
+        "capacity_form": capacity_form or SprintCapacityForm(instance=sprint, auto_id="capacity_%s"),
+        "new_resource_form": new_resource_form or SprintResourceForm(
+            instance=SprintResource(sprint=sprint), auto_id="new_resource_%s"),
         "is_locked": _locked(sprint),
     }, status=status)
 
@@ -76,6 +80,16 @@ def sprint_team(request, pk):
         blocked = _check_editable(request, sprint)
         if blocked is not None:
             return blocked
+        if request.POST.get("action") == "capacity":
+            form = SprintCapacityForm(request.POST, instance=sprint, auto_id="capacity_%s")
+            if form.is_valid():
+                sprint = form.save(commit=False)
+                sprint.capacity = None
+                sprint.capacity_source = Sprint.CapacitySource.MANUAL
+                sprint.save()
+                messages.success(request, "Ручная ёмкость по компетенциям применена. Состав команды сохранён.")
+                return redirect(_team_url(sprint))
+            return _render_team(request, _owned_sprint(request, pk), capacity_form=form, status=400)
         form = SprintSettingsForm(request.POST, instance=sprint)
         if form.is_valid():
             form.save()
@@ -85,6 +99,23 @@ def sprint_team(request, pk):
         sprint = _owned_sprint(request, pk)
         return _render_team(request, sprint, settings_form=form, status=400)
     return _render_team(request, sprint)
+
+
+@login_required
+@require_POST
+@transaction.atomic
+def sprint_resource_create(request, pk):
+    sprint = _owned_sprint(request, pk)
+    blocked = _check_editable(request, sprint)
+    if blocked is not None:
+        return blocked
+    form = SprintResourceForm(request.POST, instance=SprintResource(sprint=sprint),
+                              auto_id="new_resource_%s")
+    if not form.is_valid():
+        return _render_team(request, sprint, new_resource_form=form, status=400)
+    resource = form.save()
+    messages.success(request, f"Сотрудник «{resource.full_name}» добавлен только в этот спринт.")
+    return redirect(_team_url(sprint))
 
 
 @login_required

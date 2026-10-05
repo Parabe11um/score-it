@@ -7,7 +7,7 @@
     <a class="button button--secondary" href="{% url 'poker:sprint_export' sprint.pk %}">Отчёт по ёмкости</a>
 </div>
 {% include 'poker/sprint_nav.html' with active='team' %}
-{% if is_locked %}<div class="archive-notice">Команда и параметры расчёта сохранены. Для изменения откройте спринт на вкладке «План».</div>{% endif %}
+{% if is_locked %}<div class="archive-notice">Завершённый или архивный спринт доступен только для просмотра. Для корректировки восстановите его из архива и верните в работу на вкладке «План».</div>{% endif %}
 {% if sprint.uses_team_capacity and not sprint.has_capacity %}<div class="message message--warning">Для расчёта нужны обе даты и хотя бы один сотрудник. Пока ёмкость не определена.</div>{% endif %}
 {% if not sprint.uses_team_capacity %}<div class="message message--info">В плане используется ёмкость, введённая вручную. Чтобы применить состав команды, выберите «Рассчитать по сотрудникам» и сохраните параметры.</div>{% endif %}
 <div class="sprint-metrics">
@@ -16,12 +16,13 @@
     <div class="metric-card"><span>Ёмкость для плана</span><strong>{{ sprint.capacity_total_display }}</strong><small>{% if sprint.uses_team_capacity %}Резерв {{ sprint.reserve_percent|floatformat:"-2" }}%{% else %}Введена вручную{% endif %}</small></div>
 </div>
 <div class="team-layout">
+    <div class="resource-list">
     <section class="card section-card">
         <div class="section-heading"><div><h2>Календарь и расчёт</h2></div></div>
         {% if is_locked %}
             <dl class="resource-facts"><dt>Способ расчёта</dt><dd>{{ sprint.get_capacity_source_display }}</dd><dt>Начало</dt><dd>{{ sprint.start_date|date:"d.m.Y"|default:"—" }}</dd><dt>Завершение</dt><dd>{{ sprint.end_date|date:"d.m.Y"|default:"—" }}</dd><dt>Резерв</dt><dd>{{ sprint.reserve_percent|floatformat:"-2" }}%</dd></dl>
         {% else %}
-            <form method="post" class="stack-form">{% csrf_token %}
+            <form method="post" action="{% url 'poker:sprint_team' sprint.pk %}" class="stack-form">{% csrf_token %}
                 {% include 'poker/form_fields.html' with form=settings_form %}
                 <button class="button button--primary" type="submit">Сохранить параметры</button>
             </form>
@@ -29,6 +30,25 @@
         <p class="help-text">Часы сотрудника = (рабочие дни − дни отсутствия) × часы в день × аллокация. Из полученного времени один раз вычитается резерв.</p>
         <p class="help-text">Учитывайте только рабочие дни отсутствия внутри спринта. Полдня можно указать как 0,5.</p>
     </section>
+    <section class="card section-card">
+        <div class="section-heading"><div><h2>Ёмкость по компетенциям</h2><p>Текущие часы для плана.</p></div></div>
+        <dl class="resource-facts">
+            {% for row in sprint.competency_capacity_rows %}<dt>{{ row.label }}</dt><dd>{{ row.capacity_display }} ч</dd>{% endfor %}
+        </dl>
+        {% if not is_locked %}
+        <details {% if capacity_form.errors or not sprint.uses_team_capacity %}open{% endif %}>
+            <summary>Задать ёмкость вручную</summary>
+            <p class="help-text">Введите часы по компетенциям. Пустое поле означает, что лимит не задан, 0 — доступных часов нет. Сохранение включит ручной расчёт. Резерв к этим часам дополнительно не применяется.</p>
+            {% if sprint.uses_team_capacity %}<p class="help-text">В полях показаны ранее сохранённые ручные значения. Текущая ёмкость команды приведена выше.</p>{% endif %}
+            <form method="post" action="{% url 'poker:sprint_team' sprint.pk %}" class="stack-form resource-edit-form">
+                {% csrf_token %}<input type="hidden" name="action" value="capacity">
+                {% include 'poker/form_fields.html' with form=capacity_form %}
+                <button class="button button--primary" type="submit">Применить ручную ёмкость</button>
+            </form>
+        </details>
+        {% endif %}
+    </section>
+    </div>
     <div class="resource-list">
         <section class="card section-card">
             <div class="section-heading"><div><h2>Состав команды</h2><p>Параметры действуют только в этом спринте.</p></div><span class="pill">{{ resource_forms|length }}</span></div>
@@ -40,13 +60,23 @@
                 <button class="button button--ghost" type="submit" name="all" value="1">Добавить всю команду</button>
             </form>
             {% endif %}
+            {% if not is_locked %}
+            <details {% if new_resource_form.errors %}open{% endif %}>
+                <summary>Добавить сотрудника только в этот спринт</summary>
+                <p class="help-text">Для временного участника укажите имя и доступность. В справочник команды проекта он не добавляется.</p>
+                <form method="post" action="{% url 'poker:sprint_resource_create' sprint.pk %}" class="stack-form resource-edit-form">
+                    {% csrf_token %}<div class="resource-fields">{% include 'poker/form_fields.html' with form=new_resource_form %}</div>
+                    <button class="button button--secondary" type="submit">Добавить в спринт</button>
+                </form>
+            </details>
+            {% endif %}
         </section>
         {% for resource, form in resource_forms %}
         <article class="card section-card">
             <div class="resource-heading"><div><strong>{{ resource.full_name }}</strong><div><span class="competency-badge competency-badge--{{ resource.competency }}">{{ resource.get_competency_display }}</span></div></div><div class="resource-hours"><strong>{{ resource.capacity_hours|floatformat:"-2"|default:"—" }}</strong><span>ч после резерва</span></div></div>
             <p class="muted">Аллокация {{ resource.allocation_percent|floatformat:"-2" }}% · {{ resource.hours_per_day|floatformat:"-2" }} ч/день · отсутствие {{ resource.absence_days|floatformat:"-2" }} дн.</p>
             {% if not is_locked %}
-            <details {% if form.errors %}open{% endif %}><summary>Изменить параметры</summary>
+            <details {% if form.errors %}open{% endif %}><summary>Изменить ресурс</summary>
                 <form method="post" action="{% url 'poker:sprint_resource_update' sprint.pk resource.pk %}" class="stack-form resource-edit-form">
                     {% csrf_token %}<div class="resource-fields">{% include 'poker/form_fields.html' %}</div>
                     <button class="button button--primary" type="submit">Сохранить сотрудника в спринте</button>
@@ -57,7 +87,7 @@
             </details>
             {% endif %}
         </article>
-        {% empty %}<div class="card section-card compact-empty">В спринте пока нет сотрудников. Добавьте их из команды проекта.</div>{% endfor %}
+        {% empty %}<div class="card section-card compact-empty">В спринте пока нет сотрудников.{% if not is_locked %} Добавьте их из команды проекта или создайте участника только для этого спринта.{% endif %}</div>{% endfor %}
     </div>
 </div>
 {% endblock %}

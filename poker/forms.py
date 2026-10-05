@@ -384,9 +384,12 @@ class SprintSettingsForm(BootstrapFormMixin, forms.ModelForm):
 class SprintResourceForm(BootstrapFormMixin, forms.ModelForm):
     class Meta:
         model = SprintResource
-        fields = ("competency", "allocation_percent", "hours_per_day", "absence_days")
+        fields = ("full_name", "competency", "allocation_percent", "hours_per_day", "absence_days")
         widgets = {
             "allocation_percent": forms.NumberInput(attrs={"min": 0, "max": 100, "step": "0.01"}),
             "hours_per_day": forms.NumberInput(attrs={"min": "0.01", "max": 24, "step": "0.01"}),
             "absence_days": forms.NumberInput(attrs={"min": 0, "step": "0.5"}),
         }
+
+    def clean_full_name(self):
+        return " ".join(self.cleaned_data["full_name"].split())
