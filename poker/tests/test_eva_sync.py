@@ -5,6 +5,7 @@ from io import BytesIO
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 from openpyxl import load_workbook
 
 from poker.forms import SprintCapacityForm, SprintForm
@@ -65,7 +66,7 @@ class EvaSyncTests(TestCase):
         self.assertEqual((task.quota, task.eva_sprints), ('', ''))
         self.assertFalse(task.sprint_items.filter(status='planned').exists())
 
-    def test_multi_sprint_duplicate_names_and_archived_targets_are_conflicts(self):
+    def test_multi_sprint_and_duplicate_names_remain_conflicts(self):
         self.sync([row(sprints='Original') + ['Квота']])
         task = self.project.tasks.get()
         for name in ('A; B', '["A", "B"]', '{"id": "uuid"}'):
@@ -76,19 +77,61 @@ class EvaSyncTests(TestCase):
         for _ in range(2):
             Sprint.objects.create(project=self.project, name='Duplicate')
         self.assertEqual(self.sync([row(sprints='Duplicate') + ['']]).counts['conflicts'], 1)
-        target = Sprint.objects.create(project=self.project, name='Finished', status='completed')
-        self.assertEqual(self.sync([row(sprints=target.name) + ['']]).counts['conflicts'], 1)
         self.assertEqual(task.sprint_items.get(status='planned').sprint.name, 'Original')
 
-    def test_completed_plan_is_not_silently_rewritten(self):
+    def test_completed_plan_follows_eva_estimate_and_transfer(self):
         self.sync([row(sprints='Original') + ['Квота']])
         self.project.sprints.update(status='completed')
+        old = self.project.sprints.get()
+        self.project.tasks.update(eva_readiness_stale=True)
         result = self.sync([row(estimate=52, sprints='Next') + ['Другая']])
-        self.assertEqual(result.counts['conflicts'], 1)
+        self.assertEqual(result.counts['conflicts'], 0)
+        self.assertEqual(result.counts['assignments'], 1)
         task = self.project.tasks.get()
-        self.assertEqual(task.estimate, 12)
-        self.assertEqual(task.quota, 'Квота')
-        self.assertFalse(self.project.sprints.filter(name='Next').exists())
+        self.assertEqual(task.estimate, 52)
+        self.assertEqual(task.quota, 'Другая')
+        self.assertFalse(task.eva_readiness_stale)
+        self.assertEqual(task.sprint_items.get(status='planned').sprint.name, 'Next')
+        old.refresh_from_db()
+        self.assertEqual(old.status, 'completed')
+        self.assertEqual(old.total_estimate, 0)
+        self.assertEqual(task.sprint_items.get(sprint=old).status, 'transferred')
+        self.assertEqual(self.project.sprints.get(name='Next').total_estimate, 52)
+        self.assertEqual(self.sync([row(estimate=52, sprints='Next') + ['Другая']]).counts['unchanged'], 1)
+
+    def test_eva_can_assign_into_completed_or_archived_target_without_reopening_it(self):
+        self.sync([row(sprints='Original') + ['Квота']])
+        for index, fields in enumerate(({'status': 'completed'}, {'archived_at': timezone.now()})):
+            target = Sprint.objects.create(project=self.project, name=f'History {index}',
+                                            start_date=date(2026, 9, 1), end_date=date(2026, 9, 14),
+                                            capacity=80, **fields)
+            saved = self.sync([row(estimate='7.5', sprints=target.name) + ['Квота']])
+            self.assertEqual(saved.counts['conflicts'], 0)
+            task = self.project.tasks.get()
+            self.assertEqual(task.sprint_items.get(status='planned').sprint_id, target.pk)
+            target.refresh_from_db()
+            self.assertEqual(target.total_estimate, Decimal('7.5'))
+            self.assertEqual((target.start_date, target.end_date, target.capacity), (date(2026, 9, 1), date(2026, 9, 14), 80))
+            for field, value in fields.items():
+                self.assertEqual(getattr(target, field), value)
+            self.assertEqual(self.sync([row(estimate='7.5', sprints=target.name) + ['Квота']]).counts['unchanged'], 1)
+
+    def test_missing_sprint_column_preserves_archive_assignment_but_empty_removes_it(self):
+        self.sync([row(sprints='History') + ['Квота']])
+        self.project.sprints.update(archived_at=timezone.now(), status='completed')
+        saved = self.sync([row(estimate=32, title='Updated')], quota=False, sprints=False)
+        self.assertEqual(saved.counts['conflicts'], 0)
+        task = self.project.tasks.get()
+        sprint = self.project.sprints.get()
+        self.assertEqual((task.estimate, task.title, sprint.total_estimate), (32, 'Updated', 32))
+        self.assertEqual(task.sprint_items.get(status='planned').sprint_id, sprint.pk)
+        self.assertEqual(self.sync([row(estimate=32, title='Updated')], quota=False, sprints=False).counts['unchanged'], 1)
+        saved = self.sync([row(estimate=0, sprints='') + ['Квота']])
+        self.assertEqual(saved.counts['assignments'], 1)
+        task.refresh_from_db()
+        self.assertIsNone(task.estimate)
+        self.assertEqual(task.sprint_items.get().status, 'removed')
+        self.assertEqual(Sprint.objects.get(pk=sprint.pk).total_estimate, 0)
 
     def test_identity_conflict_does_not_create_sprint_or_overwrite_quota(self):
         self.sync([row(sprints='') + ['Квота']])
