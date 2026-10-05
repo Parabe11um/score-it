@@ -1,9 +1,8 @@
-"""Read EVA task exports, treating an empty hour estimate or numeric zero as unset."""
+"""Bounded CSV/XLSX readers and shared EVA column/type mapping."""
 
 import csv
 import re
-from dataclasses import dataclass, field
-from decimal import Decimal, InvalidOperation
+from dataclasses import dataclass
 from html.parser import HTMLParser
 from io import BytesIO, StringIO
 from itertools import chain
@@ -12,7 +11,6 @@ from uuid import UUID
 from zipfile import BadZipFile, ZipFile
 
 from django.core.exceptions import ValidationError
-from django.db import transaction
 from openpyxl import load_workbook
 from openpyxl.utils.exceptions import InvalidFileException
 
@@ -27,6 +25,7 @@ HOUR_ESTIMATE_HEADER = "Оценка задачи, час"
 
 # Deliberately exclude EVA's unrelated fields «Оценка» and «Story Point».
 HEADERS = {
+    "quota": ("Тип квоты",),
     "number": ("Код", "Код задачи", "Номер задачи", "Номер"),
     "title": ("Наименование", "Название задачи", "Название"),
     "competency": ("Логический тип.Имя логического типа", "Логический тип", "Тип задачи"),
@@ -47,10 +46,10 @@ COMPETENCIES = {
     "анализ": Task.Competency.ANALYSIS,
     "analysis": Task.Competency.ANALYSIS,
     "разработка": Task.Competency.DEVELOPMENT,
-    "разработка абс": Task.Competency.DEVELOPMENT,
+    "разработка абс": Task.Competency.DEVELOPMENT_ABS,
     "разработка битрикс": Task.Competency.DEVELOPMENT,
-    "разработка be": Task.Competency.DEVELOPMENT,
-    "разработка fe": Task.Competency.DEVELOPMENT,
+    "разработка be": Task.Competency.DEVELOPMENT_BE,
+    "разработка fe": Task.Competency.DEVELOPMENT_FE,
     "development": Task.Competency.DEVELOPMENT,
     "dev": Task.Competency.DEVELOPMENT,
     "тестирование": Task.Competency.TESTING,
@@ -58,6 +57,9 @@ COMPETENCIES = {
     "тестирование - на test": Task.Competency.TESTING,
     "testing": Task.Competency.TESTING,
     "qa": Task.Competency.TESTING,
+    "дефект": Task.Competency.DEFECT,
+    "defect": Task.Competency.DEFECT,
+    "bug": Task.Competency.DEFECT,
     "": Task.Competency.NONE,
     "без типа": Task.Competency.NONE,
 }
@@ -69,19 +71,6 @@ def _text(value):
 
 def _normalise(value):
     return " ".join(_text(value).lstrip("\ufeff").split()).casefold()
-
-
-def _has_hour_estimate(value):
-    """Only blank values and finite numeric zeros are eligible for import."""
-    value = _text(value)
-    if not value:
-        return False
-    try:
-        estimate = Decimal(value.replace(",", "."))
-    except InvalidOperation:
-        # Formulas and unrecognised nonempty values must not bypass the filter.
-        return True
-    return not (estimate.is_finite() and estimate.is_zero())
 
 
 class _DescriptionText(HTMLParser):
@@ -130,15 +119,7 @@ class ImportedTask:
     competency: str
     description: str
     external_url: str
-
-
-@dataclass
-class ParsedTaskImport:
-    tasks: list[ImportedTask] = field(default_factory=list)
-    total_rows: int = 0
-    skipped_estimated: int = 0
-    zero_estimate_rows: int = 0
-    duplicates: int = 0
+    quota: str = ""
 
 
 def _column_mapping(headers):
@@ -289,9 +270,11 @@ def task_from_row(row, columns, row_number):
     elif not title or len(title) > 500:
         error = "нужно название задачи длиной до 500 символов"
     elif _normalise(type_name) not in COMPETENCIES:
-        error = f"неизвестный тип «{type_name[:80]}»; укажите аналитику, разработку или тестирование"
+        error = f"неизвестный тип «{type_name[:80]}»; укажите аналитику, разработку АБС/BE/FE, тестирование или дефект"
     elif not re.fullmatch(r"CmfTask:[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", identifier):
         error = "нужен идентификатор объекта CmfTask:UUID для ссылки в EVA"
+    if len(value("quota")) > 200:
+        error = "тип квоты превышает 200 символов"
     if error:
         raise ValidationError(f"Строка {row_number}: {error}.")
     html = value("html_description")
@@ -300,100 +283,16 @@ def task_from_row(row, columns, row_number):
         raise ValidationError(f"Строка {row_number}: описание превышает 100 000 символов.")
     return ImportedTask(
         number=number, title=title, competency=COMPETENCIES[_normalise(type_name)],
-        description=description,
+        description=description, quota=value("quota"),
         external_url=f"{EVA_TASK_URL_PREFIX}CmfTask:{UUID(identifier.split(':', 1)[1])}",
     )
 
 
 def parse_task_file(upload):
-    rows = read_task_file_rows(upload)
-    columns = _column_mapping(rows[0])
-
-    def value(row, key):
-        index = columns.get(key)
-        return _text(row[index]) if index is not None and index < len(row) else ""
-
-    data_rows = [
-        (n, row) for n, row in enumerate(rows[1:], 2)
-        if any(_text(cell) for cell in row)
-    ]
-    # A filled nonzero/invalid estimate blocks duplicate blank and zero rows too.
-    estimated_numbers = {
-        value(row, "number") for _, row in data_rows
-        if _has_hour_estimate(value(row, "estimate"))
-    }
-    result = ParsedTaskImport(total_rows=len(data_rows))
-    seen = {}
-    errors = []
-    for row_number, row in data_rows:
-        number = value(row, "number")
-        estimate = value(row, "estimate")
-        has_estimate = _has_hour_estimate(estimate)
-        if estimate and not has_estimate:
-            result.zero_estimate_rows += 1
-        if has_estimate or number in estimated_numbers:
-            result.skipped_estimated += 1
-            continue
-        try:
-            task = task_from_row(row, columns, row_number)
-        except ValidationError as exc:
-            errors.extend(exc.messages)
-            continue
-        if number in seen:
-            if seen[number] != task:
-                errors.append(f"Строка {row_number}: код {number} повторяется с разными данными.")
-            else:
-                result.duplicates += 1
-        else:
-            seen[number] = task
-    if errors:
-        shown_errors = errors[:20]
-        if len(errors) > 20:
-            shown_errors.append("Исправьте эти строки и загрузите файл повторно.")
-        raise ValidationError(shown_errors)
-    result.tasks = list(seen.values())
-    return result
+    from .sprint_import import parse_sprint_file
+    return parse_sprint_file(upload, require_status=False)
 
 
-@dataclass
-class SavedTaskImport:
-    tasks: list[Task] = field(default_factory=list)
-    created: int = 0
-    updated: int = 0
-    unchanged: int = 0
-    skipped_local: int = 0
-
-
-@transaction.atomic
 def save_task_import(project, parsed):
-    result = SavedTaskImport()
-    for item in parsed.tasks:
-        defaults = {
-            key: getattr(item, key)
-            for key in ("title", "competency", "description", "external_url")
-        }
-        task, created = Task.objects.select_for_update().get_or_create(
-            project=project, number=item.number, defaults=defaults,
-        )
-        if created:
-            result.created += 1
-        elif (
-            task.status == Task.Status.ESTIMATED
-            or task.estimate is not None
-            or task.completed_at
-        ):
-            result.skipped_local += 1
-            continue
-        else:
-            changed = [
-                key for key, value in defaults.items() if getattr(task, key) != value
-            ]
-            if changed:
-                for key in changed:
-                    setattr(task, key, defaults[key])
-                task.save(update_fields=(*changed, "updated_at"))
-                result.updated += 1
-            else:
-                result.unchanged += 1
-        result.tasks.append(task)
-    return result
+    from .sprint_import import save_sprint_import
+    return save_sprint_import(project, parsed)

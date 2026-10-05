@@ -1548,7 +1548,7 @@ class SprintTests(TestCase):
             rows[Task.Competency.TESTING]["remaining"], Decimal("2")
         )
         self.assertTrue(sprint.is_over_capacity)
-        self.assertEqual(sprint.over_capacity_labels, ["Разработка"])
+        self.assertEqual(sprint.over_capacity_labels, ["Разработка (не уточнена)"])
 
         response = self.client.get(sprint.get_absolute_url())
         self.assertContains(response, "Аналитика")
@@ -1565,8 +1565,8 @@ class SprintTests(TestCase):
         self.assertEqual(capacity_sheet["A2"].value, "Аналитика")
         self.assertEqual(capacity_sheet["B2"].value, 8)
         self.assertEqual(capacity_sheet["C2"].value, 10)
-        self.assertEqual(capacity_sheet["A5"].value, "Без типа")
-        self.assertEqual(capacity_sheet["B5"].value, 2)
+        self.assertEqual(capacity_sheet["A9"].value, "Без типа")
+        self.assertEqual(capacity_sheet["B9"].value, 2)
 
     def test_capacity_update_converts_legacy_total_and_validates_values(self):
         response = self.client.post(
