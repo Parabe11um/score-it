@@ -44,10 +44,10 @@ class SprintFileParserTests(SimpleTestCase):
         for xlsx in (False, True):
             with self.subTest(xlsx=xlsx):
                 parsed = parse_sprint_file(upload(rows, xlsx=xlsx))
-                self.assertEqual([r.estimate for r in parsed.rows if not r.skip_reason], [12, 32, 4])
+                self.assertEqual([r.estimate for r in parsed.rows if not r.skip_reason], [12, 32, 4, 5])
                 self.assertEqual(parsed.counts['unestimated'], 2)
                 self.assertEqual(parsed.counts['closed'], 2)
-                self.assertEqual(parsed.counts['other_type'], 1)
+                self.assertEqual(parsed.counts['other_type'], 0)
                 self.assertFalse(parsed.has_sprints_column)
 
     def test_does_not_confuse_unrelated_status_field_or_estimate_columns(self):
@@ -61,7 +61,7 @@ class SprintFileParserTests(SimpleTestCase):
             parse_sprint_file(upload([data[:9]], headers=HEADERS))
 
     def test_invalid_estimates_are_reported_without_rounding_or_import(self):
-        values = [5, -1, "NaN", "Infinity", "=12", "sNaN", False, "нет"]
+        values = ["0.001", -1, "NaN", "Infinity", "=12", "sNaN", False, "нет"]
         parsed = parse_sprint_file(upload([
             row(f"ABS-SA-{n}", estimate=value) for n, value in enumerate(values, 1)
         ], xlsx=True))
@@ -74,7 +74,7 @@ class SprintFileParserTests(SimpleTestCase):
             row("ABS-SA-1", sprints="Спринт 1"), row("ABS-SA-2", sprints="Нет"),
         ], sprints=True))
         self.assertTrue(parsed.has_sprints_column)
-        self.assertEqual(parsed.counts['eva_assigned'], 1)
+        self.assertEqual(parsed.rows[0].eva_sprints, 'Спринт 1')
         self.assertEqual(parsed.rows[1].eva_sprints, "")
 
     def test_duplicate_rows_and_identifier_conflicts(self):
@@ -125,17 +125,17 @@ class SprintPlanningTests(TestCase):
         self.client.post(reverse('poker:sprint_add_tasks', args=[self.next_sprint.pk]), {'task_ids': [first.pk]})
         self.assertEqual(first.sprint_items.filter(status='planned').count(), 1)
         saved = self.load([row(estimate=32), row("ABS-ABS-2", competency="Разработка АБС", estimate=32)])
-        self.assertEqual(saved.counts['planned_or_completed'], 1)
+        self.assertEqual(saved.counts['updated'], 1)
         self.assertEqual(saved.counts['unchanged'], 1)
         first.refresh_from_db()
-        self.assertEqual(first.estimate, 12)
-        self.assertEqual(Sprint.objects.get(pk=self.sprint.pk).total_estimate, 12)
+        self.assertEqual(first.estimate, 32)
+        self.assertEqual(Sprint.objects.get(pk=self.sprint.pk).total_estimate, 32)
         export = self.client.get(reverse('poker:sprint_export_eva', args=[self.sprint.pk]))
         book = load_workbook(BytesIO(export.content))
         sheet = book['План для EVA']
         self.assertEqual(sheet.max_row, 2)
         self.assertEqual(sheet['A2'].value, first.number)
-        self.assertEqual(sheet['D2'].value, 12)
+        self.assertEqual(sheet['D2'].value, 32)
         self.assertEqual(sheet['E2'].value, first.eva_identifier)
         self.assertEqual(sheet['G2'].value, self.sprint.name)
         self.assertEqual(sheet['K2'].value, self.sprint.pk)
@@ -153,16 +153,17 @@ class SprintPlanningTests(TestCase):
         self.assertEqual(original.title, 'Уточнённая задача')
         self.assertIsNone(original.estimate_sum)
 
-    def test_existing_votes_estimates_and_conflicts_are_preserved(self):
+    def test_eva_overrides_current_estimate_and_preserves_vote_history(self):
         task = Task.objects.create(project=self.project, number='ABS-SA-1', title='Согласованная',
                                    status='estimated', estimate_sum=24, estimate_count=2)
         saved = self.load([row(estimate=20)])
-        self.assertEqual(saved.counts['conflicts'], 1)
+        self.assertEqual(saved.counts['updated'], 1)
         task.refresh_from_db()
-        self.assertEqual((task.estimate_sum, task.estimate_count, task.title), (24, 2, 'Согласованная'))
-        self.load([row()])
+        self.assertEqual((task.estimate_sum, task.estimate_count), (24, 2))
+        self.assertEqual(task.estimate, 20)
+        self.load([row(estimate=5)])
         task.refresh_from_db()
-        self.assertIsNone(task.imported_estimate)
+        self.assertEqual(task.estimate, 5)
         self.assertEqual(task.estimate_count, 2)
 
     def test_real_zero_vote_result_stays_available_when_eva_exports_zero(self):
@@ -172,7 +173,7 @@ class SprintPlanningTests(TestCase):
         self.assertIn(task, available_sprint_tasks(self.project))
 
     def test_closed_assigned_and_unestimated_snapshots_remove_previously_available_tasks(self):
-        for status, estimate, sprints in [('Закрыта', 12, ''), ('Открыта', 12, 'Другой'), ('Открыта', 0, '')]:
+        for status, estimate, sprints in [('Закрыта', 12, ''), ('Открыта', 12, 'Другой')]:
             with self.subTest(status=status, estimate=estimate, sprints=sprints):
                 self.load([row(sprints='')], sprints=True)
                 self.load([row(status=status, estimate=estimate, sprints=sprints)], sprints=True)
@@ -182,7 +183,7 @@ class SprintPlanningTests(TestCase):
         self.load([row()])
         self.load([row(sprints='Уже назначенный спринт')], sprints=True)
         saved = self.load([row()])
-        self.assertEqual(saved.counts['eva_assigned'], 1)
+        self.assertEqual(saved.counts['unchanged'], 1)
         self.assertEqual(available_sprint_tasks(self.project).count(), 0)
         self.load([row(sprints='')], sprints=True)
         self.assertEqual(available_sprint_tasks(self.project).count(), 1)
@@ -195,7 +196,7 @@ class SprintPlanningTests(TestCase):
         self.assertEqual(self.client.get(reverse('poker:sprint_export_eva', args=[self.sprint.pk])).status_code, 302)
         self.load([row(estimate=20)])
         task.refresh_from_db()
-        self.assertEqual(task.estimate, 12)
+        self.assertEqual(task.estimate, 20)
         self.assertFalse(task.eva_unavailable)
         self.assertEqual(self.client.get(reverse('poker:sprint_export_eva', args=[self.sprint.pk])).status_code, 200)
 

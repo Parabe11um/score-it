@@ -524,3 +524,8 @@ select.competency-select { width: auto; min-height: 29px; padding: 4px 27px 4px 
 .selection-capacity { display: grid; gap: 7px; padding: 16px 20px; background: #f5f8fc; font-size: .9rem; }
 .selection-capacity--over { color: #b54708; font-weight: 700; }
 .check-item[hidden] { display: none; }
+
+/* Additional EVA task types share the existing badge rhythm. */
+.competency-badge--development_abs, .competency-badge--development_be,
+.competency-badge--development_fe { background: #eaf1ff; color: #2456a6; }
+.competency-badge--defect { background: #fff0ee; color: #a83426; }

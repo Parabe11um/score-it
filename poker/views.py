@@ -519,13 +519,9 @@ def _project_detail_context(
     if task_filter not in valid_filters:
         task_filter = "all"
 
-    competency_filter_labels = (
-        ("all", "Все направления"),
-        ("analysis", "Аналитика"),
-        ("development", "Разработка"),
-        ("testing", "Тестирование"),
-        ("untyped", "Без типа"),
-    )
+    competency_filter_labels = [("all", "Все направления")] + [
+        (key or "untyped", label) for key, label in Task.Competency.choices
+    ]
     valid_competency_filters = {
         value for value, _label in competency_filter_labels
     }
@@ -565,13 +561,9 @@ def _project_detail_context(
         for value, _label in task_filter_labels
     }
     tasks_by_status = tasks.filter(task_queries[task_filter])
-    competency_queries = {
-        "all": Q(),
-        "analysis": Q(competency=Task.Competency.ANALYSIS),
-        "development": Q(competency=Task.Competency.DEVELOPMENT),
-        "testing": Q(competency=Task.Competency.TESTING),
-        "untyped": Q(competency=Task.Competency.NONE),
-    }
+    competency_queries = {"all": Q(), **{
+        key or "untyped": Q(competency=key) for key in Task.Competency.values
+    }}
     competency_filter_counts = {
         value: tasks_by_status.filter(competency_queries[value]).count()
         for value, _label in competency_filter_labels
@@ -832,15 +824,27 @@ def task_import(request, pk):
 
 
 def _file_import_message(parsed, saved):
+    p, s = parsed.counts, saved.counts
     return (
-        f"Импорт завершён. Строк в файле: {parsed.total_rows}. "
-        f"Добавлено: {saved.created}; обновлено: {saved.updated}; "
-        f"без изменений: {saved.unchanged}. "
-        f"Пропущено с оценкой в EVA: {parsed.skipped_estimated}; "
-        f"строк с нулём вместо оценки в EVA: {parsed.zero_estimate_rows}; "
-        f"уже оценённых или завершённых в score-it: {saved.skipped_local}; "
-        f"повторных строк: {parsed.duplicates}."
+        f"Импорт EVA завершён. Строк: {p['total']}. "
+        f"Добавлено: {s['created']}; обновлено: {s['updated']}; без изменений: {s['unchanged']}. "
+        f"Изменено назначений: {s['assignments']}; создано спринтов: {s['sprints_created']}. "
+        f"Конфликтов: {s['conflicts']}; на голосовании: {s['voting']}; "
+        f"некорректных оценок: {p['invalid_estimate']}; неизвестных типов: {p['other_type']}; "
+        f"повторных строк: {p['duplicates']}."
     )
+
+
+def _import_warnings(request, parsed, saved):
+    issues = parsed.issues + saved.issues
+    for issue in issues[:10]:
+        messages.warning(request, issue)
+    if len(issues) > 10:
+        messages.warning(request, f"Показаны первые 10 из {len(issues)} замечаний.")
+    if not parsed.has_sprints_column:
+        messages.info(request, "Колонки «Спринты» нет: назначения в score-it сохранены.")
+    if not parsed.has_quota_column:
+        messages.info(request, "Колонки «Тип квоты» нет: ранее загруженные квоты сохранены.")
 
 
 @login_required
@@ -858,6 +862,7 @@ def task_import_file(request, pk):
         )
     saved = save_task_import(project, form.parsed_import)
     messages.success(request, _file_import_message(form.parsed_import, saved))
+    _import_warnings(request, form.parsed_import, saved)
     return redirect(project)
 
 
@@ -1094,6 +1099,7 @@ def session_import_file(request, pk):
         _file_import_message(form.parsed_import, saved)
         + f" В очередь добавлено: {len(queued)}.",
     )
+    _import_warnings(request, form.parsed_import, saved)
     return redirect(voting_session)
 
 
@@ -1851,27 +1857,8 @@ def sprint_import(request, pk):
                       _sprint_detail_context(sprint, import_form=form), status=400)
     parsed = form.parsed_import
     saved = save_sprint_import(sprint.project, parsed)
-    p, s = parsed.counts, saved.counts
-    messages.success(request,
-        f"Импорт для планирования завершён. Строк: {p['total']}. "
-        f"Добавлено: {s['created']}; обновлено: {s['updated']}; без изменений: {s['unchanged']}. "
-        f"Пропущено: без оценки или с нулём — {p['unestimated']}; закрытых/выполненных — {p['closed']}; "
-        f"с указанным спринтом EVA — {p['eva_assigned'] + s['eva_assigned']}; других типов — {p['other_type']}; "
-        f"с некорректной оценкой или вне шкалы — {p['invalid_estimate']}; "
-        f"повторных строк — {p['duplicates']}; уже запланированных/завершённых в score-it — {s['planned_or_completed']}; "
-        f"на голосовании — {s['voting']}; конфликтов — {s['conflicts']}. "
-        "Выберите задачи в разделе «Доступные задачи»."
-    )
-    issues = parsed.issues + saved.issues
-    for issue in issues[:10]:
-        messages.warning(request, issue)
-    if len(issues) > 10:
-        messages.warning(request, f"Показаны первые 10 из {len(issues)} замечаний к строкам.")
-    if not parsed.has_sprints_column:
-        messages.info(request,
-            "В файле нет колонки «Спринты»: назначения в EVA проверить нельзя. "
-            "Задачи, уже запланированные в score-it, исключаются автоматически."
-        )
+    messages.success(request, _file_import_message(parsed, saved))
+    _import_warnings(request, parsed, saved)
     return redirect(sprint.get_absolute_url() + "#available-tasks")
 
 
@@ -2030,6 +2017,10 @@ def sprint_copy(request, pk):
             analysis_capacity=source.analysis_capacity,
             development_capacity=source.development_capacity,
             testing_capacity=source.testing_capacity,
+            development_abs_capacity=source.development_abs_capacity,
+            development_be_capacity=source.development_be_capacity,
+            development_fe_capacity=source.development_fe_capacity,
+            defect_capacity=source.defect_capacity,
             capacity_source=source.capacity_source,
             reserve_percent=source.reserve_percent,
         )
@@ -2129,14 +2120,14 @@ def sprint_export_eva(request, pk):
     sheet.append((
         "Код задачи", "Наименование", "Тип задачи", "Итоговая оценка, ч",
         "Идентификатор объекта", "Ссылка на задачу", "Спринт",
-        "Дата начала", "Дата завершения", "Проект score-it", "ID спринта score-it",
+        "Дата начала", "Дата завершения", "Проект score-it", "ID спринта score-it", "Тип квоты",
     ))
     for item in items:
         task = item.task
         sheet.append((
             task.number, task.title, task.get_competency_display(), task.estimate,
             task.eva_identifier, task.external_url, sprint.name,
-            sprint.start_date, sprint.end_date, sprint.project.name, sprint.pk,
+            sprint.start_date, sprint.end_date, sprint.project.name, sprint.pk, task.quota,
         ))
     for row in sheet:
         for cell in row:
@@ -2149,7 +2140,7 @@ def sprint_export_eva(request, pk):
     for row in sheet.iter_rows(min_row=2, min_col=8, max_col=9):
         for cell in row:
             cell.number_format = "dd.mm.yyyy"
-    for index, width in enumerate((20, 65, 20, 22, 48, 40, 30, 18, 18, 24, 22), 1):
+    for index, width in enumerate((20, 65, 24, 22, 48, 40, 30, 18, 18, 24, 22, 30), 1):
         sheet.column_dimensions[get_column_letter(index)].width = width
     sheet.freeze_panes = "C2"
     sheet.auto_filter.ref = sheet.dimensions
@@ -2184,6 +2175,7 @@ def sprint_export(request, pk):
         "Сумма оценок, часы",
         "Количество голосов",
         "Тип задачи",
+        "Тип квоты",
     )
     sheet.append(headers)
 
@@ -2204,10 +2196,11 @@ def sprint_export(request, pk):
                 task.estimate_sum,
                 task.estimate_count,
                 task.get_competency_display(),
+                task.quota,
             )
         )
-        sheet.cell(row=row_number, column=4).number_format = "0"
-        for column in (2, 3, 7):
+        sheet.cell(row=row_number, column=4).number_format = "0.00"
+        for column in (2, 3, 7, 8):
             sheet.cell(row=row_number, column=column).data_type = "s"
 
     if items:
@@ -2216,13 +2209,13 @@ def sprint_export(request, pk):
         sheet.cell(row=total_row, column=3).font = Font(bold=True)
         sheet.cell(row=total_row, column=4, value=f"=SUM(D2:D{total_row - 1})")
         sheet.cell(row=total_row, column=4).font = Font(bold=True)
-        sheet.cell(row=total_row, column=4).number_format = "0"
+        sheet.cell(row=total_row, column=4).number_format = "0.00"
 
-    widths = (6, 20, 70, 20, 18, 22, 20)
+    widths = (6, 20, 70, 20, 18, 22, 24, 30)
     for index, width in enumerate(widths, start=1):
         sheet.column_dimensions[get_column_letter(index)].width = width
     sheet.freeze_panes = "A2"
-    sheet.auto_filter.ref = f"A1:G{max(1, len(items) + 1)}"
+    sheet.auto_filter.ref = f"A1:H{max(1, len(items) + 1)}"
 
     capacity_sheet = workbook.create_sheet("Ёмкость")
     capacity_sheet.append(
@@ -2321,6 +2314,19 @@ def sprint_export(request, pk):
             cell.fill = header_fill
             cell.alignment = Alignment(horizontal="center")
         team_sheet.freeze_panes = "A2"
+
+    quota_sheet = workbook.create_sheet("Квоты")
+    quota_sheet.append(("Тип квоты", "Количество задач", "Доля задач"))
+    for quota in sprint.quota_rows:
+        quota_sheet.append((quota["label"], quota["count"], float(quota["percent"] / 100)))
+        quota_sheet.cell(quota_sheet.max_row, 1).data_type = "s"
+        quota_sheet.cell(quota_sheet.max_row, 3).number_format = "0.00%"
+    for cell in quota_sheet[1]:
+        cell.font = Font(color="FFFFFF", bold=True)
+        cell.fill = header_fill
+    for col, width in (("A", 40), ("B", 22), ("C", 20)):
+        quota_sheet.column_dimensions[col].width = width
+    quota_sheet.freeze_panes = "A2"
 
     response = HttpResponse(
         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"

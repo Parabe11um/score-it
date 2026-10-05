@@ -1,4 +1,5 @@
 import csv
+from uuid import uuid5, NAMESPACE_URL
 from io import BytesIO, StringIO
 from unittest.mock import patch
 
@@ -22,7 +23,7 @@ IDENTIFIER = "CmfTask:5d7adfd4-a87a-11f1-8708-9e913e917b69"
 
 
 def task_row(number="ABS-1", *, estimate="", competency="Системный анализ", title="Проверить комиссию", description="<p>Первая строка</p><p>Вторая строка</p>"):
-    return [IDENTIFIER, number, title, description, "Запасной текст", competency, "", "", estimate]
+    return [IDENTIFIER if number == "ABS-1" else "CmfTask:" + str(uuid5(NAMESPACE_URL, number)), number, title, description, "Запасной текст", competency, "", "", estimate]
 
 
 def csv_upload(rows, *, headers=HEADERS, encoding="utf-8-sig", delimiter=";", prefix=""):
@@ -60,23 +61,15 @@ class TaskFileParserTests(SimpleTestCase):
                 self.assertEqual(parsed.tasks[0].description, "Строка 1\nСтрока 2")
                 self.assertEqual(parsed.tasks[0].external_url, EVA_TASK_URL_PREFIX + IDENTIFIER)
 
-    def test_csv_and_xlsx_import_blank_and_zero_but_skip_other_estimates(self):
-        zeros = [0, 0.0, "0", "0.0", "0,00", " 0 ", "+0", "-0.00", "0e0"]
-        blanks = [None, "", "  "]
-        filled = [32, "5", "0.01", "-1", "—", "=1-1", "=0", "неизвестно",
-                  "NaN", "sNaN", "Infinity", False]
-        estimates = zeros + blanks + filled
-        rows = [task_row(f"ABS-{i}", estimate=value) for i, value in enumerate(estimates)]
+    def test_csv_and_xlsx_parse_estimates_without_rounding(self):
+        values = [None, "", 0, "0,00", 32, "5", "0,01", "-1", "=0", "NaN", "sNaN", "Infinity", False, "0.001"]
+        rows = [task_row(f"ABS-{i}", estimate=value) for i, value in enumerate(values)]
         for upload in (csv_upload, xlsx_upload):
-            with self.subTest(format=upload.__name__):
-                parsed = parse_task_file(upload(rows))
-                self.assertEqual(parsed.total_rows, len(estimates))
-                self.assertEqual(parsed.skipped_estimated, len(filled))
-                self.assertEqual(parsed.zero_estimate_rows, len(zeros))
-                self.assertEqual(
-                    [task.number for task in parsed.tasks],
-                    [f"ABS-{i}" for i in range(len(zeros) + len(blanks))],
-                )
+            parsed = parse_task_file(upload(rows))
+            self.assertEqual(parsed.total_rows, len(values))
+            self.assertEqual(parsed.counts['invalid_estimate'], 7)
+            self.assertEqual(parsed.counts['zero'], 2)
+            self.assertEqual(parsed.rows[5].estimate, 5)
 
     def test_uses_hour_field_and_exact_headers_in_any_order(self):
         row = task_row()
@@ -93,8 +86,8 @@ class TaskFileParserTests(SimpleTestCase):
     def test_maps_eva_competencies_without_inferring_from_title(self):
         expected = {
             "Системный анализ": "analysis", "Аналитика": "analysis",
-            "Разработка АБС": "development", "Разработка BE": "development",
-            "Разработка FE": "development", "Разработка Битрикс": "development",
+            "Разработка АБС": "development_abs", "Разработка BE": "development_be",
+            "Разработка FE": "development_fe", "Дефект": "defect", "Разработка Битрикс": "development",
             "Тестирование": "testing", "Тестирование - на DEV": "testing",
         }
         rows = [task_row(f"ABS-{i}", competency=name, title="[SA] Общая задача") for i, name in enumerate(expected)]
@@ -115,16 +108,13 @@ class TaskFileParserTests(SimpleTestCase):
         with self.assertRaisesMessage(ValidationError, "повторяется с разными данными"):
             parse_task_file(csv_upload([row, task_row(title="Другое название")]))
 
-    def test_estimated_duplicate_cannot_be_reimported_as_blank_or_zero(self):
+    def test_conflicting_blank_and_filled_estimates_abort_in_either_order(self):
         for upload in (csv_upload, xlsx_upload):
             for estimate in (32, "=0", "неизвестно"):
-                rows = [task_row(), task_row(estimate=0), task_row(estimate=estimate)]
+                rows = [task_row(), task_row(estimate=estimate)]
                 for ordered_rows in (rows, list(reversed(rows))):
-                    with self.subTest(format=upload.__name__, rows=ordered_rows):
-                        parsed = parse_task_file(upload(ordered_rows))
-                        self.assertEqual(parsed.tasks, [])
-                        self.assertEqual(parsed.skipped_estimated, 3)
-                        self.assertEqual(parsed.zero_estimate_rows, 1)
+                    with self.assertRaisesMessage(ValidationError, "разными данными"):
+                        parse_task_file(upload(ordered_rows))
 
     def test_blank_and_zero_duplicates_import_one_task(self):
         for upload in (csv_upload, xlsx_upload):
@@ -134,17 +124,20 @@ class TaskFileParserTests(SimpleTestCase):
                 ]))
                 self.assertEqual([task.number for task in parsed.tasks], ["ABS-1"])
                 self.assertEqual(parsed.duplicates, 2)
-                self.assertEqual(parsed.skipped_estimated, 0)
-                self.assertEqual(parsed.zero_estimate_rows, 2)
+                self.assertEqual(parsed.counts["invalid_estimate"], 0)
+                self.assertEqual(parsed.counts["zero"], 2)
 
-    def test_unknown_type_and_invalid_identifier_give_row_errors(self):
-        for row, error in ((task_row(competency="Дефект"), "неизвестный тип"), (task_row(), "идентификатор объекта")):
-            if error == "идентификатор объекта":
-                row[0] = 'javascript:alert(1)'
-            with self.subTest(error=error), self.assertRaisesMessage(ValidationError, "Строка 2: " + ("нужен " if error == "идентификатор объекта" else "") + error):
-                parse_task_file(csv_upload([row]))
-        # Irrelevant data on rows that must be skipped does not block the file.
-        self.assertEqual(parse_task_file(csv_upload([task_row(competency="Дефект", estimate=5)])).skipped_estimated, 1)
+    def test_unknown_type_is_reported_and_invalid_identifier_blocks_file(self):
+        parsed = parse_task_file(csv_upload([task_row(competency="Эпик")]))
+        self.assertEqual(parsed.counts['other_type'], 1)
+        self.assertIn("неизвестный тип", parsed.issues[0])
+        bad = task_row()
+        bad[0] = 'javascript:alert(1)'
+        with self.assertRaisesMessage(ValidationError, "идентификатор объекта"):
+            parse_task_file(csv_upload([bad]))
+        parsed = parse_task_file(csv_upload([task_row(competency="Дефект", estimate=5)]))
+        self.assertEqual(parsed.rows[0].estimate, 5)
+        self.assertEqual(parsed.tasks[0].competency, "defect")
 
     def test_bad_files_and_limits_fail_with_validation_errors(self):
         for name, content in (("file.xls", b"bad"), ("file.xlsx", b"bad"), ("file.csv", b"")):
@@ -182,47 +175,39 @@ class TaskFileImportViewsTests(TestCase):
         self.client.force_login(self.owner)
         self.url = reverse("poker:task_import_file", args=[self.project.pk])
 
-    def test_project_import_accepts_zero_skips_source_estimates_and_is_idempotent(self):
+    def test_project_import_creates_estimated_and_unestimated_tasks_idempotently(self):
         rows = [task_row(), task_row("ABS-2", estimate=0), task_row("ABS-3", estimate=32)]
         response = self.client.post(self.url, {"task_file": xlsx_upload(rows)}, follow=True)
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Добавлено: 2")
-        self.assertContains(response, "Пропущено с оценкой в EVA: 1;")
-        self.assertContains(response, "строк с нулём вместо оценки в EVA: 1;")
-        self.assertContains(response, "числовым нулём")
-        self.assertEqual(self.project.tasks.count(), 2)
+        self.assertContains(response, "Добавлено: 3")
+        self.assertEqual(self.project.tasks.count(), 3)
         for number in ("ABS-1", "ABS-2"):
             task = self.project.tasks.get(number=number)
             self.assertEqual(task.competency, "analysis")
-            self.assertEqual(task.description, "Первая строка\nВторая строка")
             self.assertIsNone(task.estimate)
             self.assertIsNone(task.estimate_sum)
-            self.assertIsNone(task.estimate_count)
-            self.assertNotEqual(task.status, Task.Status.ESTIMATED)
-            self.assertEqual(task.external_url, EVA_TASK_URL_PREFIX + IDENTIFIER)
+            self.assertEqual(task.status, Task.Status.UNESTIMATED)
+        self.assertEqual(self.project.tasks.get(number="ABS-3").estimate, 32)
         self.assertFalse(Vote.objects.exists())
         response = self.client.post(self.url, {"task_file": csv_upload(rows)}, follow=True)
-        self.assertContains(response, "без изменений: 2")
-        self.assertEqual(self.project.tasks.count(), 2)
+        self.assertContains(response, "без изменений: 3")
+        self.assertEqual(self.project.tasks.count(), 3)
 
-    def test_import_updates_only_unestimated_tasks_and_preserves_existing_estimates(self):
+    def test_blank_eva_estimates_preserve_local_votes_but_refresh_metadata(self):
         pending = Task.objects.create(project=self.project, number="ABS-1", title="Старое")
         zero = Task.objects.create(project=self.project, number="ABS-2", title="Нулевая", estimate_sum=0, estimate_count=4, status=Task.Status.ESTIMATED)
         estimated = Task.objects.create(project=self.project, number="ABS-3", title="Оценена", estimate_sum=116, estimate_count=4, status=Task.Status.ESTIMATED)
         completed = Task.objects.create(project=self.project, number="ABS-4", title="Закрытая", completed_at=timezone.now())
         rows = [task_row(f"ABS-{i}", estimate=0, competency="Разработка АБС") for i in range(1, 5)]
         response = self.client.post(self.url, {"task_file": csv_upload(rows)}, follow=True)
-        self.assertContains(response, "обновлено: 1")
-        self.assertContains(response, "уже оценённых или завершённых в score-it: 3")
-        pending.refresh_from_db()
-        self.assertEqual(pending.competency, "development")
-        self.assertEqual(pending.title, rows[0][2])
-        for task, title in ((zero, "Нулевая"), (estimated, "Оценена"), (completed, "Закрытая")):
+        self.assertContains(response, "обновлено: 4")
+        for task in (pending, zero, estimated, completed):
             task.refresh_from_db()
-            self.assertEqual(task.title, title)
-            self.assertEqual(task.external_url, "")
+            self.assertEqual(task.competency, "development_abs")
+            self.assertEqual(task.title, rows[0][2])
         self.assertEqual((zero.estimate_sum, zero.estimate_count), (0, 4))
         self.assertEqual((estimated.estimate_sum, estimated.estimate_count), (116, 4))
+        self.assertIsNotNone(completed.completed_at)
 
     def test_invalid_row_prevents_partial_import_and_reports_form_error(self):
         bad = task_row("ABS-2")

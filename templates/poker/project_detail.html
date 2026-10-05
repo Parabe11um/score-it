@@ -108,7 +108,7 @@
         <form method="post" action="{% url 'poker:sprint_create' project.pk %}" class="stack-form details-form" data-capacity-source-form>
             {% csrf_token %}
             {% for field in sprint_form %}
-                {% if field.name != "analysis_capacity" and field.name != "development_capacity" and field.name != "testing_capacity" %}
+                {% if "_capacity" not in field.name %}
                     <div class="field field--compact">
                         <label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}
                         {% if field.help_text %}<small class="help-text">{{ field.help_text }}</small>{% endif %}
@@ -118,9 +118,9 @@
             {% endfor %}
             <fieldset class="capacity-inputs" data-manual-capacity>
                 <legend>Ёмкость по компетенциям, часы</legend>
-                <p>Укажите доступное количество часов аналитики, разработки и тестирования.</p>
+                <p>Укажите доступные часы по типам задач. Неуточнённая разработка сохраняет прежнюю общую ёмкость.</p>
                 {% for field in sprint_form %}
-                    {% if field.name == "analysis_capacity" or field.name == "development_capacity" or field.name == "testing_capacity" %}
+                    {% if "_capacity" in field.name %}
                         <div class="capacity-input capacity-input--{{ field.name }}">
                             <label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}
                             {% for error in field.errors %}<div class="form-error">{{ error }}</div>{% endfor %}
@@ -162,7 +162,7 @@
                 <tr>
                     <td><span class="task-number">{{ task.number }}</span></td>
                     <td>
-                        <div class="task-title-cell">{{ task.title }}</div>
+                        <div class="task-title-cell">{{ task.title }}</div><small>Квота: {{ task.quota|default:"Не указана" }}</small>
                         <form method="post" action="{% url 'poker:task_competency_update' project.pk task.pk %}?tasks={{ task_filter }}&amp;competency={{ competency_filter }}{% if show_archived %}&amp;archive=1{% endif %}" class="task-competency-form">
                             {% csrf_token %}
                             <label class="visually-hidden" for="task-competency-{{ task.pk }}">Тип задачи {{ task.number }}</label>

@@ -1,4 +1,5 @@
 import uuid
+from collections import Counter
 from datetime import timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from functools import cached_property
@@ -170,7 +171,11 @@ class Task(models.Model):
     class Competency(models.TextChoices):
         NONE = "", "Без типа"
         ANALYSIS = "analysis", "Аналитика"
-        DEVELOPMENT = "development", "Разработка"
+        DEVELOPMENT = "development", "Разработка (не уточнена)"
+        DEVELOPMENT_ABS = "development_abs", "Разработка АБС"
+        DEVELOPMENT_BE = "development_be", "Разработка BE"
+        DEVELOPMENT_FE = "development_fe", "Разработка FE"
+        DEFECT = "defect", "Дефект"
         TESTING = "testing", "Тестирование"
 
     class Status(models.TextChoices):
@@ -205,9 +210,11 @@ class Task(models.Model):
     estimate_count = models.PositiveIntegerField(
         "Количество голосов", null=True, blank=True
     )
-    imported_estimate = models.PositiveSmallIntegerField(
-        "Оценка из EVA, часы", choices=ESTIMATION_CHOICES, null=True, blank=True
+    imported_estimate = models.DecimalField(
+        "Оценка из EVA, часы", max_digits=8, decimal_places=2, null=True, blank=True,
+        validators=(MinValueValidator(Decimal("0")),),
     )
+    quota = models.CharField("Тип квоты", max_length=200, blank=True, default="")
     eva_status = models.CharField("Статус в выгрузке EVA", max_length=200, blank=True)
     eva_sprints = models.TextField("Спринты в выгрузке EVA", blank=True)
     eva_block_reason = models.CharField(
@@ -270,7 +277,7 @@ class Task(models.Model):
     @property
     def estimate_display(self):
         value = self.estimate
-        return str(value) if value is not None else "—"
+        return format(Decimal(value).normalize(), "f") if value is not None else "—"
 
     def capture_estimate(self, voting_round):
         summary = voting_round.summary()
@@ -603,6 +610,22 @@ class Sprint(models.Model):
         blank=True,
         validators=(MinValueValidator(Decimal("0")),),
     )
+    development_abs_capacity = models.DecimalField(
+        "Ёмкость разработки АБС, часы", max_digits=8, decimal_places=2,
+        null=True, blank=True, validators=(MinValueValidator(Decimal("0")),),
+    )
+    development_be_capacity = models.DecimalField(
+        "Ёмкость разработки BE, часы", max_digits=8, decimal_places=2,
+        null=True, blank=True, validators=(MinValueValidator(Decimal("0")),),
+    )
+    development_fe_capacity = models.DecimalField(
+        "Ёмкость разработки FE, часы", max_digits=8, decimal_places=2,
+        null=True, blank=True, validators=(MinValueValidator(Decimal("0")),),
+    )
+    defect_capacity = models.DecimalField(
+        "Ёмкость дефектов, часы", max_digits=8, decimal_places=2,
+        null=True, blank=True, validators=(MinValueValidator(Decimal("0")),),
+    )
     tasks = models.ManyToManyField(
         Task,
         through="SprintTask",
@@ -645,7 +668,7 @@ class Sprint(models.Model):
 
     @cached_property
     def team_capacities(self):
-        competencies = (Task.Competency.ANALYSIS, Task.Competency.DEVELOPMENT, Task.Competency.TESTING)
+        competencies = [key for key in Task.Competency.values if key]
         if self.working_days is None or not self.resource_rows:
             return dict.fromkeys(competencies)
         totals = dict.fromkeys(competencies, Decimal("0"))
@@ -690,13 +713,17 @@ class Sprint(models.Model):
         )
 
     @cached_property
+    def quota_rows(self):
+        counts = Counter(self.sprint_tasks.filter(status=SprintTask.Status.PLANNED)
+                         .values_list("task__quota", flat=True))
+        total = sum(counts.values())
+        return [{"label": quota or "Не указана", "count": count,
+                 "percent": (Decimal(count) * 100 / total).quantize(Decimal("0.01"))}
+                for quota, count in sorted(counts.items(), key=lambda row: (-row[1], row[0]))]
+
+    @cached_property
     def estimates_by_competency(self):
-        estimates = {
-            Task.Competency.ANALYSIS: Decimal("0"),
-            Task.Competency.DEVELOPMENT: Decimal("0"),
-            Task.Competency.TESTING: Decimal("0"),
-            Task.Competency.NONE: Decimal("0"),
-        }
+        estimates = dict.fromkeys(Task.Competency.values, Decimal("0"))
         for item in self.sprint_tasks.select_related("task").filter(
             status=SprintTask.Status.PLANNED
         ):
@@ -712,31 +739,19 @@ class Sprint(models.Model):
                 self.analysis_capacity,
                 self.development_capacity,
                 self.testing_capacity,
+                self.development_abs_capacity,
+                self.development_be_capacity,
+                self.development_fe_capacity,
+                self.defect_capacity,
             )
         )
 
     @cached_property
     def competency_capacity_rows(self):
-        definitions = (
-            (
-                Task.Competency.ANALYSIS,
-                "Аналитика",
-                "analysis",
-                self.analysis_capacity,
-            ),
-            (
-                Task.Competency.DEVELOPMENT,
-                "Разработка",
-                "development",
-                self.development_capacity,
-            ),
-            (
-                Task.Competency.TESTING,
-                "Тестирование",
-                "testing",
-                self.testing_capacity,
-            ),
-        )
+        definitions = [
+            (key, label, key, getattr(self, f"{key}_capacity"))
+            for key, label in Task.Competency.choices if key
+        ]
         rows = []
         for competency, label, css_class, capacity in definitions:
             if self.uses_team_capacity:
@@ -1011,6 +1026,7 @@ class SprintTask(models.Model):
     class Status(models.TextChoices):
         PLANNED = "planned", "Запланирована"
         TRANSFERRED = "transferred", "Перенесена"
+        REMOVED = "removed", "Исключена по данным EVA"
 
     sprint = models.ForeignKey(
         Sprint,

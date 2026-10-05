@@ -92,6 +92,10 @@ class BulkTaskImportForm(BootstrapFormMixin, forms.Form):
     )
 
     competency_aliases = {
+        "разработка абс": Task.Competency.DEVELOPMENT_ABS,
+        "разработка be": Task.Competency.DEVELOPMENT_BE,
+        "разработка fe": Task.Competency.DEVELOPMENT_FE,
+        "дефект": Task.Competency.DEFECT,
         "аналитика": Task.Competency.ANALYSIS,
         "анализ": Task.Competency.ANALYSIS,
         "analysis": Task.Competency.ANALYSIS,
@@ -239,10 +243,18 @@ class SprintForm(BootstrapFormMixin, forms.ModelForm):
             "analysis_capacity",
             "development_capacity",
             "testing_capacity",
+            "development_abs_capacity",
+            "development_be_capacity",
+            "development_fe_capacity",
+            "defect_capacity",
         )
         labels = {
             "analysis_capacity": "Аналитика, часы",
-            "development_capacity": "Разработка, часы",
+            "development_capacity": "Разработка (не уточнена), часы",
+            "development_abs_capacity": "Разработка АБС, часы",
+            "development_be_capacity": "Разработка BE, часы",
+            "development_fe_capacity": "Разработка FE, часы",
+            "defect_capacity": "Дефект, часы",
             "testing_capacity": "Тестирование, часы",
         }
         widgets = {
@@ -295,10 +307,18 @@ class SprintCapacityForm(BootstrapFormMixin, forms.ModelForm):
             "analysis_capacity",
             "development_capacity",
             "testing_capacity",
+            "development_abs_capacity",
+            "development_be_capacity",
+            "development_fe_capacity",
+            "defect_capacity",
         )
         labels = {
             "analysis_capacity": "Аналитика, часы",
-            "development_capacity": "Разработка, часы",
+            "development_capacity": "Разработка (не уточнена), часы",
+            "development_abs_capacity": "Разработка АБС, часы",
+            "development_be_capacity": "Разработка BE, часы",
+            "development_fe_capacity": "Разработка FE, часы",
+            "defect_capacity": "Дефект, часы",
             "testing_capacity": "Тестирование, часы",
         }
         widgets = {
