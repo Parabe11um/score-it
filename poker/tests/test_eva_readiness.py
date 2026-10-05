@@ -189,23 +189,23 @@ class EvaReadinessImportTests(TestCase):
         with self.assertRaises(ValidationError):
             parse_sprint_file(upload([row() + ['One'], row() + ['Two']], headers=headers))
 
-    def test_skipped_analysis_does_not_leave_a_stale_completed_status_as_permission(self):
+    def test_analysis_in_completed_sprint_uses_latest_eva_status_for_readiness(self):
         save_sprint_import(self.project, parse_sprint_file(self.data()))
         analysis = self.project.tasks.get(number='SA-1')
         dev = self.project.tasks.get(number='DEV-2')
         finished = Sprint.objects.create(project=self.project, name='History', status='completed')
         SprintTask.objects.create(sprint=finished, task=analysis)
         saved = save_sprint_import(self.project, parse_sprint_file(self.data('Ревью')))
-        self.assertEqual(saved.counts['conflicts'], 1)
+        self.assertEqual(saved.counts['conflicts'], 0)
         analysis.refresh_from_db()
-        self.assertEqual(analysis.eva_status, 'Выполнена')
+        self.assertEqual(analysis.eva_status, 'Ревью')
         self.assertEqual(analysis.imported_estimate, 12)
         self.assertFalse(EvaReadiness.for_project(self.project).check(dev).allowed)
-        self.assertIn('Не обновлены данные аналитики', EvaReadiness.for_project(self.project).check(dev).message)
-        finished.status = 'planning'
-        finished.save()
+        self.assertIn('Ревью', EvaReadiness.for_project(self.project).check(dev).message)
         save_sprint_import(self.project, parse_sprint_file(self.data()))
         self.assertTrue(EvaReadiness.for_project(self.project).check(dev).allowed)
+        finished.refresh_from_db()
+        self.assertEqual(finished.status, 'completed')
 
     def test_failed_task_import_requires_a_successful_retry_with_status(self):
         save_sprint_import(self.project, parse_sprint_file(self.data()))

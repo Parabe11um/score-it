@@ -197,10 +197,8 @@ def save_sprint_import(project, parsed):
             result.issues.append(f"{task.number}: идёт голосование; повторите импорт после его завершения.")
             continue
         current = list(task.sprint_items.filter(status=SprintTask.Status.PLANNED).select_related("sprint")) if task else []
-        # Completed sprint totals depend on Task.estimate: don't mutate historical plans.
-        if any(link.sprint.archived_at or link.sprint.status == Sprint.Status.COMPLETED for link in current):
-            conflict("задача находится в завершённом или архивном спринте")
-            continue
+        # EVA is authoritative even for completed/archived sprint assignments.
+        # Their displayed totals intentionally follow imported estimates/membership.
         target, name = None, ""
         if parsed.has_sprints_column:
             try:
@@ -214,9 +212,6 @@ def save_sprint_import(project, parsed):
                     conflict(f"несколько спринтов с названием «{name}»")
                     continue
                 target = candidates[0] if candidates else None
-                if target and (target.archived_at or target.status == Sprint.Status.COMPLETED):
-                    conflict("спринт EVA завершён или находится в архиве")
-                    continue
         values = {key: getattr(item.task, key) for key in ("title", "competency", "description", "external_url")}
         values.update({key: getattr(item.task, key) for key in parsed.relationship_columns})
         if parsed.has_quota_column:

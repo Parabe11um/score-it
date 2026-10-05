@@ -67,7 +67,7 @@ class EvaZeroTests(TestCase):
         self.assertIsNone(self.task.estimate)
         self.assertIsNotNone(self.task.completed_at)
 
-    def test_active_voting_and_completed_plan_keep_their_guards(self):
+    def test_active_voting_is_protected_but_completed_plan_accepts_eva_zero(self):
         self.round.status = 'voting'
         self.round.save()
         self.assertEqual(self.sync(0).counts['voting'], 1)
@@ -77,9 +77,12 @@ class EvaZeroTests(TestCase):
         self.round.save()
         sprint = Sprint.objects.create(project=self.project, name='Finished', status='completed')
         SprintTask.objects.create(sprint=sprint, task=self.task)
-        self.assertEqual(self.sync(0).counts['conflicts'], 1)
+        self.assertEqual(self.sync(0).counts['conflicts'], 0)
         self.task.refresh_from_db()
-        self.assertEqual(self.task.estimate, 20)
+        self.assertIsNone(self.task.estimate)
+        self.assertFalse(self.task.eva_readiness_stale)
+        self.assertEqual(self.task.sprint_items.get(status='planned').sprint_id, sprint.pk)
+        self.assertEqual(Vote.objects.get(pk=self.vote.pk).value, 12)
 
     def test_conflicting_blank_and_zero_rows_do_not_choose_arbitrarily(self):
         with self.assertRaisesMessage(ValidationError, 'разными данными'):

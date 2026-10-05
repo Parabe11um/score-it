@@ -109,7 +109,7 @@ class SprintPlanningTests(TestCase):
             'task_file': upload([row(), row("ABS-ABS-2", competency="Разработка АБС", estimate=32),
                                  row("ABS-QA-3", competency="Тестирование", estimate=4)], xlsx=True),
         })
-        self.assertRedirects(response, self.sprint.get_absolute_url() + '#available-tasks')
+        self.assertRedirects(response, self.sprint.get_absolute_url() + '#eva-import')
         self.assertEqual(self.project.tasks.count(), 3)
         self.assertEqual(Vote.objects.count(), 0)
         self.assertEqual(VotingRound.objects.count(), 0)
@@ -242,7 +242,7 @@ class SprintPlanningTests(TestCase):
         self.assertContains(response, 'CmfTask:UUID', status_code=400)
         self.assertEqual(self.project.tasks.count(), 0)
 
-    def test_owner_only_and_closed_sprint_mutation_guards(self):
+    def test_owner_only_and_eva_import_allowed_from_closed_sprint(self):
         stranger = get_user_model().objects.create_user('other')
         self.client.force_login(stranger)
         for route in ('sprint_import', 'sprint_add_tasks', 'sprint_export_eva'):
@@ -252,9 +252,10 @@ class SprintPlanningTests(TestCase):
         self.client.force_login(self.user)
         for fields in ({'status': 'completed'}, {'status': 'planning', 'archived_at': timezone.now()}):
             Sprint.objects.filter(pk=self.sprint.pk).update(**fields)
+            self.assertContains(self.client.get(self.sprint.get_absolute_url()), 'id="eva-import"')
             response = self.client.post(reverse('poker:sprint_import', args=[self.sprint.pk]), {'task_file': upload([row()])})
             self.assertEqual(response.status_code, 302)
-            self.assertEqual(self.project.tasks.count(), 0)
+            self.assertEqual(self.project.tasks.count(), 1)
 
     def test_completed_sprint_reserves_tasks_for_future_sprints(self):
         self.load([row()])

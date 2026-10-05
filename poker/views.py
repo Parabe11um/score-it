@@ -1864,9 +1864,6 @@ def _sprint_detail_context(sprint, capacity_form=None, import_form=None):
 @require_POST
 def sprint_import(request, pk):
     sprint = _sprint_for_user(request.user, pk)
-    if sprint.archived_at or sprint.status == Sprint.Status.COMPLETED:
-        messages.error(request, "Импорт доступен в планируемом или активном спринте.")
-        return redirect(sprint)
     form = SprintFileImportForm(request.POST, request.FILES)
     if not form.is_valid():
         return render(request, "poker/sprint_detail.html",
@@ -1875,7 +1872,7 @@ def sprint_import(request, pk):
     saved = save_sprint_import(sprint.project, parsed)
     messages.success(request, _file_import_message(parsed, saved))
     _import_warnings(request, parsed, saved)
-    return redirect(sprint.get_absolute_url() + "#available-tasks")
+    return redirect(sprint.get_absolute_url() + "#eva-import")
 
 
 @login_required

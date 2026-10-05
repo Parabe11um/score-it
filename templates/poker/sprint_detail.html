@@ -48,18 +48,18 @@
     </section>
 {% endif %}
 
-{% if not sprint.archived_at and sprint.status != "completed" %}
-<details class="card section-card" {% if import_form.errors or not available_tasks and not sprint_items %}open{% endif %}>
+<details class="card section-card" id="eva-import" {% if import_form.errors or not available_tasks and not sprint_items %}open{% endif %}>
     <summary class="section-heading"><div><h2>Импорт для планирования из EVA</h2><p>Загрузите CSV/XLSX производственной доски со всеми полями.</p></div></summary>
     <form method="post" enctype="multipart/form-data" action="{% url 'poker:sprint_import' sprint.pk %}" class="stack-form">
         {% csrf_token %}
         <div class="field"><label for="{{ import_form.task_file.id_for_label }}">{{ import_form.task_file.label }}</label>{{ import_form.task_file }}<small>{{ import_form.task_file.help_text }}</small>
             {% for error in import_form.task_file.errors %}<div class="form-error">{{ error }}</div>{% endfor %}
         </div>
-        <p class="muted">Импорт обновляет задачи всего проекта: оценки, типы, квоты и назначения из колонки «Спринты». Пустой спринт исключает задачу из текущего плана; отсутствующая колонка сохраняет назначения. Незнакомое название создаёт новый спринт. Новые задачи без оценки попадают в бэклог. Ноль EVA сбрасывает текущую оценку до «Не оценена»; пустая ячейка сохраняет локальную оценку. Несколько спринтов, активное голосование и завершённые планы требуют разрешения конфликта.</p>
+        <p class="muted">Импорт обновляет задачи всего проекта: оценки, типы, квоты и назначения из колонки «Спринты». Пустой спринт исключает задачу из текущего плана; отсутствующая колонка сохраняет назначения. Незнакомое название создаёт новый спринт. Новые задачи без оценки попадают в бэклог. Ноль EVA сбрасывает текущую оценку до «Не оценена»; пустая ячейка сохраняет локальную оценку. Данные EVA обновляют также завершённые и архивные спринты: их состав и итоговые часы могут измениться. Неоднозначные назначения и задачи на текущем голосовании пропускаются с объяснением.</p>
         <div class="section-footer"><button class="button button--primary" type="submit">Обновить из EVA</button></div>
     </form>
 </details>
+{% if not sprint.archived_at and sprint.status != "completed" %}
 {% if not sprint.uses_team_capacity %}
 <details class="card capacity-editor" {% if capacity_form.errors %}open{% endif %}>
     <summary class="section-heading">
