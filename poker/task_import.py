@@ -25,6 +25,9 @@ HOUR_ESTIMATE_HEADER = "Оценка задачи, час"
 
 # Deliberately exclude EVA's unrelated fields «Оценка» and «Story Point».
 HEADERS = {
+    "eva_parent_title": ("Родительская задача.Наименование",),
+    "eva_project_name": ("Проект.Имя объекта",),
+    "eva_epic_title": ("Epic.Наименование",),
     "quota": ("Тип квоты",),
     "number": ("Код", "Код задачи", "Номер задачи", "Номер"),
     "title": ("Наименование", "Название задачи", "Название"),
@@ -120,6 +123,9 @@ class ImportedTask:
     description: str
     external_url: str
     quota: str = ""
+    eva_parent_title: str = ""
+    eva_project_name: str = ""
+    eva_epic_title: str = ""
 
 
 def _column_mapping(headers):
@@ -275,6 +281,8 @@ def task_from_row(row, columns, row_number):
         error = "нужен идентификатор объекта CmfTask:UUID для ссылки в EVA"
     if len(value("quota")) > 200:
         error = "тип квоты превышает 200 символов"
+    if any(len(value(key)) > 500 for key in ("eva_parent_title", "eva_project_name", "eva_epic_title")):
+        error = "название родителя, проекта или эпика превышает 500 символов"
     if error:
         raise ValidationError(f"Строка {row_number}: {error}.")
     html = value("html_description")
@@ -284,6 +292,9 @@ def task_from_row(row, columns, row_number):
     return ImportedTask(
         number=number, title=title, competency=COMPETENCIES[_normalise(type_name)],
         description=description, quota=value("quota"),
+        eva_parent_title=value("eva_parent_title"),
+        eva_project_name=value("eva_project_name"),
+        eva_epic_title=value("eva_epic_title"),
         external_url=f"{EVA_TASK_URL_PREFIX}CmfTask:{UUID(identifier.split(':', 1)[1])}",
     )
 

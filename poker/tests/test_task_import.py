@@ -116,16 +116,16 @@ class TaskFileParserTests(SimpleTestCase):
                     with self.assertRaisesMessage(ValidationError, "разными данными"):
                         parse_task_file(upload(ordered_rows))
 
-    def test_blank_and_zero_duplicates_import_one_task(self):
+    def test_equal_numeric_zero_duplicates_import_one_task(self):
         for upload in (csv_upload, xlsx_upload):
             with self.subTest(format=upload.__name__):
                 parsed = parse_task_file(upload([
-                    task_row(), task_row(estimate=0), task_row(estimate="0,00"),
+                    task_row(estimate="0.0"), task_row(estimate=0), task_row(estimate="0,00"),
                 ]))
                 self.assertEqual([task.number for task in parsed.tasks], ["ABS-1"])
                 self.assertEqual(parsed.duplicates, 2)
                 self.assertEqual(parsed.counts["invalid_estimate"], 0)
-                self.assertEqual(parsed.counts["zero"], 2)
+                self.assertEqual(parsed.counts["zero"], 3)
 
     def test_unknown_type_is_reported_and_invalid_identifier_blocks_file(self):
         parsed = parse_task_file(csv_upload([task_row(competency="Эпик")]))
@@ -198,7 +198,7 @@ class TaskFileImportViewsTests(TestCase):
         zero = Task.objects.create(project=self.project, number="ABS-2", title="Нулевая", estimate_sum=0, estimate_count=4, status=Task.Status.ESTIMATED)
         estimated = Task.objects.create(project=self.project, number="ABS-3", title="Оценена", estimate_sum=116, estimate_count=4, status=Task.Status.ESTIMATED)
         completed = Task.objects.create(project=self.project, number="ABS-4", title="Закрытая", completed_at=timezone.now())
-        rows = [task_row(f"ABS-{i}", estimate=0, competency="Разработка АБС") for i in range(1, 5)]
+        rows = [task_row(f"ABS-{i}", estimate="", competency="Разработка АБС") for i in range(1, 5)]
         response = self.client.post(self.url, {"task_file": csv_upload(rows)}, follow=True)
         self.assertContains(response, "обновлено: 4")
         for task in (pending, zero, estimated, completed):

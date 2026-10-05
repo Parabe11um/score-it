@@ -41,6 +41,7 @@ class PlanningImport:
     has_sprints_column: bool = False
     has_quota_column: bool = False
     has_status_column: bool = False
+    relationship_columns: tuple[str, ...] = ()
     issues: list[str] = field(default_factory=list)
 
     @property
@@ -63,7 +64,10 @@ def parse_sprint_file(upload, *, require_status=True):
         raise ValidationError("Не найдена колонка «Статус.Имя статуса». Выгрузите из EVA все поля.")
     result = PlanningImport(has_sprints_column="eva_sprints" in columns,
                             has_quota_column="quota" in columns,
-                            has_status_column="eva_status" in columns)
+                            has_status_column="eva_status" in columns,
+                            relationship_columns=tuple(key for key in (
+                                "eva_parent_title", "eva_project_name", "eva_epic_title"
+                            ) if key in columns))
     seen, identifiers, errors = {}, {}, []
     for line, row in enumerate(rows[1:], 2):
         if not any(_text(cell) for cell in row):
@@ -97,6 +101,7 @@ def parse_sprint_file(upload, *, require_status=True):
             elif numeric:
                 estimate, reason = numeric, ""
             else:
+                estimate = Decimal("0")
                 result.counts["zero"] += 1
         if reason != "invalid_estimate" and (_normalise(status) in CLOSED_STATUSES or _normalise(value("eva_status_type")) in CLOSED_STATUSES):
             reason = "closed"
@@ -166,11 +171,19 @@ def save_sprint_import(project, parsed):
     for item in parsed.rows:
         task = project.tasks.select_for_update().filter(number=item.task.number).first()
 
+        def mark_readiness_stale():
+            # Preserve protected task/estimate fields, but don't trust stale readiness.
+            if task and not task.eva_readiness_stale:
+                task.eva_readiness_stale = True
+                task.save(update_fields=("eva_readiness_stale",))
+
         def conflict(message):
+            mark_readiness_stale()
             result.counts["conflicts"] += 1
-            result.issues.append(f"{item.task.number}: {message}; строка не изменена.")
+            result.issues.append(f"{item.task.number}: {message}; данные строки не перезаписаны, готовность к оценке требует повторного импорта.")
 
         if item.skip_reason == "invalid_estimate":
+            mark_readiness_stale()
             continue
         if task and task.eva_identifier and task.eva_identifier != item.task.external_url.split("?popup=", 1)[1]:
             conflict("отличается идентификатор EVA")
@@ -179,6 +192,7 @@ def save_sprint_import(project, parsed):
             conflict("идентификатор EVA уже связан с другим кодом")
             continue
         if task and task.voting_rounds.filter(status__in=(VotingRound.Status.VOTING, VotingRound.Status.REVEALED)).exists():
+            mark_readiness_stale()
             result.counts["voting"] += 1
             result.issues.append(f"{task.number}: идёт голосование; повторите импорт после его завершения.")
             continue
@@ -204,14 +218,21 @@ def save_sprint_import(project, parsed):
                     conflict("спринт EVA завершён или находится в архиве")
                     continue
         values = {key: getattr(item.task, key) for key in ("title", "competency", "description", "external_url")}
+        values.update({key: getattr(item.task, key) for key in parsed.relationship_columns})
         if parsed.has_quota_column:
             values["quota"] = item.task.quota
         if parsed.has_sprints_column:
             values["eva_sprints"] = item.eva_sprints
         if parsed.has_status_column:
             values["eva_status"] = item.eva_status
+            if item.eva_status:
+                values["eva_readiness_stale"] = False
         # Blank EVA is not an instruction to discard locally collected votes awaiting export.
-        if item.estimate is not None:
+        if item.estimate == 0:
+            # Reset the current result, not VotingRound/Vote history. EVA zero means unset.
+            values.update(imported_estimate=None, estimate_sum=None, estimate_count=None,
+                          status=Task.Status.UNESTIMATED)
+        elif item.estimate is not None:
             values.update(imported_estimate=item.estimate, status=Task.Status.ESTIMATED)
         elif task is None or task.estimate is None:
             values.update(imported_estimate=None, status=Task.Status.UNESTIMATED)
@@ -258,4 +279,16 @@ def save_sprint_import(project, parsed):
             result.counts["assignments"] += 1
         if task.estimate is None and not task.completed_at and not task.sprint_items.filter(status=SprintTask.Status.PLANNED).exists():
             result.tasks.append(task)
+    # Resolve only after all rows have been saved: export order is irrelevant.
+    from .eva_readiness import EvaReadiness
+    readiness = EvaReadiness.for_project(project)
+    ready_tasks = []
+    for task in result.tasks:
+        decision = readiness.check(task)
+        if decision.allowed:
+            ready_tasks.append(task)
+        else:
+            result.counts["waiting_analysis"] += 1
+            result.issues.append(f"{task.number}: сохранена в бэклоге, в очередь оценки не добавлена. {decision.message}")
+    result.tasks = ready_tasks
     return result
