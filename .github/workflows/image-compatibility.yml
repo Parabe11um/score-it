@@ -1,0 +1,72 @@
+name: Docker image compatibility
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  classic-to-containerd:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Start isolated Docker 24 and Docker 29 daemons
+        run: |
+          mkdir -p "$RUNNER_TEMP/docker29"
+          docker run --privileged -d --name compat-classic -e DOCKER_TLS_CERTDIR= docker:24-dind
+          docker run --privileged -d --name compat-containerd -e DOCKER_TLS_CERTDIR= \
+            -v "$RUNNER_TEMP/docker29:/var/run" docker:29-dind
+          for DAEMON in compat-classic compat-containerd; do
+            for attempt in $(seq 1 60); do
+              if docker exec "$DAEMON" docker info >/dev/null 2>&1; then break; fi
+              sleep 1
+            done
+            docker exec "$DAEMON" docker info --format '{{.ServerVersion}} {{json .DriverStatus}}'
+          done
+          DRIVER="$(docker exec compat-containerd docker info --format '{{json .DriverStatus}}')"
+          [[ "$DRIVER" == *io.containerd.snapshotter* ]]
+          docker exec compat-containerd chown "$(id -u):$(id -g)" /var/run/docker.sock
+      - name: Verify classic archives on containerd and reject a substituted tag
+        run: |
+          echo 'compatibility payload' > "$RUNNER_TEMP/payload"
+          tar -C "$RUNNER_TEMP" -cf "$RUNNER_TEMP/payload.tar" payload
+          docker exec -i compat-classic docker image import --change 'LABEL role=app' - score-it:compat < "$RUNNER_TEMP/payload.tar"
+          docker exec -i compat-classic docker image import --change 'LABEL role=db' - score-it-postgres:compat < "$RUNNER_TEMP/payload.tar"
+          docker exec compat-classic docker image save score-it:compat score-it-postgres:compat > "$RUNNER_TEMP/classic.tar"
+          python3 deploy/verify_release.py manifest --archive "$RUNNER_TEMP/classic.tar" \
+            --output "$RUNNER_TEMP/images.tsv" --platform linux/amd64 \
+            --image score-it:compat --image score-it-postgres:compat
+          docker exec -i compat-containerd docker image load < "$RUNNER_TEMP/classic.tar"
+          export VERIFY_ARCHIVE="$RUNNER_TEMP/classic.tar"
+          export VERIFY_MANIFEST="$RUNNER_TEMP/images.tsv"
+          DOCKER_HOST="unix://$RUNNER_TEMP/docker29/docker.sock" python3 - <<'PY'
+          import os
+          from deploy.verify_release import Archive, manifest_rows, verify_loaded_image, inspect
+          with Archive(os.environ['VERIFY_ARCHIVE']) as archive:
+              for tag, digest, platform in manifest_rows(os.environ['VERIFY_MANIFEST']):
+                  assert inspect(tag)['Id'] != digest
+                  verify_loaded_image(archive, tag, digest, platform)
+          print('DOCKER_24_TO_29_VERIFIED')
+          PY
+          docker exec compat-containerd docker image tag score-it-postgres:compat score-it:compat
+          DOCKER_HOST="unix://$RUNNER_TEMP/docker29/docker.sock" python3 - <<'PY'
+          import os
+          from deploy.verify_release import Archive, manifest_rows, verify_loaded_image, VerificationError
+          with Archive(os.environ['VERIFY_ARCHIVE']) as archive:
+              tag, digest, platform = manifest_rows(os.environ['VERIFY_MANIFEST'])[0]
+              try:
+                  verify_loaded_image(archive, tag, digest, platform)
+              except VerificationError:
+                  print('SUBSTITUTED_TAG_REJECTED')
+              else:
+                  raise SystemExit('A substituted image was accepted')
+          PY
+      - name: Stop isolated test daemons
+        if: always()
+        run: docker rm -fv compat-classic compat-containerd || true

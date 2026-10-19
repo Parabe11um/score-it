@@ -7,6 +7,7 @@ if [ "$#" -ne 1 ]; then
   exit 1
 fi
 if [ -n "$(git status --porcelain)" ]; then
+  git status --short
   echo 'Release build requires a clean, committed working tree.' >&2
   exit 1
 fi
@@ -31,14 +32,12 @@ docker image save -o "$DEST/images.tar" "$APP_IMAGE" "$PG_IMAGE"
 cp compose.production.yaml compose.proxy.yaml compose.local-test.yaml "$DEST/"
 cp deploy/env.production.example "$DEST/.env.production.example"
 cp deploy/load_release.sh "$DEST/"
+cp deploy/verify_release.py "$DEST/"
 cp deploy/README.md "$DEST/README.md"
 printf 'SCORE_IT_IMAGE=%s\nPOSTGRES_IMAGE=%s\n' "$APP_IMAGE" "$PG_IMAGE" > "$DEST/release.env"
-docker image inspect --format '{{index .RepoTags 0}}' "$APP_IMAGE" >/dev/null
-for IMAGE in "$APP_IMAGE" "$PG_IMAGE"; do
-  printf '%s\t' "$IMAGE" >> "$DEST/images.tsv"
-  docker image inspect --format '{{.Id}}\t{{.Os}}/{{.Architecture}}' "$IMAGE" \
-    | sed 's/\\t/\t/g' >> "$DEST/images.tsv"
-done
+python3 deploy/verify_release.py manifest --archive "$DEST/images.tar" \
+  --output "$DEST/images.tsv" --platform "$PLATFORM" \
+  --image "$APP_IMAGE" --image "$PG_IMAGE"
 printf 'RELEASE=%s\nPLATFORM=%s\n' "$RELEASE" "$PLATFORM" > "$DEST/VERSION"
 python3 - "$DEST" <<'PY'
 import hashlib
