@@ -4,6 +4,8 @@ from pathlib import Path
 from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 
+from .database import database_config
+
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
@@ -66,16 +68,7 @@ TEMPLATES = [
 WSGI_APPLICATION = "config.wsgi.application"
 ASGI_APPLICATION = "config.asgi.application"
 
-database_path = Path(os.getenv("DATABASE_PATH", BASE_DIR / "data" / "db.sqlite3"))
-database_path.parent.mkdir(parents=True, exist_ok=True)
-
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": database_path,
-        "OPTIONS": {"timeout": 20},
-    }
-}
+DATABASES = {"default": database_config(os.environ, BASE_DIR)}
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},

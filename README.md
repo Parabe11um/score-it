@@ -318,6 +318,11 @@ ID спринта score-it) в прежнем порядке и добавляе
 
 ## Production на REG.RU
 
+Для переноса с shared-хостинга на PostgreSQL, запуска через Gunicorn и поставки
+готовыми Docker-образами без интернета используйте [инструкцию production](deploy/README.md).
+`Dockerfile` и `compose.yaml` ниже остаются локальным окружением разработки;
+production использует `Dockerfile.production` и `compose.production.yaml`.
+
 Проект рассчитан на Python 3.12 и Phusion Passenger. Общая последовательность развёртывания:
 
 ```bash

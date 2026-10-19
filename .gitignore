@@ -1,4 +1,7 @@
 .env
+.env.production
+transfer/
+releases/
 .venv/
 venv/
 __pycache__/
