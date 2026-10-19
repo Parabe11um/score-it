@@ -1,0 +1,12 @@
+# Use with an existing reverse proxy attached to SCORE_IT_PROXY_NETWORK.
+services:
+  web:
+    networks:
+      proxy:
+        aliases:
+          - score-it-web
+
+networks:
+  proxy:
+    external: true
+    name: ${SCORE_IT_PROXY_NETWORK:-score_it_proxy}

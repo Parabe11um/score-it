@@ -1,0 +1,5 @@
+# Temporary access through an SSH tunnel, before DNS is changed.
+services:
+  web:
+    ports:
+      - "127.0.0.1:18000:8000"

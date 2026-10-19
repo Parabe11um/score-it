@@ -1,9 +1,16 @@
 .git
 .env
+.env.*
 .venv
 venv
 __pycache__
 *.pyc
 data
 staticfiles
+*.sqlite3*
+transfer
+releases
+upload
+*.tar
+*.tar.gz
 
