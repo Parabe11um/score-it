@@ -74,6 +74,12 @@ jobs:
           cd "$RUNNER_TEMP/releases/score-it-$RELEASE"
           bash load_release.sh
           cp .env.production.example .env.production
+          sed -i \
+            -e 's/^POSTGRES_DB=.*/POSTGRES_DB=score_it_container_ci/' \
+            -e 's/^POSTGRES_USER=.*/POSTGRES_USER=score_it_container_ci/' \
+            -e 's/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=ci-only-password/' \
+            -e 's/^DJANGO_SECRET_KEY=.*/DJANGO_SECRET_KEY=ci-only-key/' \
+            .env.production
           export POSTGRES_DB=score_it_container_ci
           export POSTGRES_USER=score_it_container_ci
           export DJANGO_SECRET_KEY=ci-only-key
