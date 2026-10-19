@@ -31,6 +31,7 @@ jobs:
           done
           DRIVER="$(docker exec compat-containerd docker info --format '{{json .DriverStatus}}')"
           [[ "$DRIVER" == *io.containerd.snapshotter* ]]
+          docker exec compat-containerd chown "$(id -u):$(id -g)" /var/run/docker.sock
       - name: Verify classic archives on containerd and reject a substituted tag
         run: |
           echo 'compatibility payload' > "$RUNNER_TEMP/payload"
