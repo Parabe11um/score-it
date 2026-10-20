@@ -24,10 +24,12 @@ RUN gosu --version && gosu postgres id
 # bundle uses the private backend network with ssl=off, not this certificate.
 # Production TLS, when required, must use separately provisioned certificates.
 RUN rm -f /etc/ssl/private/ssl-cert-snakeoil.key /etc/ssl/certs/ssl-cert-snakeoil.pem
+RUN --mount=type=bind,source=deploy/prune_runtime_sqlite.sh,target=/run/score-it-prune-sqlite.sh,readonly \
+    sh /run/score-it-prune-sqlite.sh postgres
 
 # Copy the resulting filesystem, not the upstream image's layers: those still
 # contain the original gosu and the image-wide test certificate/key.
-# PostgreSQL and its Debian packages remain at the pinned upstream versions.
+# PostgreSQL and the retained Debian libraries keep their pinned upstream versions.
 FROM scratch
 COPY --from=runtime-files / /
 # FROM scratch does not inherit image configuration. Keep these values aligned

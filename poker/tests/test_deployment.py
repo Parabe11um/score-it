@@ -25,6 +25,24 @@ class DatabaseConfigurationTests(SimpleTestCase):
             self.assertEqual(config["OPTIONS"]["sslmode"], "require")
             self.assertFalse((Path(directory) / "data").exists())
 
+    def test_production_container_rejects_sqlite_before_creating_files(self):
+        for engine in (None, "sqlite", "postgress"):
+            with self.subTest(engine=engine), TemporaryDirectory() as directory:
+                environ = {"SCORE_IT_REQUIRE_POSTGRESQL": "1"}
+                if engine is not None:
+                    environ["DB_ENGINE"] = engine
+                with self.assertRaisesRegex(ImproperlyConfigured, "requires DB_ENGINE=postgresql"):
+                    database_config(environ, Path(directory))
+                self.assertFalse((Path(directory) / "data").exists())
+
+    def test_production_container_accepts_explicit_postgresql_runtime_role(self):
+        config = database_config({
+            "SCORE_IT_REQUIRE_POSTGRESQL": "1", "DB_ENGINE": "postgresql",
+            "POSTGRES_DB": "score_it", "DB_HOST": "db",
+            "DB_USER": "score_it_app", "DB_PASSWORD": "fixture-password",
+        }, Path("/tmp"))
+        self.assertEqual(config["USER"], "score_it_app")
+
     def test_incomplete_postgresql_configuration_fails_closed(self):
         with self.assertRaises(ImproperlyConfigured):
             database_config({"DB_ENGINE": "postgresql"}, Path("/tmp"))
