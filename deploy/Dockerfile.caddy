@@ -3,10 +3,14 @@
 ARG GO_IMAGE=golang:1.26.9-alpine3.24@sha256:3082400e369fa24d5fc60bca20edab3f6d604e0c5a690ec66b295eff4dd87ade
 ARG CADDY_IMAGE=caddy:2.11.7-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f
 FROM ${GO_IMAGE} AS builder
+ARG BUILD_TLS_COMPAT=0
 ENV GOTOOLCHAIN=local CGO_ENABLED=0
-RUN apk add --no-cache git
+RUN --mount=type=bind,source=deploy/build_tls.sh,target=/run/score-it-build-tls.sh,readonly \
+    sh /run/score-it-build-tls.sh "$BUILD_TLS_COMPAT" apk add --no-cache git
 WORKDIR /src
-RUN git init \
+RUN --mount=type=bind,source=deploy/build_tls.sh,target=/run/score-it-build-tls.sh,readonly \
+    sh /run/score-it-build-tls.sh "$BUILD_TLS_COMPAT" sh -ec '\
+    git init \
     && git remote add origin https://github.com/caddyserver/caddy.git \
     && git fetch --depth 1 origin 72dd0fb067f6d7826c7f79907670ba4a713bfe37 \
     && git checkout --detach FETCH_HEAD \
@@ -17,9 +21,11 @@ RUN git init \
     && go get github.com/caddyserver/caddy/v2@v2.11.7 golang.org/x/net@v0.60.0 \
     && go mod tidy \
     && go mod verify \
-    && go build -trimpath -ldflags '-s -w -X github.com/caddyserver/caddy/v2.CustomVersion=v2.11.7-scoreit.1' -o /out/caddy . \
-    && go version -m /out/caddy
+    && go build -trimpath -ldflags "-s -w -X github.com/caddyserver/caddy/v2.CustomVersion=v2.11.7-scoreit.1" -o /out/caddy . \
+    && go version -m /out/caddy'
 
 FROM ${CADDY_IMAGE}
-RUN apk upgrade --no-cache
+ARG BUILD_TLS_COMPAT=0
+RUN --mount=type=bind,source=deploy/build_tls.sh,target=/run/score-it-build-tls.sh,readonly \
+    sh /run/score-it-build-tls.sh "$BUILD_TLS_COMPAT" apk upgrade --no-cache
 COPY --from=builder /out/caddy /usr/bin/caddy

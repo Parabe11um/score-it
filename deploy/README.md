@@ -57,6 +57,25 @@ RELEASE_PULL=0 bash deploy/make_release.sh /absolute/output-directory
 Python/Go/Alpine и базы Trivy по-прежнему требует сети. Сканирование, создание SBOM
 и контрольных сумм выполняются в обычном порядке.
 
+Если загрузка образов работает, но `apk` внутри сборки выдаёт TLS-ошибку, можно
+явно включить профиль совместимости для сетевых шагов сборки:
+
+```bash
+RELEASE_PULL=0 RELEASE_TLS_COMPAT=1 bash deploy/make_release.sh /absolute/output-directory
+```
+
+По умолчанию `RELEASE_TLS_COMPAT=0`. Режим `1` выбирает обычные ECDH-группы для
+OpenSSL и отключает гибридный ML-KEM в Go только на время `apk`, Git, Go и запуска
+Trivy. Проверка сертификатов, подписей APK, хешей Python и Go-модулей сохраняется.
+Профиль OpenSSL создаётся во временном файле и удаляется после команды, включая
+её неуспешное завершение. В готовых контейнерах нет `OPENSSL_CONF`/`GODEBUG` этого
+профиля; настройки TLS Caddy и PostgreSQL не меняются. Использованные параметры
+сборки записываются в `security/build-options.txt` и входят в `SHA256SUMS`.
+Этот флаг не настраивает Docker daemon на машине сборки: если сброс возникает
+при самом `docker pull`, совместимость клиента и демона нужно настроить отдельно.
+Справка: https://go.dev/doc/godebug и
+https://docs.openssl.org/3.5/man3/SSL_CTX_set1_curves/.
+
 Скрипт требует обновлённый сборочный Docker (>=29.8.2), собирает код через
 `git archive`, получает PostgreSQL 17 и пересобирает Caddy с исправленными Go/x/net.
 Все три образа получают теги с полным SHA коммита и сохраняются в `images.tar`.
