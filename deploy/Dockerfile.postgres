@@ -1,5 +1,21 @@
 ARG POSTGRES_IMAGE=postgres:17.11-bookworm@sha256:3645570cccdfa447589da9f57dd740faa29b30938e861289a5574b6ca6b03826
+ARG GO_IMAGE=golang:1.26.9-alpine3.24@sha256:3082400e369fa24d5fc60bca20edab3f6d604e0c5a690ec66b295eff4dd87ade
+FROM ${GO_IMAGE} AS gosu-builder
+ENV GOTOOLCHAIN=local CGO_ENABLED=0
+RUN apk add --no-cache git
+WORKDIR /src
+RUN git init \
+    && git remote add origin https://github.com/tianon/gosu.git \
+    && git fetch --depth 1 origin 6456aaa0f3c854d199d0f037f068eb97515b7513 \
+    && git checkout --detach FETCH_HEAD \
+    && go get github.com/moby/sys/user@v0.4.1 golang.org/x/sys@v0.48.0 \
+    && go mod verify \
+    && go build -trimpath -ldflags '-d -w' -o /out/gosu . \
+    && go version -m /out/gosu
+
 FROM ${POSTGRES_IMAGE}
+COPY --from=gosu-builder /out/gosu /usr/local/bin/gosu
+RUN gosu --version && gosu postgres id
 # Debian's ssl-cert package ships an image-wide test key. PostgreSQL in this
 # bundle uses the private backend network with ssl=off, not this certificate.
 # Production TLS, when required, must use separately provisioned certificates.
