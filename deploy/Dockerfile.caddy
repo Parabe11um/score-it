@@ -24,8 +24,42 @@ RUN --mount=type=bind,source=deploy/build_tls.sh,target=/run/score-it-build-tls.
     && go build -trimpath -ldflags "-s -w -X github.com/caddyserver/caddy/v2.CustomVersion=v2.11.7-scoreit.1" -o /out/caddy . \
     && go version -m /out/caddy'
 
-FROM ${CADDY_IMAGE}
+FROM ${CADDY_IMAGE} AS runtime-files
 ARG BUILD_TLS_COMPAT=0
 RUN --mount=type=bind,source=deploy/build_tls.sh,target=/run/score-it-build-tls.sh,readonly \
     sh /run/score-it-build-tls.sh "$BUILD_TLS_COMPAT" apk upgrade --no-cache
-COPY --from=builder /out/caddy /usr/bin/caddy
+# Assemble data files separately: copying the Alpine root filesystem would also
+# ship BusyBox/curl/nghttp2 and the upstream Caddy binary in inherited layers.
+RUN set -eu; \
+    mkdir -p /runtime/usr/bin /runtime/etc/ssl/certs /runtime/etc/caddy \
+        /runtime/usr/share/caddy /runtime/config/caddy /runtime/data/caddy \
+        /runtime/srv /runtime/tmp; \
+    chmod 1777 /runtime/tmp /runtime/config/caddy /runtime/data/caddy; \
+    cp /etc/ssl/certs/ca-certificates.crt /runtime/etc/ssl/certs/; \
+    ln -s certs/ca-certificates.crt /runtime/etc/ssl/cert.pem; \
+    cp /etc/mime.types /etc/passwd /etc/group /runtime/etc/; \
+    cp /etc/caddy/Caddyfile /runtime/etc/caddy/; \
+    cp /usr/share/caddy/index.html /runtime/usr/share/caddy/
+COPY --from=builder /out/caddy /runtime/usr/bin/caddy
+COPY --from=builder /src/LICENSE /runtime/usr/share/licenses/caddy/LICENSE
+COPY --from=builder /usr/local/go/LICENSE /runtime/usr/share/licenses/go/LICENSE
+COPY --from=builder /usr/local/go/lib/time/zoneinfo.zip /runtime/usr/share/zoneinfo/zoneinfo.zip
+
+FROM scratch
+COPY --from=runtime-files /runtime/ /
+ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    CADDY_VERSION=v2.11.7-scoreit.1 \
+    XDG_CONFIG_HOME=/config \
+    XDG_DATA_HOME=/data \
+    ZONEINFO=/usr/share/zoneinfo/zoneinfo.zip
+LABEL org.opencontainers.image.title="Caddy" \
+    org.opencontainers.image.version="v2.11.7-scoreit.1" \
+    org.opencontainers.image.description="Caddy rebuilt with pinned Go dependencies for score-it" \
+    org.opencontainers.image.url="https://caddyserver.com" \
+    org.opencontainers.image.documentation="https://caddyserver.com/docs" \
+    org.opencontainers.image.source="https://github.com/Parabe11um/score-it" \
+    org.opencontainers.image.licenses="Apache-2.0"
+EXPOSE 80 443 443/udp 2019
+USER 0:0
+WORKDIR /srv
+CMD ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
