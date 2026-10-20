@@ -72,8 +72,13 @@ class PostgresPayloadTests(unittest.TestCase):
             "ExposedPorts": {"5432/tcp": {}},
         }
         check_metadata(source, copy.deepcopy(source))
+        # Docker stores the default root directory as either "" or "/".
+        explicit_root = copy.deepcopy(source)
+        explicit_root["WorkingDir"] = "/"
+        check_metadata(source, explicit_root)
         for key, value in (
             ("Entrypoint", ["sh"]), ("StopSignal", "SIGTERM"),
+            ("WorkingDir", "/unexpected"),
             ("Volumes", {"/var/lib/postgresql": {}}),
             ("Env", ["PG_MAJOR=17", "PGDATA=/another/path", "LANG=en_US.utf8"]),
         ):

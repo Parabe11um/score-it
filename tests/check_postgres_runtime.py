@@ -64,7 +64,7 @@ def check_archive(path, image):
 
 def check_metadata(source, target):
     defaults = {
-        "Entrypoint": [], "Cmd": [], "User": "", "WorkingDir": "",
+        "Entrypoint": [], "Cmd": [], "User": "", "WorkingDir": "/",
         "StopSignal": "", "Volumes": {}, "ExposedPorts": {},
         "Healthcheck": {}, "Shell": [], "OnBuild": [],
     }
