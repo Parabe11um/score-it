@@ -7,6 +7,11 @@ from django.core.exceptions import ImproperlyConfigured
 
 def database_config(environ, base_dir):
     engine = environ.get("DB_ENGINE", "sqlite").strip()
+    if environ.get("SCORE_IT_REQUIRE_POSTGRESQL") == "1" and engine != "postgresql":
+        raise ImproperlyConfigured(
+            "Production container requires DB_ENGINE=postgresql. "
+            "SQLite is supported by source installations only."
+        )
     if engine == "sqlite":
         path = Path(environ.get("DATABASE_PATH", base_dir / "data" / "db.sqlite3"))
         path.parent.mkdir(parents=True, exist_ok=True)

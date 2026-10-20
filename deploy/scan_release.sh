@@ -50,6 +50,12 @@ for name in ('app', 'postgres', 'caddy'):
     summary.append(f'{name}: vulnerability_records={len(vulnerabilities)} secrets={len(secrets)}')
     if secrets:
         blocked.append(name + ': secret findings require review')
+    if name in ('app', 'postgres'):
+        sqlite = [p for result in report.get('Results', [])
+                  for p in result.get('Packages') or []
+                  if p.get('Name') in ('libsqlite3-0', 'pysqlite3', 'pysqlite3-binary')]
+        if sqlite:
+            blocked.append(name + ': SQLite package is not allowed in PostgreSQL-only runtime')
     # Explicit release gate for all of the public proxy's embedded Go modules.
     if name in ('caddy', 'postgres'):
         high_go = [v for result in report.get('Results', []) if result.get('Type') == 'gobinary'
