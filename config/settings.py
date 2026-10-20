@@ -1,4 +1,5 @@
 import os
+from datetime import timedelta
 from pathlib import Path
 
 from django.core.exceptions import ImproperlyConfigured
@@ -34,6 +35,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "axes",
     "poker",
 ]
 
@@ -46,7 +48,41 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "config.security.TokenLinkPrivacyMiddleware",
+    "axes.middleware.AxesMiddleware",
 ]
+
+AUTHENTICATION_BACKENDS = [
+    "axes.backends.AxesStandaloneBackend",
+    "django.contrib.auth.backends.ModelBackend",
+]
+# Database-backed counters are shared by all Gunicorn processes and survive restarts.
+# Limit by account, not the corporate NAT address; X-Forwarded-For is never trusted.
+AXES_FAILURE_LIMIT = 5
+AXES_COOLOFF_TIME = timedelta(minutes=15)
+AXES_LOCKOUT_PARAMETERS = ["username"]
+AXES_RESET_ON_SUCCESS = True
+AXES_RESET_COOL_OFF_ON_FAILURE_DURING_LOCKOUT = False
+AXES_CLIENT_IP_CALLABLE = "config.security.direct_client_ip"
+AXES_LOCKOUT_CALLABLE = "config.security.login_locked_out"
+AXES_SENSITIVE_PARAMETERS = ["username", "ip_address", "user_agent", "get_data", "post_data"]
+AXES_VERBOSE = False
+# Username-only lockout is independent of IP, User-Agent and cookies. Avoid
+# locking every bank employee out after five failures behind one corporate NAT.
+SILENCED_SYSTEM_CHECKS = ["axes.W006"]
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {"safe": {"()": "config.security.RedactingFormatter", "format": "%(levelname)s %(name)s %(message)s"}},
+    "handlers": {"console": {"class": "logging.StreamHandler", "formatter": "safe"}},
+    "root": {"handlers": ["console"], "level": "INFO"},
+    "loggers": {
+        "django": {"handlers": ["console"], "level": "INFO", "propagate": False},
+        "django.server": {"handlers": ["console"], "level": "INFO", "propagate": False},
+    },
+}
+DEFAULT_EXCEPTION_REPORTER = "config.security.RedactingExceptionReporter"
 
 ROOT_URLCONF = "config.urls"
 
@@ -100,6 +136,7 @@ LOGOUT_REDIRECT_URL = "login"
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Lax"
 CSRF_COOKIE_SAMESITE = "Lax"
+SECURE_REFERRER_POLICY = "no-referrer"
 
 if not DEBUG:
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")

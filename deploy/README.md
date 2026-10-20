@@ -18,8 +18,12 @@ service_healthy` и `--wait`. Комплект по умолчанию соби�
 основе `.env.production.example`, права `0600`. Заполните пароли, Django key,
 ALLOWED_HOSTS и CSRF origins для своего домена. Для сохранения действующих сессий
 при переносе сохраните `DJANGO_SECRET_KEY` исходного сайта. Не отправляйте этот
-файл в чат, Git, образ или архив релиза. `POSTGRES_USER` — пользователь отдельного
-экземпляра PostgreSQL score-it; он не связан с базой KidsTime. Порт БД не публикуется.
+файл в чат, Git, образ или архив релиза. `POSTGRES_USER/POSTGRES_PASSWORD` —
+администратор отдельного экземпляра PostgreSQL score-it. `DB_USER/DB_PASSWORD` —
+отдельная runtime-роль; `DB_MIGRATION_USER/DB_MIGRATION_PASSWORD` — отдельная роль
+миграций. Имена ролей и пароли должны различаться. Пароли администратора и миграций
+не передаются web. Порт БД не публикуется. Порядок обновления существующей БД и
+общего Caddy описан в [SECURITY.md](SECURITY.md).
 
 Compose создаёт постоянный том `score-it_postgres_data`. Замена образа приложения
 не меняет его содержимое. Не используйте `docker compose down -v`.
@@ -35,8 +39,11 @@ Compose создаёт постоянный том `score-it_postgres_data`. З�
 bash deploy/make_release.sh /absolute/output-directory
 ```
 
-Скрипт собирает код через `git archive`, получает PostgreSQL 17, присваивает обоим
-образам теги с полным SHA коммита и сохраняет их в `images.tar`. В каталоге релиза
+Скрипт требует обновлённый сборочный Docker (>=29.8.2), собирает код через
+`git archive`, получает PostgreSQL 17 и пересобирает Caddy с исправленными Go/x/net.
+Все три образа получают теги с полным SHA коммита и сохраняются в `images.tar`.
+Сканирование точных образов, SBOM и результаты находятся в `security/`. Найденные
+секреты или High/Critical в Go/x/net Caddy останавливают выпуск. В каталоге релиза
 также находятся Compose-файлы, шаблон настроек, `release.env`, `images.tsv` с ID
 конфигураций образов, `VERSION`, `load_release.sh`, `verify_release.py`, эта инструкция
 и `SHA256SUMS`. Конфигурации включают digests несжатых слоёв; отображаемый Docker
@@ -45,9 +52,10 @@ image ID не используется как переносимая идент�
 PostgreSQL имеет собственный тег score-it, поэтому загрузка релиза не меняет теги
 образов других проектов. ОС/архитектура и ID сохранены в манифесте.
 
-Параметры сборщика: `RELEASE_PLATFORM` (по умолчанию `linux/amd64`) и
-`POSTGRES_SOURCE_IMAGE` (по умолчанию `postgres:17-bookworm`). При согласовании с
-банком можно указать разрешённый образ PostgreSQL 17, в том числе по digest.
+Платформа задаётся `RELEASE_PLATFORM` (по умолчанию `linux/amd64`). Идентичности
+базовых образов закреплены digest в `deploy/images.env`; изменение фиксируется
+коммитом и требует повторной сборки/сканирования. Пакеты Python закреплены версиями
+и SHA256; pip обновляется при сборке и исключается из runtime-образа.
 Переход на другую major-версию PostgreSQL требует отдельной процедуры переноса;
 нельзя подключать существующий том PostgreSQL 17 к другой major-версии.
 
@@ -74,7 +82,7 @@ bash load_release.sh
 
 ```bash
 cd /opt/score-it
-COMPOSE=(docker compose --env-file .env.production --env-file release.env -f compose.production.yaml)
+COMPOSE=(docker compose --env-file .env.production --env-file release.env -f compose.production.yaml -f compose.maintenance.yaml)
 ```
 
 ### Первое развёртывание / назначение для переноса
@@ -83,7 +91,10 @@ COMPOSE=(docker compose --env-file .env.production --env-file release.env -f com
 
 ```bash
 "${COMPOSE[@]}" up -d --pull never --no-build --wait db
-"${COMPOSE[@]}" run --rm --no-deps --pull never web python manage.py migrate --noinput
+"${COMPOSE[@]}" run --rm --no-deps --pull never db-admin python deploy/configure_db_roles.py
+"${COMPOSE[@]}" run --rm --no-deps --pull never db-admin python deploy/configure_db_roles.py --apply
+"${COMPOSE[@]}" run --rm --no-deps --pull never migrate
+"${COMPOSE[@]}" run --rm --no-deps --pull never web python manage.py check_database_security
 ```
 
 До импорта не запускайте web и не создавайте суперпользователя: база должна быть
@@ -92,9 +103,11 @@ COMPOSE=(docker compose --env-file .env.production --env-file release.env -f com
 ## Перенос всех данных SQLite → PostgreSQL
 
 Требуется одинаковая версия кода и применённых миграций на исходном и новом сайте.
-Новая команда не добавляет миграций. Исходный SQLite-путь должен быть проверен
+Перед экспортом этого релиза установите зависимости и выполните `migrate` также
+на исходном сайте: добавлены служебные таблицы django-axes, схема источника и
+назначения должна совпадать. Исходный SQLite-путь должен быть проверен
 отдельно: на shared-хостинге это
-`/var/www/u1528107/data/private/score-it/db.sqlite3`.
+`/private/score-it/db.sqlite3`.
 
 Команда экспортирует все управляемые модели: пользователей с хешами паролей,
 группы, права и M2M, сессии Django, admin log, проекты, задачи, спринты, ресурсы,
@@ -116,7 +129,7 @@ ID, временные метки и все поля сохраняются. Н�
 
    ```bash
    .venv/bin/python manage.py transfer_data export \
-     --file /var/www/u1528107/data/private/score-it/transfer-final.json
+     --file /private/score-it/transfer-final.json
    ```
 
    Команда только читает исходную БД, создаёт новый файл с правами `0600`, не
@@ -132,7 +145,7 @@ ID, временные метки и все поля сохраняются. Н�
    ```bash
    TRANSFER_SHA=SHA256_ИЗ_ЭКСПОРТА
    TRANSFER_ARGS=(run --rm --no-deps --pull never --user "$(id -u):$(id -g)" \
-     -v /opt/score-it/transfer:/transfer:ro web python manage.py transfer_data)
+     -v /opt/score-it/transfer:/transfer:ro migrate python manage.py transfer_data)
    "${COMPOSE[@]}" "${TRANSFER_ARGS[@]}" import \
      --file /transfer/transfer-final.json --expected-sha256 "$TRANSFER_SHA"
    ```
@@ -159,7 +172,7 @@ ID, временные метки и все поля сохраняются. Н�
    "${COMPOSE[@]}" -f compose.local-test.yaml up -d --pull never --no-build --wait web
    ```
 
-   С локального компьютера: `ssh -L 18000:127.0.0.1:18000 deploy@89.108.78.229`.
+   С локального компьютера: `ssh -L 18000:127.0.0.1:18000 USER@SERVER`.
    Для полноценного браузерного входа с secure cookies используйте тестовый HTTPS
    маршрут через Caddy; не отключайте secure cookies на рабочем домене ради проверки.
    Сверьте вход со старым паролем, проекты, оценки, составы спринтов, ресурсы,
@@ -179,7 +192,7 @@ backend-сети. Caddy тоже должен быть подключён к `sc
 Будущий маршрут Caddy (после проверки фактического Caddyfile):
 
 ```caddyfile
-score-it.devtestenv.ru {
+score-it.example.com {
     reverse_proxy score-it-web:8000
 }
 ```
@@ -193,13 +206,15 @@ KidsTime выполняются отдельно после просмотра �
 Автоматическое получение публичных сертификатов требует внешнего доступа; в закрытом
 контуре используются корпоративные сертификаты/TLS termination банка. Если нужен
 отдельный контейнер прокси, его образ и конфигурация включаются в комплект поставки
-отдельно: текущий комплект содержит приложение и PostgreSQL.
+отдельно. Этот комплект содержит также исправленный Caddy, но не запускает его
+автоматически: его подключают к существующему Compose прокси либо используют
+корпоративный reverse proxy банка.
 
 ## Следующие релизы
 
 Соберите новый комплект с новой версией образа, передайте и загрузите его. На время
 обновления остановите web (и доступ к записи), выполните `migrate` одноразовым
-контейнером нового образа, затем запустите web с `--pull never --no-build --wait`.
+сервисом `migrate`, затем запустите web с `--pull never --no-build --wait`.
 Перенос данных `transfer_data import` повторно не выполняется. PostgreSQL major не
 меняется вместе с обычным релизом приложения. Сохранение предыдущего образа само по
 себе не откатывает миграции БД; совместимость возврата проверяется для каждого релиза.

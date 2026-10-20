@@ -17,7 +17,11 @@ def database_config(environ, base_dir):
         }
     if engine != "postgresql":
         raise ImproperlyConfigured("DB_ENGINE must be sqlite or postgresql")
-    required = ("POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD", "DB_HOST")
+    # Explicit DB_* credentials are runtime-only. POSTGRES_* remains supported for
+    # existing non-Compose installations; production Compose never passes it to web.
+    user_key = "DB_USER" if "DB_USER" in environ or "DB_PASSWORD" in environ else "POSTGRES_USER"
+    password_key = "DB_PASSWORD" if user_key == "DB_USER" else "POSTGRES_PASSWORD"
+    required = ("POSTGRES_DB", user_key, password_key, "DB_HOST")
     if any(not environ.get(key) for key in required):
         raise ImproperlyConfigured("PostgreSQL requires " + ", ".join(required))
     options = {"connect_timeout": 10}
@@ -26,8 +30,8 @@ def database_config(environ, base_dir):
     return {
         "ENGINE": "django.db.backends.postgresql",
         "NAME": environ["POSTGRES_DB"],
-        "USER": environ["POSTGRES_USER"],
-        "PASSWORD": environ["POSTGRES_PASSWORD"],
+        "USER": environ[user_key],
+        "PASSWORD": environ[password_key],
         "HOST": environ["DB_HOST"],
         "PORT": environ.get("DB_PORT", "5432"),
         "CONN_MAX_AGE": 60,
