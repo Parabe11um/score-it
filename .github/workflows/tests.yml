@@ -109,7 +109,7 @@ jobs:
           export POSTGRES_DB=score_it_container_ci
           export POSTGRES_USER=score_it_container_ci
           export DJANGO_SECRET_KEY=ci-only-key
-          COMPOSE=(docker compose --env-file .env.production --env-file release.env -f compose.production.yaml -f compose.maintenance.yaml)
+          COMPOSE=(docker compose -p score-it-check-ci --env-file .env.production --env-file release.env -f compose.production.yaml -f compose.maintenance.yaml)
           "${COMPOSE[@]}" -f compose.proxy.yaml config --quiet
           "${COMPOSE[@]}" up -d --pull never --no-build --wait db
           "${COMPOSE[@]}" run --rm --no-deps --pull never db-admin python deploy/configure_db_roles.py --apply
@@ -118,6 +118,7 @@ jobs:
           "${COMPOSE[@]}" exec -T web python manage.py check_database_security
           "${COMPOSE[@]}" exec -T web python -c "import os, importlib.util; assert not {'POSTGRES_USER', 'POSTGRES_PASSWORD', 'DB_MIGRATION_USER', 'DB_MIGRATION_PASSWORD'} & os.environ.keys(); assert all(importlib.util.find_spec(name) is None for name in ('pip', 'ensurepip'))"
           "${COMPOSE[@]}" exec -T web python -c "import urllib.request; [urllib.request.urlopen('http://127.0.0.1:8000' + path, timeout=5).read() for path in ['/healthz/', '/login/', '/static/css/app.css']]"
+          python "$GITHUB_WORKSPACE/tests/check_live_security.py" --project score-it-check-ci --release "$RELEASE" --database score_it_container_ci --output "$RUNNER_TEMP/live-security.json"
           source release.env
           for IMAGE in "$SCORE_IT_IMAGE" "$POSTGRES_IMAGE" "$CADDY_IMAGE"; do
             docker image inspect --format '{{json .Config.Env}}' "$IMAGE" | python -c 'import json, sys; names = {v.split("=", 1)[0] for v in json.load(sys.stdin)}; assert not {"GODEBUG", "OPENSSL_CONF"} & names, names'
@@ -128,11 +129,13 @@ jobs:
           '
           grep -Fx 'RELEASE_TLS_COMPAT=1' security/build-options.txt
           docker run --rm --network none -v "$PWD/Caddyfile.score-it.example:/etc/caddy/Caddyfile:ro" "$CADDY_IMAGE" caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile > "$RUNNER_TEMP/caddy-adapted.json"
-          test "$(docker network inspect --format '{{.Internal}}' score-it_backend)" = true
+          test "$(docker network inspect --format '{{.Internal}}' score-it-check-ci_backend)" = true
       - name: Retain vulnerability reports and SBOM
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: release-security-reports
-          path: ${{ runner.temp }}/releases/*/security/
+          path: |
+            ${{ runner.temp }}/releases/*/security/
+            ${{ runner.temp }}/live-security.json
           if-no-files-found: warn
