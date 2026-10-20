@@ -48,6 +48,14 @@ def main():
                 raise AssertionError("Runtime executed forbidden DDL/administration")
     configure(env, apply=True)
     subprocess.run([sys.executable, "manage.py", "check_database_security"], env=env, check=True)
+    # NOINHERIT still permits SET ROLE: membership itself must be rejected.
+    with psycopg.connect(**admin_args) as admin:
+        admin.execute(sql.SQL("GRANT {} TO {}").format(sql.Identifier(env["DB_MIGRATION_USER"]), sql.Identifier(env["DB_USER"])))
+    result = subprocess.run([sys.executable, "manage.py", "check_database_security"], env=env, capture_output=True)
+    assert result.returncode != 0, "Runtime membership of the migration role was accepted"
+    with psycopg.connect(**admin_args) as admin:
+        admin.execute(sql.SQL("REVOKE {} FROM {}").format(sql.Identifier(env["DB_MIGRATION_USER"]), sql.Identifier(env["DB_USER"])))
+    subprocess.run([sys.executable, "manage.py", "check_database_security"], env=env, check=True)
     print("DATABASE_ROLES_VERIFIED: data retained; future DML allowed; DDL/admin denied; repeat apply works.")
 
 

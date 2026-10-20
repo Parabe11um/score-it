@@ -13,6 +13,8 @@ class Command(BaseCommand):
                 (rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR rolbypassrls)
                 AND (rolname = current_user OR pg_has_role(current_user, oid, 'MEMBER'))""")
             privileged = cursor.fetchall()
+            cursor.execute("SELECT 1 FROM pg_auth_members WHERE member=(SELECT oid FROM pg_roles WHERE rolname=current_user) LIMIT 1")
+            membership = cursor.fetchone()
             cursor.execute("""SELECT
                 has_database_privilege(current_user, current_database(), 'CREATE'),
                 has_database_privilege(current_user, current_database(), 'TEMP'),
@@ -20,6 +22,6 @@ class Command(BaseCommand):
                 EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
                         WHERE n.nspname='public' AND c.relowner=(SELECT oid FROM pg_roles WHERE rolname=current_user))""")
             ddl = cursor.fetchone()
-        if privileged or any(ddl):
+        if privileged or membership or any(ddl):
             raise CommandError("Runtime role has administrative, ownership, schema CREATE or TEMP privileges.")
         self.stdout.write("DATABASE_SECURITY_OK: no administrative or DDL privileges.")
