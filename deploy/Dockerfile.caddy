@@ -10,9 +10,14 @@ RUN git init \
     && git remote add origin https://github.com/caddyserver/caddy.git \
     && git fetch --depth 1 origin 72dd0fb067f6d7826c7f79907670ba4a713bfe37 \
     && git checkout --detach FETCH_HEAD \
-    && go get golang.org/x/net@v0.60.0 \
+    && mkdir /build \
+    && cp cmd/caddy/main.go /build/main.go \
+    && cd /build \
+    && go mod init score-it-caddy-build \
+    && go get github.com/caddyserver/caddy/v2@v2.11.7 golang.org/x/net@v0.60.0 \
+    && go mod tidy \
     && go mod verify \
-    && go build -trimpath -ldflags '-s -w -X github.com/caddyserver/caddy/v2.CustomVersion=v2.11.7-scoreit.1' -o /out/caddy ./cmd/caddy \
+    && go build -trimpath -ldflags '-s -w -X github.com/caddyserver/caddy/v2.CustomVersion=v2.11.7-scoreit.1' -o /out/caddy . \
     && go version -m /out/caddy
 
 FROM ${CADDY_IMAGE}

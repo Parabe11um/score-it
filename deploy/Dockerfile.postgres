@@ -1,0 +1,6 @@
+ARG POSTGRES_IMAGE=postgres:17.11-bookworm@sha256:3645570cccdfa447589da9f57dd740faa29b30938e861289a5574b6ca6b03826
+FROM ${POSTGRES_IMAGE}
+# Debian's ssl-cert package ships an image-wide test key. PostgreSQL in this
+# bundle uses the private backend network with ssl=off, not this certificate.
+# Production TLS, when required, must use separately provisioned certificates.
+RUN rm -f /etc/ssl/private/ssl-cert-snakeoil.key /etc/ssl/certs/ssl-cert-snakeoil.pem

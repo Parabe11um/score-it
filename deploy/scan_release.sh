@@ -44,11 +44,12 @@ for name in ('app', 'postgres', 'caddy'):
     summary.append(f'{name}: vulnerability_records={len(vulnerabilities)} secrets={len(secrets)}')
     if secrets:
         blocked.append(name + ': secret findings require review')
-    # Explicit release gate for the public proxy's embedded Go dependencies.
+    # Explicit release gate for all of the public proxy's embedded Go modules.
     if name == 'caddy':
-        high_go = [v for v in vulnerabilities if v['PkgName'] in ('stdlib', 'golang.org/x/net') and v['Severity'] in ('HIGH', 'CRITICAL')]
+        high_go = [v for result in report.get('Results', []) if result.get('Type') == 'gobinary'
+                   for v in result.get('Vulnerabilities') or [] if v['Severity'] in ('HIGH', 'CRITICAL')]
         if high_go:
-            blocked.append('caddy: unresolved Go/x/net HIGH/CRITICAL findings')
+            blocked.append('caddy: unresolved Go module HIGH/CRITICAL findings')
 (root / 'summary.txt').write_text('\n'.join(summary + blocked) + '\n')
 print('\n'.join(summary + blocked))
 if blocked:

@@ -36,8 +36,9 @@ docker build --pull --platform "$PLATFORM" -f "$BUILD_DIR/Dockerfile.production"
   --build-arg "PYTHON_IMAGE=$PYTHON_SOURCE_IMAGE" \
   --label "org.opencontainers.image.revision=$RELEASE" \
   -t "$APP_IMAGE" "$BUILD_DIR"
-docker pull --platform "$PLATFORM" "$PG_SOURCE"
-docker tag "$PG_SOURCE" "$PG_IMAGE"
+docker build --pull --platform "$PLATFORM" -f "$BUILD_DIR/deploy/Dockerfile.postgres" \
+  --build-arg "POSTGRES_IMAGE=$PG_SOURCE" \
+  --label "org.opencontainers.image.revision=$RELEASE" -t "$PG_IMAGE" "$BUILD_DIR"
 docker build --pull --platform "$PLATFORM" -f "$BUILD_DIR/deploy/Dockerfile.caddy" \
   --build-arg "GO_IMAGE=$GO_SOURCE_IMAGE" --build-arg "CADDY_IMAGE=$CADDY_SOURCE_IMAGE" \
   --label "org.opencontainers.image.revision=$RELEASE" -t "$CADDY_IMAGE" "$BUILD_DIR"
