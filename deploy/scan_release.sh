@@ -7,11 +7,17 @@ if [ "$#" -ne 1 ]; then
 fi
 ROOT="$(realpath "$1")"
 . "$ROOT/images.env"
+TRIVY_TLS_ARGS=()
+case "${RELEASE_TLS_COMPAT:-0}" in
+  0) ;;
+  1) TRIVY_TLS_ARGS=(-e GODEBUG=tlsmlkem=0,tlssecpmlkem=0) ;;
+  *) echo 'RELEASE_TLS_COMPAT must be 0 or 1.' >&2; exit 1 ;;
+esac
 mkdir -p "$ROOT/security"
 TEMP="$(mktemp -d)"
 trap 'rm -rf "$TEMP"' EXIT
 docker version > "$ROOT/security/docker-version.txt"
-docker run --rm "$TRIVY_IMAGE" --version > "$ROOT/security/trivy-version.txt"
+docker run --rm "${TRIVY_TLS_ARGS[@]}" "$TRIVY_IMAGE" --version > "$ROOT/security/trivy-version.txt"
 while IFS=$'\t' read -r IMAGE CONFIG PLATFORM; do
   case "$IMAGE" in
     score-it:*) NAME=app ;;
@@ -24,11 +30,11 @@ while IFS=$'\t' read -r IMAGE CONFIG PLATFORM; do
   python3 "$ROOT/verify_release.py" manifest --archive "$TEMP/$NAME.tar" \
     --output "$TEMP/$NAME.tsv" --platform "$PLATFORM" --image "$IMAGE"
   test "$(cut -f 2 "$TEMP/$NAME.tsv")" = "$CONFIG"
-  docker run --rm -v "$TEMP:/input:ro" -v "$ROOT/security:/reports" \
+  docker run --rm "${TRIVY_TLS_ARGS[@]}" -v "$TEMP:/input:ro" -v "$ROOT/security:/reports" \
     -v score_it_trivy_cache:/root/.cache/trivy "$TRIVY_IMAGE" image \
     --input "/input/$NAME.tar" --scanners vuln,secret,misconfig \
     --image-config-scanners secret,misconfig --format json --output "/reports/$NAME.json"
-  docker run --rm -v "$ROOT/security:/reports" "$TRIVY_IMAGE" convert \
+  docker run --rm "${TRIVY_TLS_ARGS[@]}" -v "$ROOT/security:/reports" "$TRIVY_IMAGE" convert \
     --format spdx-json --output "/reports/$NAME.spdx.json" "/reports/$NAME.json"
 done < "$ROOT/images.tsv"
 python3 - "$ROOT/security" <<'PY'

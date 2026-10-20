@@ -23,6 +23,11 @@ case "${RELEASE_PULL:-1}" in
   0) BUILD_PULL=--pull=false ;;
   *) echo 'RELEASE_PULL must be 1 (refresh bases) or 0 (use cached bases).' >&2; exit 1 ;;
 esac
+TLS_COMPAT="${RELEASE_TLS_COMPAT:-0}"
+case "$TLS_COMPAT" in
+  0|1) ;;
+  *) echo 'RELEASE_TLS_COMPAT must be 0 (default TLS) or 1 (build-time compatibility).' >&2; exit 1 ;;
+esac
 python3 - <<'PY'
 import json, re, subprocess
 version = json.loads(subprocess.check_output(['docker', 'version', '--format', '{{json .Server}}']))['Version']
@@ -55,9 +60,11 @@ docker build "$BUILD_PULL" --platform "$PLATFORM" -f "$BUILD_DIR/Dockerfile.prod
   -t "$APP_IMAGE" "$BUILD_DIR"
 docker build "$BUILD_PULL" --platform "$PLATFORM" -f "$BUILD_DIR/deploy/Dockerfile.postgres" \
   --build-arg "POSTGRES_IMAGE=$PG_SOURCE" --build-arg "GO_IMAGE=$GO_SOURCE_IMAGE" \
+  --build-arg "BUILD_TLS_COMPAT=$TLS_COMPAT" \
   --label "org.opencontainers.image.revision=$RELEASE" -t "$PG_IMAGE" "$BUILD_DIR"
 docker build "$BUILD_PULL" --platform "$PLATFORM" -f "$BUILD_DIR/deploy/Dockerfile.caddy" \
   --build-arg "GO_IMAGE=$GO_SOURCE_IMAGE" --build-arg "CADDY_IMAGE=$CADDY_SOURCE_IMAGE" \
+  --build-arg "BUILD_TLS_COMPAT=$TLS_COMPAT" \
   --label "org.opencontainers.image.revision=$RELEASE" -t "$CADDY_IMAGE" "$BUILD_DIR"
 docker image save -o "$DEST/images.tar" "$APP_IMAGE" "$PG_IMAGE" "$CADDY_IMAGE"
 cp compose.production.yaml compose.proxy.yaml compose.local-test.yaml compose.maintenance.yaml compose.caddy-image.yaml "$DEST/"
@@ -71,6 +78,8 @@ python3 deploy/verify_release.py manifest --archive "$DEST/images.tar" \
   --output "$DEST/images.tsv" --platform "$PLATFORM" \
   --image "$APP_IMAGE" --image "$PG_IMAGE" --image "$CADDY_IMAGE"
 printf 'RELEASE=%s\nPLATFORM=%s\n' "$RELEASE" "$PLATFORM" > "$DEST/VERSION"
+mkdir -p "$DEST/security"
+printf 'RELEASE_PULL=%s\nRELEASE_TLS_COMPAT=%s\n' "${RELEASE_PULL:-1}" "$TLS_COMPAT" > "$DEST/security/build-options.txt"
 bash deploy/scan_release.sh "$DEST"
 python3 - "$DEST" <<'PY'
 import hashlib
