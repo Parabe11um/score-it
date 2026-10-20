@@ -37,7 +37,7 @@ def layer_bytes(files, link=True):
         for name, data in files.items():
             item = tarfile.TarInfo(name)
             item.size = len(data)
-            item.mode = 0o755 if name == "usr/bin/caddy" else 0o644
+            item.mode = 0o755 if name in ("usr/bin/caddy", "usr/local/bin/gosu") else 0o644
             layer.addfile(item, io.BytesIO(data))
         if link:
             item = tarfile.TarInfo("etc/ssl/cert.pem")
@@ -47,7 +47,7 @@ def layer_bytes(files, link=True):
     return stream.getvalue()
 
 
-def saved_image(path, layers, oci=False):
+def saved_image(path, layers, oci=False, image=IMAGE):
     config = json.dumps({
         "os": "linux", "architecture": "amd64",
         "config": {"Env": ["XDG_CONFIG_HOME=/config", "XDG_DATA_HOME=/data"]},
@@ -68,7 +68,7 @@ def saved_image(path, layers, oci=False):
                 names.append(name)
                 add(name, layer)
             add("manifest.json", json.dumps([{
-                "Config": "config.json", "RepoTags": [IMAGE], "Layers": names,
+                "Config": "config.json", "RepoTags": [image], "Layers": names,
             }]).encode())
         else:
             def blob(data):
@@ -78,7 +78,7 @@ def saved_image(path, layers, oci=False):
 
             manifest = json.dumps({"config": blob(config), "layers": [blob(x) for x in layers]}).encode()
             descriptor = blob(manifest)
-            descriptor["annotations"] = {"org.opencontainers.image.ref.name": IMAGE}
+            descriptor["annotations"] = {"org.opencontainers.image.ref.name": image}
             add("index.json", json.dumps({"manifests": [descriptor]}).encode())
 
 
