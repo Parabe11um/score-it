@@ -39,6 +39,24 @@ Compose создаёт постоянный том `score-it_postgres_data`. З�
 bash deploy/make_release.sh /absolute/output-directory
 ```
 
+По умолчанию сборка принудительно запрашивает базовые образы из реестра
+(`RELEASE_PULL=1`). Если образы уже загружены, но повторное получение метаданных
+реестра обрывается, для стандартного Docker builder можно использовать локальные
+образы с теми же закреплёнными digest:
+
+```bash
+. deploy/images.env
+for IMAGE in "$PYTHON_SOURCE_IMAGE" "$POSTGRES_SOURCE_IMAGE" "$GO_SOURCE_IMAGE" "$CADDY_SOURCE_IMAGE"; do
+  docker pull --platform "${RELEASE_PLATFORM:-linux/amd64}" "$IMAGE"
+done
+RELEASE_PULL=0 bash deploy/make_release.sh /absolute/output-directory
+```
+
+Этот режим требует наличия всех четырёх базовых образов локально и SHA256 в их
+ссылках. Он отключает только принудительный `--pull` при сборке; загрузка пакетов
+Python/Go/Alpine и базы Trivy по-прежнему требует сети. Сканирование, создание SBOM
+и контрольных сумм выполняются в обычном порядке.
+
 Скрипт требует обновлённый сборочный Docker (>=29.8.2), собирает код через
 `git archive`, получает PostgreSQL 17 и пересобирает Caddy с исправленными Go/x/net.
 Все три образа получают теги с полным SHA коммита и сохраняются в `images.tar`.

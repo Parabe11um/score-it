@@ -18,6 +18,11 @@ PG_SOURCE="$POSTGRES_SOURCE_IMAGE"
 APP_IMAGE="score-it:$RELEASE"
 PG_IMAGE="score-it-postgres:17-$RELEASE"
 CADDY_IMAGE="score-it-caddy:$RELEASE"
+case "${RELEASE_PULL:-1}" in
+  1) BUILD_PULL=--pull ;;
+  0) BUILD_PULL=--pull=false ;;
+  *) echo 'RELEASE_PULL must be 1 (refresh bases) or 0 (use cached bases).' >&2; exit 1 ;;
+esac
 python3 - <<'PY'
 import json, re, subprocess
 version = json.loads(subprocess.check_output(['docker', 'version', '--format', '{{json .Server}}']))['Version']
@@ -25,6 +30,18 @@ match = re.match(r'^(\d+)\.(\d+)\.(\d+)', version)
 if not match or tuple(map(int, match.groups())) < (29, 8, 2):
     raise SystemExit('Update build-host Docker Engine/containerd/runc first (Docker >= 29.8.2).')
 PY
+if [ "$BUILD_PULL" = --pull=false ]; then
+  for SOURCE in "$PYTHON_SOURCE_IMAGE" "$POSTGRES_SOURCE_IMAGE" "$GO_SOURCE_IMAGE" "$CADDY_SOURCE_IMAGE"; do
+    if [[ ! "$SOURCE" =~ @sha256:[a-f0-9]{64}$ ]]; then
+      echo "Cached-base mode requires a SHA256-pinned source: $SOURCE" >&2
+      exit 1
+    fi
+    if ! docker image inspect "$SOURCE" >/dev/null 2>&1; then
+      echo "Base image is not cached; run: docker pull --platform $PLATFORM $SOURCE" >&2
+      exit 1
+    fi
+  done
+fi
 OUTPUT="$(realpath -m "$1")"
 mkdir -p "$OUTPUT"
 DEST="$OUTPUT/score-it-$RELEASE"
@@ -32,14 +49,14 @@ mkdir "$DEST"
 BUILD_DIR="$(mktemp -d)"
 trap 'rm -rf "$BUILD_DIR"' EXIT
 git archive HEAD | tar -x -C "$BUILD_DIR"
-docker build --pull --platform "$PLATFORM" -f "$BUILD_DIR/Dockerfile.production" \
+docker build "$BUILD_PULL" --platform "$PLATFORM" -f "$BUILD_DIR/Dockerfile.production" \
   --build-arg "PYTHON_IMAGE=$PYTHON_SOURCE_IMAGE" \
   --label "org.opencontainers.image.revision=$RELEASE" \
   -t "$APP_IMAGE" "$BUILD_DIR"
-docker build --pull --platform "$PLATFORM" -f "$BUILD_DIR/deploy/Dockerfile.postgres" \
+docker build "$BUILD_PULL" --platform "$PLATFORM" -f "$BUILD_DIR/deploy/Dockerfile.postgres" \
   --build-arg "POSTGRES_IMAGE=$PG_SOURCE" --build-arg "GO_IMAGE=$GO_SOURCE_IMAGE" \
   --label "org.opencontainers.image.revision=$RELEASE" -t "$PG_IMAGE" "$BUILD_DIR"
-docker build --pull --platform "$PLATFORM" -f "$BUILD_DIR/deploy/Dockerfile.caddy" \
+docker build "$BUILD_PULL" --platform "$PLATFORM" -f "$BUILD_DIR/deploy/Dockerfile.caddy" \
   --build-arg "GO_IMAGE=$GO_SOURCE_IMAGE" --build-arg "CADDY_IMAGE=$CADDY_SOURCE_IMAGE" \
   --label "org.opencontainers.image.revision=$RELEASE" -t "$CADDY_IMAGE" "$BUILD_DIR"
 docker image save -o "$DEST/images.tar" "$APP_IMAGE" "$PG_IMAGE" "$CADDY_IMAGE"
