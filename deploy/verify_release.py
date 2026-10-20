@@ -112,7 +112,10 @@ def verify_checksums(directory):
     checked = set()
     for line in (directory / "SHA256SUMS").read_text().splitlines():
         digest, name = line.split("  ", 1)
-        if Path(name).name != name or not re.fullmatch(r"[0-9a-f]{64}", digest) or name in checked:
+        relative = PurePosixPath(name)
+        if (relative.is_absolute() or '..' in relative.parts or str(relative) != name
+                or not (directory / name).resolve().is_relative_to(directory.resolve())
+                or not re.fullmatch(r"[0-9a-f]{64}", digest) or name in checked):
             raise VerificationError("Invalid checksum manifest")
         if file_digest(directory / name) != "sha256:" + digest:
             raise VerificationError("Checksum mismatch: " + name)
@@ -124,8 +127,8 @@ def verify_checksums(directory):
 def manifest_rows(path):
     with Path(path).open(newline="") as stream:
         rows = list(csv.reader(stream, delimiter="\t"))
-    if len(rows) != 2 or any(len(row) != 3 for row in rows):
-        raise VerificationError("Expected exactly two images in images.tsv")
+    if len(rows) not in (2, 3) or any(len(row) != 3 for row in rows):
+        raise VerificationError("Expected app/database and optional Caddy in images.tsv")
     if len({row[0] for row in rows}) != len(rows):
         raise VerificationError("Duplicate image tags")
     kinds = set()
@@ -134,13 +137,15 @@ def manifest_rows(path):
             kinds.add("app")
         elif tag.startswith("score-it-postgres:"):
             kinds.add("db")
+        elif tag.startswith("score-it-caddy:"):
+            kinds.add("caddy")
         else:
             raise VerificationError("Unexpected image tag")
         if not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
             raise VerificationError("Invalid config digest")
         if not re.fullmatch(r"linux/[a-z0-9_]+(?:/[a-z0-9_]+)?", platform):
             raise VerificationError("Invalid platform")
-    if kinds != {"app", "db"}:
+    if not {"app", "db"} <= kinds or len(kinds) != len(rows):
         raise VerificationError("Application and PostgreSQL images are required")
     return rows
 

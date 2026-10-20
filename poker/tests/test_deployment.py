@@ -31,6 +31,15 @@ class DatabaseConfigurationTests(SimpleTestCase):
         with self.assertRaises(ImproperlyConfigured):
             database_config({"DB_ENGINE": "postgress"}, Path("/tmp"))
 
+    def test_explicit_runtime_credentials_do_not_fall_back_to_administrator(self):
+        environ = {"DB_ENGINE": "postgresql", "POSTGRES_DB": "score_it", "DB_HOST": "db",
+                   "POSTGRES_USER": "admin", "POSTGRES_PASSWORD": "admin-password",
+                   "DB_USER": "score_it_app", "DB_PASSWORD": "app-password"}
+        self.assertEqual(database_config(environ, Path("/tmp"))["USER"], "score_it_app")
+        environ["DB_PASSWORD"] = ""
+        with self.assertRaises(ImproperlyConfigured):
+            database_config(environ, Path("/tmp"))
+
 
 class HealthTests(TestCase):
     def test_health_is_available_without_authentication(self):

@@ -1,0 +1,36 @@
+# Run explicitly alongside compose.production.yaml. Never part of web's env.
+x-maintenance: &maintenance
+  image: ${SCORE_IT_IMAGE:?Set SCORE_IT_IMAGE}
+  pull_policy: never
+  profiles: [maintenance]
+  networks: [backend]
+  read_only: true
+  tmpfs: ["/tmp:size=64m,mode=1777"]
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+
+services:
+  db-admin:
+    <<: *maintenance
+    command: [python, deploy/configure_db_roles.py]
+    environment:
+      DB_HOST: db
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      DB_USER: ${DB_USER:?Set DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD}
+      DB_MIGRATION_USER: ${DB_MIGRATION_USER:?Set DB_MIGRATION_USER}
+      DB_MIGRATION_PASSWORD: ${DB_MIGRATION_PASSWORD:?Set DB_MIGRATION_PASSWORD}
+  migrate:
+    <<: *maintenance
+    command: [python, manage.py, migrate, --noinput]
+    environment:
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?Set DJANGO_SECRET_KEY}
+      DJANGO_DEBUG: "0"
+      DB_ENGINE: postgresql
+      DB_HOST: db
+      DB_PORT: "5432"
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB}
+      DB_USER: ${DB_MIGRATION_USER:?Set DB_MIGRATION_USER}
+      DB_PASSWORD: ${DB_MIGRATION_PASSWORD:?Set DB_MIGRATION_PASSWORD}

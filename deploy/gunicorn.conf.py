@@ -7,6 +7,7 @@ timeout = 120
 graceful_timeout = 30
 accesslog = "-"
 errorlog = "-"
+logger_class = "deploy.gunicorn_logger.SafeLogger"
 access_log_format = '%(h)s %(m)s %(U)s %(s)s %(L)s'
 max_requests = 2000
 max_requests_jitter = 200

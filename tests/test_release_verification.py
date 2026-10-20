@@ -109,6 +109,35 @@ class ReleaseVerificationTests(unittest.TestCase):
         with self.assertRaisesRegex(release.VerificationError, "Checksum mismatch"):
             release.verify_checksums(root)
 
+    def test_security_subdirectory_is_verified_and_cannot_escape_release(self):
+        root = Path(self.directory.name)
+        names = ['images.tar', 'images.tsv', 'release.env', 'VERSION', 'compose.production.yaml', 'security/app.json']
+        lines = []
+        for name in names:
+            path = root / name
+            path.parent.mkdir(exist_ok=True)
+            path.write_bytes(b'checked')
+            lines.append(hashlib.sha256(b'checked').hexdigest() + '  ' + name)
+        (root / 'SHA256SUMS').write_text('\n'.join(lines))
+        release.verify_checksums(root)
+        (root / 'security/app.json').write_bytes(b'tampered')
+        with self.assertRaisesRegex(release.VerificationError, 'Checksum mismatch'):
+            release.verify_checksums(root)
+        (root / 'SHA256SUMS').write_text(hashlib.sha256(b'checked').hexdigest() + '  ../outside')
+        with self.assertRaisesRegex(release.VerificationError, 'Invalid checksum'):
+            release.verify_checksums(root)
+
+    def test_three_image_manifest_and_legacy_two_image_manifest_are_supported(self):
+        root = Path(self.directory.name)
+        tags = ['score-it:release', 'score-it-postgres:release', 'score-it-caddy:release']
+        path = root / 'images.tsv'
+        for count in (2, 3):
+            path.write_text(''.join(f'{tag}\t{DIGEST}\tlinux/amd64\n' for tag in tags[:count]))
+            self.assertEqual(len(release.manifest_rows(path)), count)
+        path.write_text(''.join(f'{tag}\t{DIGEST}\tlinux/amd64\n' for tag in [tags[0], tags[1], 'score-it:another']))
+        with self.assertRaises(release.VerificationError):
+            release.manifest_rows(path)
+
 
 if __name__ == "__main__":
     unittest.main()

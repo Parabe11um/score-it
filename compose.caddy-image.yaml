@@ -1,0 +1,6 @@
+# Apply to the EXISTING proxy's Compose project, after checking its service name
+# is `caddy`. Preserve all original mounts, ports, networks and project name.
+services:
+  caddy:
+    image: ${CADDY_IMAGE:?Set CADDY_IMAGE from release.env}
+    pull_policy: never

@@ -30,10 +30,14 @@ jobs:
         run: python manage.py test poker.tests --verbosity 2
       - name: Verify release compatibility and rejection cases
         run: python -m unittest discover -s tests -p 'test_release_verification.py' -v
+      - name: Audit locked production Python dependencies
+        run: |
+          python -m pip install pip-audit==2.10.1
+          python -m pip_audit -r requirements.production.txt --disable-pip --no-deps
 
   postgres:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 40
     services:
       postgres:
         image: postgres:17-bookworm
@@ -69,6 +73,18 @@ jobs:
           python manage.py check --database default
           python manage.py makemigrations --check --dry-run
           python manage.py test poker.tests --verbosity 2
+      - name: Verify existing database role migration and least privilege
+        run: python tests/check_database_roles.py
+      - name: Update build-host Docker and bundled runtime components
+        run: |
+          sudo install -m 0755 -d /etc/apt/keyrings
+          curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo tee /etc/apt/keyrings/docker.asc > /dev/null
+          sudo chmod a+r /etc/apt/keyrings/docker.asc
+          source /etc/os-release
+          printf 'Types: deb\nURIs: https://download.docker.com/linux/ubuntu\nSuites: %s\nComponents: stable\nArchitectures: %s\nSigned-By: /etc/apt/keyrings/docker.asc\n' "$VERSION_CODENAME" "$(dpkg --print-architecture)" | sudo tee /etc/apt/sources.list.d/docker.sources > /dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+          docker version
       - name: Build, load and run the release without external container networking
         run: |
           bash deploy/make_release.sh "$RUNNER_TEMP/releases"
@@ -80,15 +96,29 @@ jobs:
             -e 's/^POSTGRES_DB=.*/POSTGRES_DB=score_it_container_ci/' \
             -e 's/^POSTGRES_USER=.*/POSTGRES_USER=score_it_container_ci/' \
             -e 's/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=ci-only-password/' \
+            -e 's/^DB_PASSWORD=.*/DB_PASSWORD=runtime-ci-only-password/' \
+            -e 's/^DB_MIGRATION_PASSWORD=.*/DB_MIGRATION_PASSWORD=migration-ci-only-password/' \
             -e 's/^DJANGO_SECRET_KEY=.*/DJANGO_SECRET_KEY=ci-only-key/' \
             .env.production
           export POSTGRES_DB=score_it_container_ci
           export POSTGRES_USER=score_it_container_ci
           export DJANGO_SECRET_KEY=ci-only-key
-          COMPOSE=(docker compose --env-file .env.production --env-file release.env -f compose.production.yaml)
+          COMPOSE=(docker compose --env-file .env.production --env-file release.env -f compose.production.yaml -f compose.maintenance.yaml)
           "${COMPOSE[@]}" -f compose.proxy.yaml config --quiet
           "${COMPOSE[@]}" up -d --pull never --no-build --wait db
-          "${COMPOSE[@]}" run --rm --no-deps --pull never web python manage.py migrate --noinput
+          "${COMPOSE[@]}" run --rm --no-deps --pull never db-admin python deploy/configure_db_roles.py --apply
+          "${COMPOSE[@]}" run --rm --no-deps --pull never migrate
           "${COMPOSE[@]}" up -d --pull never --no-build --wait web
+          "${COMPOSE[@]}" exec -T web python manage.py check_database_security
+          "${COMPOSE[@]}" exec -T web python -c "import os, importlib.util; assert not {'POSTGRES_USER', 'POSTGRES_PASSWORD', 'DB_MIGRATION_USER', 'DB_MIGRATION_PASSWORD'} & os.environ.keys(); assert all(importlib.util.find_spec(name) is None for name in ('pip', 'ensurepip'))"
           "${COMPOSE[@]}" exec -T web python -c "import urllib.request; [urllib.request.urlopen('http://127.0.0.1:8000' + path, timeout=5).read() for path in ['/healthz/', '/login/', '/static/css/app.css']]"
+          source release.env
+          docker run --rm --network none -v "$PWD/Caddyfile.score-it.example:/etc/caddy/Caddyfile:ro" "$CADDY_IMAGE" caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile > "$RUNNER_TEMP/caddy-adapted.json"
           test "$(docker network inspect --format '{{.Internal}}' score-it_backend)" = true
+      - name: Retain vulnerability reports and SBOM
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-security-reports
+          path: ${{ runner.temp }}/releases/*/security/
+          if-no-files-found: warn

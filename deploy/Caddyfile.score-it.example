@@ -1,0 +1,35 @@
+# Merge into the EXISTING Caddyfile; keep all KidsTime sites/global settings.
+# Merge the global formatter into the existing global block as well: proxy
+# errors use the global logger, not just this site's access logger. Keep debug off.
+{
+    log default {
+        format filter {
+            wrap json
+            fields {
+                request>uri replace [redacted]
+                request>headers delete
+                resp_headers delete
+            }
+        }
+    }
+}
+
+(score-it-safe-log) {
+    log {
+        output stdout
+        format filter {
+            wrap json
+            fields {
+                request>uri replace [redacted]
+                request>headers delete
+                resp_headers delete
+            }
+        }
+    }
+}
+
+score-it.example.com {
+    import score-it-safe-log
+    header Referrer-Policy no-referrer
+    reverse_proxy score-it-web:8000
+}
