@@ -110,7 +110,7 @@ jobs:
           "${COMPOSE[@]}" run --rm --no-deps --pull never migrate
           "${COMPOSE[@]}" up -d --pull never --no-build --wait web
           "${COMPOSE[@]}" exec -T web python manage.py check_database_security
-          "${COMPOSE[@]}" exec -T web python -c "import os, importlib.util; assert not {'POSTGRES_USER', 'POSTGRES_PASSWORD', 'DB_MIGRATION_USER', 'DB_MIGRATION_PASSWORD'} & os.environ.keys(); assert importlib.util.find_spec('pip') is None"
+          "${COMPOSE[@]}" exec -T web python -c "import os, importlib.util; assert not {'POSTGRES_USER', 'POSTGRES_PASSWORD', 'DB_MIGRATION_USER', 'DB_MIGRATION_PASSWORD'} & os.environ.keys(); assert all(importlib.util.find_spec(name) is None for name in ('pip', 'ensurepip'))"
           "${COMPOSE[@]}" exec -T web python -c "import urllib.request; [urllib.request.urlopen('http://127.0.0.1:8000' + path, timeout=5).read() for path in ['/healthz/', '/login/', '/static/css/app.css']]"
           source release.env
           docker run --rm --network none -v "$PWD/Caddyfile.score-it.example:/etc/caddy/Caddyfile:ro" "$CADDY_IMAGE" caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile > "$RUNNER_TEMP/caddy-adapted.json"

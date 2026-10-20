@@ -9,6 +9,7 @@ RUN python -m pip install --no-cache-dir --require-hashes -r requirements.bootst
     && python -m pip install --no-cache-dir --require-hashes -r requirements.production.txt \
     && python -m pip check \
     && python -m pip uninstall --yes pip \
+    && rm -rf /usr/local/lib/python3.12/ensurepip \
     && useradd --uid 10001 --create-home app
 COPY . /app
 # This is a build-time key only; the runtime key must be supplied separately.
