@@ -87,7 +87,11 @@ jobs:
           docker version
       - name: Build, load and run the release without external container networking
         run: |
-          bash deploy/make_release.sh "$RUNNER_TEMP/releases"
+          source deploy/images.env
+          for IMAGE in "$PYTHON_SOURCE_IMAGE" "$POSTGRES_SOURCE_IMAGE" "$GO_SOURCE_IMAGE" "$CADDY_SOURCE_IMAGE"; do
+            docker pull --platform linux/amd64 "$IMAGE"
+          done
+          RELEASE_PULL=0 bash deploy/make_release.sh "$RUNNER_TEMP/releases"
           RELEASE="$(git rev-parse HEAD)"
           cd "$RUNNER_TEMP/releases/score-it-$RELEASE"
           bash load_release.sh
