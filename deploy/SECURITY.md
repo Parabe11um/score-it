@@ -251,3 +251,32 @@ https://pkg.go.dev/vuln/GO-2026-6604.
 До пересборки и повторного Scout/Trivy эти изменения не закрывают находки нового
 комплекта. Находки Debian в приложении/PostgreSQL, полная история Git, секреты
 нижних слоёв остальных образов и допуск ИБ остаются отдельными проверками.
+
+
+## Extended audit evidence
+
+CI fetches advertised branch, tag and pull-request head refs into a full clone,
+then runs pinned Gitleaks 8.30.1 across all reachable history. Deleted or
+unadvertised refs and external Git LFS payloads are outside this scope. The
+recorded refs and commit count identify the exact checked history.
+
+The isolated release job also scans every regular file in every saved image
+layer separately, including overwritten and deleted content, plus image config
+and archive member/link metadata. Layer diff IDs and image config digests are
+verified against the saved release. Links are never followed. The documented
+limits are 4 GiB of regular payload per image, 250,000 entries per layer, nested
+archive depth 3, and decode depth 5. Scanner failure or findings block CI.
+
+Repository ignore files, inline allows and baselines are disabled. Built-in
+Gitleaks rules and allowlists still apply. The sole additional exception is the
+exact public Python release signing fingerprint
+`7169605F62C751356D054A26A821E680E5FA6305`, documented in
+https://github.com/docker-library/python/blob/master/Dockerfile-linux.template .
+It is neither a private key nor an authentication credential. Findings reports
+retain only rule, path, line and commit metadata; matched values and source
+lines are never published.
+
+Live staging HTTP checks cover anonymous access to private routes, CSRF rejection
+for mutation routes, secure CSRF cookies, framing/MIME headers, login lockout and
+log token privacy. These are bounded automated checks, not a full penetration
+test or approval of residual OS CVEs.
