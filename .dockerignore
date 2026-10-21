@@ -13,4 +13,5 @@ releases
 upload
 *.tar
 *.tar.gz
+**/node_modules
 

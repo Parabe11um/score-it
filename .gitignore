@@ -13,6 +13,7 @@ staticfiles/
 .coverage
 htmlcov/
 .pytest_cache/
+**/node_modules/
 .idea/
 .vscode/
 .DS_Store
