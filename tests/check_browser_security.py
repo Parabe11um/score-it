@@ -95,8 +95,9 @@ def wait_https(base):
                 require(response.status == 200 and response.headers.get('Referrer-Policy') == 'strict-origin',
                         'Temporary HTTPS proxy did not return the expected policy')
             return
-        except Exception:
-            require(time.monotonic() < deadline, 'Temporary HTTPS Caddy did not become ready')
+        except Exception as error:
+            require(time.monotonic() < deadline,
+                    'Temporary HTTPS Caddy did not become ready: ' + str(error))
             time.sleep(0.2)
 
 
@@ -107,7 +108,9 @@ def loopback_base(item):
             'Proxy HTTPS port was not published only to loopback')
     port = bindings[0].get('HostPort', '')
     require(port.isdigit() and 0 < int(port) < 65536, 'Proxy HTTPS port is invalid')
-    return 'https://127.0.0.1:' + port
+    # A hostname sends TLS SNI. With an IP URL, the client omits SNI and
+    # Caddy sees its private Docker address rather than the published IP.
+    return 'https://localhost:' + port
 
 
 def redact(message, fixture):
@@ -149,14 +152,14 @@ def run(args):
             directory = Path(directory)
             subprocess.run(['openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1',
                             '-keyout', str(directory / 'key.pem'), '-out', str(directory / 'cert.pem'),
-                            '-subj', '/CN=127.0.0.1', '-addext', 'subjectAltName=IP:127.0.0.1'],
+                            '-subj', '/CN=localhost', '-addext', 'subjectAltName=DNS:localhost'],
                            capture_output=True, text=True, check=True, timeout=20)
             template = (ROOT / 'deploy/Caddyfile.score-it.example').read_text()
             require(template.count('score-it.example.com {') == 1 and template.count('score-it-web:8000') == 1,
                     'Proxy template changed; review the test adaptation')
             template = template.replace('{\n', '{\n    admin off\n', 1)
             template = template.replace('score-it.example.com {',
-                                        'https://127.0.0.1 {\n    tls /certs/cert.pem /certs/key.pem')
+                                        'https://localhost {\n    tls /certs/cert.pem /certs/key.pem')
             template = template.replace('score-it-web:8000', web + ':8000')
             config = directory / 'Caddyfile'
             config.write_text(template)

@@ -6,7 +6,7 @@ const {chromium, expect} = require('@playwright/test');
 
 const input = JSON.parse(fs.readFileSync(0, 'utf8'));
 const {fixture, base_url: base} = input;
-assert.match(base, /^https:\/\/127\.0\.0\.1:[0-9]+$/);
+assert.match(base, /^https:\/\/localhost:[0-9]+$/);
 const completed = [];
 let activeCheck = '';
 let browser;

@@ -92,7 +92,7 @@ class BrowserStageGuardTests(unittest.TestCase):
 
     def test_loopback_proxy_port_mapping_is_accepted(self):
         self.assertEqual(module.loopback_base({'NetworkSettings': {'Ports': {'443/tcp': [
-            {'HostIp': '127.0.0.1', 'HostPort': '49152'}]}}}), 'https://127.0.0.1:49152')
+            {'HostIp': '127.0.0.1', 'HostPort': '49152'}]}}}), 'https://localhost:49152')
 
 
 if __name__ == '__main__':
