@@ -81,6 +81,19 @@ class BrowserStageGuardTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'one staging web'):
             module.preflight(self.args)
 
+    def test_missing_proxy_port_mapping_is_rejected(self):
+        with self.assertRaisesRegex(RuntimeError, 'not published only to loopback'):
+            module.loopback_base({'NetworkSettings': {'Ports': {'443/tcp': None}}})
+
+    def test_public_proxy_port_mapping_is_rejected(self):
+        with self.assertRaisesRegex(RuntimeError, 'not published only to loopback'):
+            module.loopback_base({'NetworkSettings': {'Ports': {'443/tcp': [
+                {'HostIp': '0.0.0.0', 'HostPort': '49152'}]}}})
+
+    def test_loopback_proxy_port_mapping_is_accepted(self):
+        self.assertEqual(module.loopback_base({'NetworkSettings': {'Ports': {'443/tcp': [
+            {'HostIp': '127.0.0.1', 'HostPort': '49152'}]}}}), 'https://127.0.0.1:49152')
+
 
 if __name__ == '__main__':
     unittest.main()

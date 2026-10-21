@@ -100,6 +100,16 @@ def wait_https(base):
             time.sleep(0.2)
 
 
+def loopback_base(item):
+    bindings = (item['NetworkSettings'].get('Ports') or {}).get('443/tcp')
+    require(isinstance(bindings, list) and len(bindings) == 1
+            and bindings[0].get('HostIp') == '127.0.0.1',
+            'Proxy HTTPS port was not published only to loopback')
+    port = bindings[0].get('HostPort', '')
+    require(port.isdigit() and 0 < int(port) < 65536, 'Proxy HTTPS port is invalid')
+    return 'https://127.0.0.1:' + port
+
+
 def redact(message, fixture):
     message = str(message)
     if fixture:
@@ -118,6 +128,7 @@ def run(args):
                   production_used=False, ok=False)
     fixture = None
     proxy = None
+    frontend = None
     selected = None
     errors = []
     try:
@@ -149,19 +160,25 @@ def run(args):
             template = template.replace('score-it-web:8000', web + ':8000')
             config = directory / 'Caddyfile'
             config.write_text(template)
+            # Docker does not publish ports for an internal-only endpoint.
+            # Only the ephemeral proxy joins this second bridge; web and DB
+            # remain on their original private network without host ports.
+            frontend = docker('network', 'create', '--driver', 'bridge',
+                              '--label', 'score-it.browser-test=' + nonce,
+                              'score-it-browser-' + nonce).strip()
             proxy = docker('create', '--pull=never', '--name', 'score-it-browser-' + nonce,
-                           '--network', network, '--publish', '127.0.0.1::443/tcp', '--read-only',
+                           '--network', frontend, '--publish', '127.0.0.1::443/tcp', '--read-only',
                            '--tmpfs', '/data:rw,mode=1777', '--tmpfs', '/config:rw,mode=1777',
                            '--tmpfs', '/tmp:rw,mode=1777', '--security-opt', 'no-new-privileges:true',
                            '--mount', 'type=bind,source=' + str(config) + ',target=/etc/caddy/Caddyfile,readonly',
                            '--mount', 'type=bind,source=' + str(directory) + ',target=/certs,readonly',
                            '--entrypoint', 'caddy', caddy_image, 'run', '--config', '/etc/caddy/Caddyfile',
                            '--adapter', 'caddyfile').strip()
+            docker('network', 'connect', network, proxy)
             docker('start', proxy)
             item = json.loads(docker('inspect', proxy))[0]
-            bindings = item['NetworkSettings']['Ports']['443/tcp']
-            require(len(bindings) == 1 and bindings[0]['HostIp'] == '127.0.0.1', 'Proxy is not bound only to loopback')
-            base = 'https://127.0.0.1:' + bindings[0]['HostPort']
+            base = loopback_base(item)
+            report['proxy_bound_only_to_loopback'] = True
             wait_https(base)
             fixture = fixture_action(web, args, 'seed', nonce=nonce)
             result = subprocess.run(['node', str(ROOT / 'tests/browser/check.cjs')],
@@ -191,6 +208,12 @@ def run(args):
                 report['proxy_removed'] = True
             except Exception as error:
                 errors.append('Proxy cleanup failed: ' + redact(error, fixture))
+        if frontend is not None:
+            try:
+                docker('network', 'rm', frontend)
+                report['proxy_network_removed'] = True
+            except Exception as error:
+                errors.append('Proxy network cleanup failed: ' + redact(error, fixture))
         report['finished_utc'] = datetime.now(timezone.utc).isoformat()
         report['errors'] = errors
         if errors:
