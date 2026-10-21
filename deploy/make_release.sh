@@ -56,6 +56,7 @@ trap 'rm -rf "$BUILD_DIR"' EXIT
 git archive HEAD | tar -x -C "$BUILD_DIR"
 docker build "$BUILD_PULL" --platform "$PLATFORM" -f "$BUILD_DIR/Dockerfile.production" \
   --build-arg "PYTHON_IMAGE=$PYTHON_SOURCE_IMAGE" \
+  --build-arg "BUILD_TLS_COMPAT=$TLS_COMPAT" \
   --label "org.opencontainers.image.revision=$RELEASE" \
   -t "$APP_IMAGE" "$BUILD_DIR"
 docker build "$BUILD_PULL" --platform "$PLATFORM" -f "$BUILD_DIR/deploy/Dockerfile.postgres" \

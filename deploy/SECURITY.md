@@ -292,3 +292,16 @@ records above describe the prior binaries, not the rebuilt release.
 
 References: https://go.dev/doc/devel/release#go1.26.10 and the exact Trivy JSON
 retained for the failed candidate in Actions run 39570909958.
+
+
+DLA-4845-1 also appeared for the Python image CA bundle during this scan. The
+app build upgrades only `ca-certificates` to `20250419~deb12u2`, using normal
+Debian signed repository verification; an apt simulation rejects removal or
+changes to other packages. Both certificate-trust advisories are explicit
+release blockers. The PostgreSQL image does not ship the ca-certificates package.
+
+Caddy also retains its build-time package dependency list and the SHA256 of the
+built executable. Archive checks require that hash to match the delivered
+binary and reject any `golang.org/x/crypto/openpgp` import, including subpackages.
+This is build provenance evidence for GO-2026-5932, not a blanket waiver of
+other x/crypto advisories.

@@ -50,6 +50,8 @@ for name in ('app', 'postgres', 'caddy'):
     summary.append(f'{name}: vulnerability_records={len(vulnerabilities)} secrets={len(secrets)}')
     if secrets:
         blocked.append(name + ': secret findings require review')
+    if any(v['VulnerabilityID'] in ('CVE-2026-111943', 'DLA-4845-1') for v in vulnerabilities):
+        blocked.append(name + ': certificate trust security update is still missing')
     if name in ('app', 'postgres'):
         sqlite = [p for result in report.get('Results', [])
                   for p in result.get('Packages') or []
