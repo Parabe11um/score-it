@@ -22,7 +22,7 @@ ARG BUILD_TLS_COMPAT=0
 RUN --mount=type=bind,source=deploy/build_tls.sh,target=/run/score-it-build-tls.sh,readonly \
     sh /run/score-it-build-tls.sh "$BUILD_TLS_COMPAT" sh -ec '\
     apt-get update \
-    && apt-get install -y --no-install-recommends build-essential curl dpkg-dev \
+    && apt-get install -y --no-install-recommends build-essential ca-certificates curl dpkg-dev \
     && sed "s/^deb /deb-src /" /etc/apt/sources.list.d/pgdg.list >/etc/apt/sources.list.d/score-it-build-src.list \
     && apt-get update \
     && apt-get build-dep -y --no-install-recommends --arch-only \
