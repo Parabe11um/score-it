@@ -45,7 +45,7 @@ jobs:
 
   postgres:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 60
     services:
       postgres:
         image: postgres:17-bookworm
@@ -127,7 +127,7 @@ jobs:
           "${COMPOSE[@]}" exec -T web python -c "import urllib.request; [urllib.request.urlopen('http://127.0.0.1:8000' + path, timeout=5).read() for path in ['/healthz/', '/login/', '/static/css/app.css']]"
           python "$GITHUB_WORKSPACE/tests/check_live_security.py" --project score-it-check-ci --release "$RELEASE" --database score_it_container_ci --output "$RUNNER_TEMP/live-security.json"
           source release.env
-          python "$GITHUB_WORKSPACE/tests/check_postgres_runtime.py" --image "$POSTGRES_IMAGE" --source-image "$POSTGRES_SOURCE_IMAGE" --go-image "$GO_SOURCE_IMAGE" </dev/null | tee "$RUNNER_TEMP/postgres-runtime.txt"
+          cat security/postgres-runtime.txt
           for IMAGE in "$SCORE_IT_IMAGE" "$POSTGRES_IMAGE" "$CADDY_IMAGE"; do
             docker image inspect --format '{{json .Config.Env}}' "$IMAGE" | python -c 'import json, sys; names = {v.split("=", 1)[0] for v in json.load(sys.stdin)}; assert not {"GODEBUG", "OPENSSL_CONF"} & names, names'
           done

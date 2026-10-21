@@ -62,6 +62,13 @@ for name in ('app', 'postgres', 'caddy'):
                    for v in result.get('Vulnerabilities') or [] if v['Severity'] in ('HIGH', 'CRITICAL')]
         if high_go:
             blocked.append(name + ': unresolved Go module HIGH/CRITICAL findings')
+    if name == 'postgres':
+        removed = {'libxml2', 'libxslt1.1', 'libllvm19', 'libz3-4', 'dirmngr',
+                   'gnupg-l10n', 'gnupg-utils', 'gpg-agent', 'gpgconf', 'gpgsm',
+                   'pinentry-curses', 'libksba8', 'libnpth0', 'libassuan0', 'libncursesw6'}
+        if any(p.get('Name') in removed for result in report.get('Results', [])
+               for p in result.get('Packages') or []):
+            blocked.append('postgres: unused optional feature/dependency is still installed')
 (root / 'summary.txt').write_text('\n'.join(summary + blocked) + '\n')
 print('\n'.join(summary + blocked))
 if blocked:

@@ -17,7 +17,23 @@ RUN --mount=type=bind,source=deploy/build_tls.sh,target=/run/score-it-build-tls.
     && go build -trimpath -ldflags "-d -w" -o /out/gosu . \
     && go version -m /out/gosu'
 
+FROM ${POSTGRES_IMAGE} AS postgres-builder
+ARG BUILD_TLS_COMPAT=0
+RUN --mount=type=bind,source=deploy/build_tls.sh,target=/run/score-it-build-tls.sh,readonly \
+    sh /run/score-it-build-tls.sh "$BUILD_TLS_COMPAT" sh -ec '\
+    apt-get update \
+    && apt-get install -y --no-install-recommends build-essential curl dpkg-dev \
+    && sed "s/^deb /deb-src /" /etc/apt/sources.list.d/pgdg.list >/etc/apt/sources.list.d/score-it-build-src.list \
+    && apt-get update \
+    && apt-get build-dep -y --no-install-recommends --arch-only \
+       --build-profiles=pkg.postgresql.nollvm,nodoc,nocheck "postgresql-17=$PG_VERSION"'
+RUN --mount=type=bind,source=deploy/build_tls.sh,target=/run/score-it-build-tls.sh,readonly \
+    --mount=type=bind,source=deploy/build_postgres_minimal.sh,target=/run/score-it-build-postgres.sh,readonly \
+    sh /run/score-it-build-tls.sh "$BUILD_TLS_COMPAT" sh /run/score-it-build-postgres.sh
+
 FROM ${POSTGRES_IMAGE} AS runtime-files
+RUN --mount=type=bind,from=postgres-builder,source=/out,target=/run/score-it-postgres,readonly \
+    dpkg -i /run/score-it-postgres/postgresql-17_17.11-1.pgdg12+2+scoreit1_amd64.deb
 COPY --from=gosu-builder /out/gosu /usr/local/bin/gosu
 RUN gosu --version && gosu postgres id
 # Debian's ssl-cert package ships an image-wide test key. PostgreSQL in this
@@ -26,10 +42,14 @@ RUN gosu --version && gosu postgres id
 RUN rm -f /etc/ssl/private/ssl-cert-snakeoil.key /etc/ssl/certs/ssl-cert-snakeoil.pem
 RUN --mount=type=bind,source=deploy/prune_runtime_sqlite.sh,target=/run/score-it-prune-sqlite.sh,readonly \
     sh /run/score-it-prune-sqlite.sh postgres
+RUN --mount=type=bind,source=deploy/prune_postgres_features.sh,target=/run/score-it-prune-features.sh,readonly \
+    sh /run/score-it-prune-features.sh
+COPY --from=postgres-builder /out/postgres-*.txt /out/postgres-build-packages.tsv /usr/share/score-it/
 
 # Copy the resulting filesystem, not the upstream image's layers: those still
 # contain the original gosu and the image-wide test certificate/key.
-# PostgreSQL and the retained Debian libraries keep their pinned upstream versions.
+# Retained Debian libraries keep their pinned runtime versions. The rebuilt
+# PostgreSQL package retains Debian's patches, paths and package inventory.
 FROM scratch
 COPY --from=runtime-files / /
 # FROM scratch does not inherit image configuration. Keep these values aligned
@@ -38,7 +58,7 @@ ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/lib/p
     GOSU_VERSION=1.19 \
     LANG=en_US.utf8 \
     PG_MAJOR=17 \
-    PG_VERSION=17.11-1.pgdg12+2 \
+    PG_VERSION=17.11-1.pgdg12+2+scoreit1 \
     PGDATA=/var/lib/postgresql/data
 VOLUME /var/lib/postgresql/data
 ENTRYPOINT ["docker-entrypoint.sh"]
