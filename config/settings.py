@@ -44,6 +44,7 @@ MIDDLEWARE = [
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
+    "config.upload_limits.UploadLimitMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
@@ -136,6 +137,12 @@ LOGOUT_REDIRECT_URL = "login"
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Lax"
 CSRF_COOKIE_SAMESITE = "Lax"
+FILE_UPLOAD_HANDLERS = [
+    'config.upload_limits.BoundedUploadHandler',
+    'django.core.files.uploadhandler.MemoryFileUploadHandler',
+    'django.core.files.uploadhandler.TemporaryFileUploadHandler',
+]
+DATA_UPLOAD_MAX_NUMBER_FILES = 1
 # Native POST forms need a non-null Origin (or an HTTPS Referer) for CSRF.
 # Send only the origin, so room/invitation tokens never enter the Referer.
 SECURE_REFERRER_POLICY = "strict-origin"

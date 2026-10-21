@@ -186,6 +186,10 @@ jobs:
           NODE_PATH="$RUNNER_TEMP/browser-test-tools/node_modules" \
           python tests/check_browser_security.py --project score-it-check-ci --release "$RELEASE" \
             --database score_it_container_ci --output "$RUNNER_TEMP/browser-security.json"
+      - name: Verify actual parser resource limits and synthetic import corpus in the production image
+        run: |
+          docker exec score-it-check-ci-web-1 python /app/tests/check_import_resources.py --output /tmp/import-resources.json
+          docker cp score-it-check-ci-web-1:/tmp/import-resources.json "$RUNNER_TEMP/import-resources.json"
       - name: Scan every saved image layer, including deleted and overwritten files
         run: |
           set -euo pipefail
@@ -216,5 +220,6 @@ jobs:
             ${{ runner.temp }}/layer-secrets/
             ${{ runner.temp }}/live-security.json
             ${{ runner.temp }}/browser-security.json
+            ${{ runner.temp }}/import-resources.json
             ${{ runner.temp }}/postgres-runtime.txt
           if-no-files-found: warn

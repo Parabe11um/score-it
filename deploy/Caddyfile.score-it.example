@@ -30,6 +30,13 @@
 
 score-it.example.com {
     import score-it-safe-log
+    # Reject a known oversized body before proxying; otherwise an upstream
+    # early 413 can race the body stream and surface as a proxy 502.
+    @oversized expression `{http.request.header.Content-Length} != "" && int({http.request.header.Content-Length}) > 11534336`
+    respond @oversized "Слишком большой запрос. Загрузите один файл до 10 МБ." 413
+    request_body {
+        max_size 11MiB
+    }
     header >Referrer-Policy strict-origin
     reverse_proxy score-it-web:8000
 }
