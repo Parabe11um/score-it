@@ -27,6 +27,9 @@ def binary(interpreter=False):
 def payload(interpreter=False):
     values = {name: b"data" for name in PAYLOAD}
     values["usr/bin/caddy"] = binary(interpreter)
+    values['usr/share/caddy/build-deps.txt'] = (
+        'github.com/caddyserver/caddy/v2\n' + hashlib.sha256(values['usr/bin/caddy']).hexdigest()
+        + '  /out/caddy\n').encode()
     values["etc/ssl/certs/ca-certificates.crt"] = b"-----BEGIN CERTIFICATE-----\n" * 21
     return values
 
@@ -83,6 +86,17 @@ def saved_image(path, layers, oci=False, image=IMAGE):
 
 
 class CaddyPayloadTests(unittest.TestCase):
+    def test_rejects_openpgp_imports_and_unbound_evidence(self):
+        for dependency in ('golang.org/x/crypto/openpgp', 'golang.org/x/crypto/openpgp/packet'):
+            data = payload()
+            data['usr/share/caddy/build-deps.txt'] = dependency.encode() + b'\n' + data['usr/share/caddy/build-deps.txt']
+            with self.assertRaisesRegex(RuntimeError, 'OpenPGP is imported'):
+                self.verify([layer_bytes(data)])
+        data = payload()
+        data['usr/share/caddy/build-deps.txt'] = b'wrong binary hash'
+        with self.assertRaisesRegex(RuntimeError, 'does not match'):
+            self.verify([layer_bytes(data)])
+
     def verify(self, layers, oci=False):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "caddy.tar"

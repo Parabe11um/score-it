@@ -22,7 +22,10 @@ RUN --mount=type=bind,source=deploy/build_tls.sh,target=/run/score-it-build-tls.
     && go mod tidy \
     && go mod verify \
     && go build -trimpath -ldflags "-s -w -X github.com/caddyserver/caddy/v2.CustomVersion=v2.11.7-scoreit.1" -o /out/caddy . \
-    && go version -m /out/caddy'
+    && go version -m /out/caddy \
+    && go list -deps . > /out/caddy-build-deps.txt \
+    && ! grep -E "^golang.org/x/crypto/openpgp(/|$)" /out/caddy-build-deps.txt \
+    && sha256sum /out/caddy >> /out/caddy-build-deps.txt'
 
 FROM ${CADDY_IMAGE} AS runtime-files
 ARG BUILD_TLS_COMPAT=0
@@ -41,6 +44,7 @@ RUN set -eu; \
     cp /etc/caddy/Caddyfile /runtime/etc/caddy/; \
     cp /usr/share/caddy/index.html /runtime/usr/share/caddy/
 COPY --from=builder /out/caddy /runtime/usr/bin/caddy
+COPY --from=builder /out/caddy-build-deps.txt /runtime/usr/share/caddy/build-deps.txt
 COPY --from=builder /src/LICENSE /runtime/usr/share/licenses/caddy/LICENSE
 COPY --from=builder /usr/local/go/LICENSE /runtime/usr/share/licenses/go/LICENSE
 COPY --from=builder /usr/local/go/lib/time/zoneinfo.zip /runtime/usr/share/zoneinfo/zoneinfo.zip
