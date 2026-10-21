@@ -139,6 +139,21 @@ def check_existing_volume(source, target):
                       "--set", "ON_ERROR_STOP=1", "--username", "postgres",
                       "--dbname", database, "--command", statement)
 
+    def preflight(container, blocked=False):
+        script = (Path(__file__).resolve().parents[1] /
+                  'deploy/postgres_feature_preflight.sql').read_text()
+        result = subprocess.run(
+            ['docker', 'exec', '-i', '--env', 'PGPASSWORD=' + password,
+             '--user', 'postgres', container, 'psql', '-X', '-h', '127.0.0.1',
+             '-U', 'postgres', '-d', database],
+            input=script, capture_output=True, text=True, timeout=15)
+        if blocked:
+            require(result.returncode != 0 and 'POSTGRES_PREFLIGHT_BLOCKED' in result.stderr,
+                    'Feature preflight accepted an XML column')
+        else:
+            require(result.returncode == 0 and 'POSTGRES_FEATURE_PREFLIGHT_OK' in result.stdout,
+                    'Feature preflight rejected a compatible database')
+
     def ready(container):
         deadline = time.monotonic() + 45
         while True:
@@ -160,6 +175,12 @@ def check_existing_volume(source, target):
         volume_created = True
         previous = create(source, "-previous")
         ready(previous)
+        preflight(previous)
+        sql(previous, 'CREATE TABLE xml_feature_probe (payload xml)')
+        preflight(previous, blocked=True)
+        sql(previous, 'DROP TABLE xml_feature_probe')
+        preflight(previous)
+        print('POSTGRES_FEATURE_PREFLIGHT_REJECTIONS_OK', flush=True)
         sql(previous, "CREATE TABLE runtime_probe (id integer PRIMARY KEY, note text NOT NULL); "
                       "INSERT INTO runtime_probe VALUES (101, 'проверка данных');")
         sql(previous, "CREATE COLLATION runtime_icu (provider=icu, locale='und'); "
