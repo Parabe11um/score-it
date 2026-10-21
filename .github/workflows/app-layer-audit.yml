@@ -1,0 +1,29 @@
+name: Application layer secret audit
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  audit-app:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Build the application without waiting for the PostgreSQL compiler
+        run: |
+          source deploy/images.env
+          docker build --platform linux/amd64 --build-arg "PYTHON_IMAGE=$PYTHON_SOURCE_IMAGE" --build-arg BUILD_TLS_COMPAT=1 -f Dockerfile.production -t score-it:layer-audit .
+          docker image save score-it:layer-audit -o "$RUNNER_TEMP/app.tar"
+          docker image inspect --format '{{.Id}}' score-it:layer-audit > "$RUNNER_TEMP/app.config"
+      - name: Scan all application layers
+        run: |
+          sh deploy/install_gitleaks.sh "$RUNNER_TEMP/secret-scanner"
+          python tests/check_secret_audit.py --gitleaks "$RUNNER_TEMP/secret-scanner/gitleaks" --archive "$RUNNER_TEMP/app.tar" --image score-it:layer-audit --expected-config "$(cat "$RUNNER_TEMP/app.config")" --output "$RUNNER_TEMP/app-layer-audit.json"
+      - name: Retain redacted diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: app-layer-audit
+          path: ${{ runner.temp }}/app-layer-audit.json

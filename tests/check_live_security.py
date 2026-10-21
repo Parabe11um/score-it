@@ -90,6 +90,8 @@ def check_inside(args):
             if key.lower() == "set-cookie":
                 cookies.load(value)
         require("csrftoken" in cookies, "Login form did not issue a CSRF cookie")
+        require(cookies['csrftoken']['secure'] and cookies['csrftoken']['samesite'] == 'Lax',
+                'CSRF cookie lacks production security attributes')
         form = {"username": name, "password": password}
         if csrf:
             form["csrfmiddlewaretoken"] = cookies["csrftoken"].value
@@ -99,6 +101,25 @@ def check_inside(args):
 
     checks = {}
     try:
+        for path in ('/', '/projects/new/', '/projects/2147483647/',
+                     '/sessions/2147483647/', '/sprints/2147483647/'):
+            status, headers = request(path)
+            headers = {key.lower(): value for key, value in headers}
+            require(status == 302 and headers.get('location', '').startswith('/login/?next='),
+                    'Anonymous request bypassed authentication')
+        checks['anonymous_private_routes_rejected'] = True
+        for path in ('/projects/new/', '/projects/2147483647/tasks/import/file/',
+                     '/sessions/2147483647/delete/', '/sprints/2147483647/delete/'):
+            require(request(path, {'probe': 'csrf'})[0] == 403,
+                    'Mutation route accepted a request without CSRF')
+        checks['mutation_routes_require_csrf'] = True
+        for path in ('/login/', '/healthz/'):
+            status, headers = request(path)
+            headers = {key.lower(): value for key, value in headers}
+            require(status == 200 and headers.get('x-content-type-options') == 'nosniff',
+                    'Missing MIME sniffing protection')
+            require(headers.get('x-frame-options') == 'DENY', 'Missing framing protection')
+        checks['browser_security_headers'] = True
         for name, password in zip(names, passwords):
             user_model.objects.create_user(name, password=password, is_staff=True)
         require(login("/login/", names[0], passwords[0])[0] == 302, "Baseline login failed")

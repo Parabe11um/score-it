@@ -27,6 +27,7 @@ PAYLOAD = {
     "etc/passwd", "etc/group", "etc/caddy/Caddyfile", "usr/share/caddy/index.html",
     "usr/share/licenses/caddy/LICENSE", "usr/share/licenses/go/LICENSE",
     "usr/share/zoneinfo/zoneinfo.zip",
+    "usr/share/caddy/build-deps.txt",
 }
 TLS_CLIENT = r'''
 import ssl, sys, time, urllib.error, urllib.request
@@ -121,6 +122,7 @@ def check_archive(path, image, platform="linux/amd64"):
     links = []
     roots = b""
     binary = b""
+    dependencies = b""
     with Archive(path) as source:
         config, layers = layer_names(source, image, platform)
         env = dict(v.split("=", 1) for v in config["config"].get("Env", []))
@@ -147,17 +149,28 @@ def check_archive(path, image, platform="linux/amd64"):
                                 "Unexpected runtime file: " + name)
                         require(name not in files, "Overwritten file retained in layers: " + name)
                         files[name] = item.size
-                        if name in ("usr/bin/caddy", "etc/ssl/certs/ca-certificates.crt"):
+                        if name in ("usr/bin/caddy", "etc/ssl/certs/ca-certificates.crt",
+                                    "usr/share/caddy/build-deps.txt"):
                             with layer.extractfile(item) as content:
                                 raw = content.read()
                             if name == "usr/bin/caddy":
                                 binary = raw
+                            elif name == "usr/share/caddy/build-deps.txt":
+                                dependencies = raw
                             else:
                                 roots = raw
     require(set(files) == PAYLOAD, "Required runtime data files are missing")
     require(links == [("etc/ssl/cert.pem", "certs/ca-certificates.crt")],
             "Unexpected runtime symlink")
     require(roots.count(b"-----BEGIN CERTIFICATE-----") > 20, "CA bundle is missing")
+    deps = dependencies.decode('utf-8').splitlines()
+    require(deps and deps[-1] == hashlib.sha256(binary).hexdigest() + '  /out/caddy',
+            'Caddy dependency evidence does not match the saved executable')
+    require('github.com/caddyserver/caddy/v2' in deps,
+            'Caddy dependency evidence is incomplete')
+    require(not any(p == 'golang.org/x/crypto/openpgp'
+                    or p.startswith('golang.org/x/crypto/openpgp/') for p in deps),
+            'OpenPGP is imported by Caddy')
     require(binary[:6] == b"\x7fELF\x02\x01", "Expected a little-endian ELF64 binary")
     offset = struct.unpack_from("<Q", binary, 32)[0]
     size, count = struct.unpack_from("<HH", binary, 54)
@@ -277,7 +290,7 @@ def main():
     docker("image", "inspect", args.client_image)
     output = docker("run", "--rm", "--pull=never", "--network", "none",
                     "--entrypoint", "caddy", info["Id"], "build-info")
-    require(re.search(r"^go\s+go1[.]26[.]9$", output, re.M), "Unexpected Go version")
+    require(re.search(r"^go\s+go1[.]26[.]10$", output, re.M), "Unexpected Go version")
     require(re.search(r"^dep\s+golang.org/x/net\s+v0[.]60[.]0\s", output, re.M),
             "Unexpected x/net version")
     with tempfile.TemporaryDirectory(prefix="score-it-caddy-runtime-") as temp:
@@ -288,6 +301,7 @@ def main():
         require(json.loads(docker("image", "inspect", args.image))[0]["Id"] == info["Id"],
                 "Caddy tag changed during export")
         print("CADDY_ARCHIVE_PAYLOAD_OK", flush=True)
+        print("CADDY_OPENPGP_NOT_IMPORTED_OK", flush=True)
         check_runtime(info["Id"], args.client_image, roots, directory)
     print("CADDY_RUNTIME_OK", flush=True)
 

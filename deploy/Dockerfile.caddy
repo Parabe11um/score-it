@@ -1,6 +1,6 @@
 # Caddy 2.11.7's upstream go.mod still uses x/net 0.59.0. Rebuild the binary;
 # upgrading Alpine alone cannot fix dependencies embedded in a Go executable.
-ARG GO_IMAGE=golang:1.26.9-alpine3.24@sha256:3082400e369fa24d5fc60bca20edab3f6d604e0c5a690ec66b295eff4dd87ade
+ARG GO_IMAGE=golang:1.26.10-alpine3.24@sha256:9ce231b28998b32e116927c61aa5c406183061d4f3f2d61b292c88e7f6bdf7ca
 ARG CADDY_IMAGE=caddy:2.11.7-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f
 FROM ${GO_IMAGE} AS builder
 ARG BUILD_TLS_COMPAT=0
@@ -22,7 +22,10 @@ RUN --mount=type=bind,source=deploy/build_tls.sh,target=/run/score-it-build-tls.
     && go mod tidy \
     && go mod verify \
     && go build -trimpath -ldflags "-s -w -X github.com/caddyserver/caddy/v2.CustomVersion=v2.11.7-scoreit.1" -o /out/caddy . \
-    && go version -m /out/caddy'
+    && go version -m /out/caddy \
+    && go list -deps . > /out/caddy-build-deps.txt \
+    && ! grep -E "^golang.org/x/crypto/openpgp(/|$)" /out/caddy-build-deps.txt \
+    && sha256sum /out/caddy >> /out/caddy-build-deps.txt'
 
 FROM ${CADDY_IMAGE} AS runtime-files
 ARG BUILD_TLS_COMPAT=0
@@ -41,6 +44,7 @@ RUN set -eu; \
     cp /etc/caddy/Caddyfile /runtime/etc/caddy/; \
     cp /usr/share/caddy/index.html /runtime/usr/share/caddy/
 COPY --from=builder /out/caddy /runtime/usr/bin/caddy
+COPY --from=builder /out/caddy-build-deps.txt /runtime/usr/share/caddy/build-deps.txt
 COPY --from=builder /src/LICENSE /runtime/usr/share/licenses/caddy/LICENSE
 COPY --from=builder /usr/local/go/LICENSE /runtime/usr/share/licenses/go/LICENSE
 COPY --from=builder /usr/local/go/lib/time/zoneinfo.zip /runtime/usr/share/zoneinfo/zoneinfo.zip

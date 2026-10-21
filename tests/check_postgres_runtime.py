@@ -20,12 +20,26 @@ import uuid
 
 # Reuse the tested Docker-save/OCI archive traversal and Docker command wrapper.
 from check_caddy_runtime import Archive, docker, layer_names, require
+from check_sqlite_payload import installed_packages
 
 
 GOSU = "usr/local/bin/gosu"
 TEST_CERTIFICATE = {
     "etc/ssl/private/ssl-cert-snakeoil.key", "etc/ssl/certs/ssl-cert-snakeoil.pem",
 }
+REMOVED_PACKAGES = {
+    "libxml2", "libxslt1.1", "libllvm19", "libz3-4", "dirmngr", "gnupg-l10n",
+    "gnupg-utils", "gpg-agent", "gpgconf", "gpgsm", "pinentry-curses",
+    "libksba8", "libnpth0", "libassuan0", "libncursesw6",
+}
+
+
+def optional_feature_path(name):
+    basename = PurePosixPath(name).name.removeprefix(".wh.")
+    return (basename.startswith(("libxml2.so", "libxslt.so", "libexslt.so", "libLLVM", "libz3.so"))
+            or basename in {"pgxml.so", "llvmjit.so", "llvmjit_types.bc"}
+            or "/postgresql/17/lib/bitcode/" in "/" + name
+            or basename in {"dirmngr", "gpg-agent", "gpgconf", "gpgsm", "pinentry-curses"})
 
 
 def check_archive(path, image):
@@ -44,6 +58,14 @@ def check_archive(path, image):
                                 "Unsafe layer path")
                         require(name not in TEST_CERTIFICATE,
                                 "Image-wide test certificate/key retained in layers")
+                        require(not optional_feature_path(name),
+                                "Removed PostgreSQL feature retained in layers: " + name)
+                        if name == "var/lib/dpkg/status":
+                            require(item.isfile() and item.size < 16 * 1024 * 1024,
+                                    "Invalid PostgreSQL package inventory")
+                            with layer.extractfile(item) as content:
+                                require(not REMOVED_PACKAGES & installed_packages(content.read()),
+                                        "Removed PostgreSQL package retained in layers")
                         require(name != "usr/local/bin/.wh.gosu", "Deleted gosu retained in layers")
                         if name != GOSU:
                             continue
@@ -73,14 +95,18 @@ def check_metadata(source, target):
                 "PostgreSQL image configuration changed: " + key)
     environments = [dict(value.split("=", 1) for value in config.get("Env", []))
                     for config in (source, target)]
-    require(environments[0] == environments[1], "PostgreSQL image environment changed")
+    expected_env = environments[0].copy()
+    if "PG_VERSION" in expected_env:
+        require(expected_env["PG_VERSION"] == "17.11-1.pgdg12+2", "Unexpected upstream PostgreSQL")
+        expected_env["PG_VERSION"] += "+scoreit1"
+    require(expected_env == environments[1], "PostgreSQL image environment changed")
     require(environments[1].get("PG_MAJOR") == "17", "Expected PostgreSQL 17")
     require(not {"GODEBUG", "OPENSSL_CONF"}.intersection(environments[1]),
             "Build-only TLS settings leaked into runtime")
 
 
 def check_build_info(output):
-    require(re.search(r"^\s*/probe/gosu:\s+go1[.]26[.]9$", output, re.M),
+    require(re.search(r"^\s*/probe/gosu:\s+go1[.]26[.]10$", output, re.M),
             "Unexpected gosu Go version")
     for module, version in (("github.com/moby/sys/user", "v0.4.1"),
                             ("golang.org/x/sys", "v0.48.0")):
@@ -113,6 +139,21 @@ def check_existing_volume(source, target):
                       "--set", "ON_ERROR_STOP=1", "--username", "postgres",
                       "--dbname", database, "--command", statement)
 
+    def preflight(container, blocked=False):
+        script = (Path(__file__).resolve().parents[1] /
+                  'deploy/postgres_feature_preflight.sql').read_text()
+        result = subprocess.run(
+            ['docker', 'exec', '-i', '--env', 'PGPASSWORD=' + password,
+             '--user', 'postgres', container, 'psql', '-X', '-h', '127.0.0.1',
+             '-U', 'postgres', '-d', database],
+            input=script, capture_output=True, text=True, timeout=15)
+        if blocked:
+            require(result.returncode != 0 and 'POSTGRES_PREFLIGHT_BLOCKED' in result.stderr,
+                    'Feature preflight accepted an XML column')
+        else:
+            require(result.returncode == 0 and 'POSTGRES_FEATURE_PREFLIGHT_OK' in result.stdout,
+                    'Feature preflight rejected a compatible database')
+
     def ready(container):
         deadline = time.monotonic() + 45
         while True:
@@ -134,8 +175,34 @@ def check_existing_volume(source, target):
         volume_created = True
         previous = create(source, "-previous")
         ready(previous)
+        preflight(previous)
+        sql(previous, 'CREATE TABLE xml_feature_probe (payload xml)')
+        preflight(previous, blocked=True)
+        sql(previous, 'DROP TABLE xml_feature_probe')
+        preflight(previous)
+        print('POSTGRES_FEATURE_PREFLIGHT_REJECTIONS_OK', flush=True)
         sql(previous, "CREATE TABLE runtime_probe (id integer PRIMARY KEY, note text NOT NULL); "
                       "INSERT INTO runtime_probe VALUES (101, 'проверка данных');")
+        sql(previous, "CREATE COLLATION runtime_icu (provider=icu, locale='und'); "
+                      "CREATE TABLE sort_probe (id integer PRIMARY KEY, value text NOT NULL); "
+                      "INSERT INTO sort_probe SELECT n, v FROM unnest(ARRAY["
+                      "'а','я','ё','е','Ё','Е','А','z','Z','a','A','Ä','ä','é','e','10','2',"
+                      "'проект','Проект','задача','Задача','І','Ї','Й','И','🙂','']) "
+                      "WITH ORDINALITY AS t(v,n); "
+                      "CREATE INDEX sort_probe_libc ON sort_probe (value); "
+                      "CREATE INDEX sort_probe_icu ON sort_probe (value COLLATE runtime_icu); "
+                      "CREATE EXTENSION amcheck;")
+        sort_query = ("SELECT string_agg(id::text,',' ORDER BY value,id) FROM sort_probe; "
+                      "SELECT string_agg(id::text,',' ORDER BY value COLLATE runtime_icu,id) FROM sort_probe; "
+                      "SELECT datlocprovider,datcollate,datctype,datcollversion,"
+                      "pg_database_collation_actual_version(oid) FROM pg_database "
+                      "WHERE datname=current_database(); "
+                      "SELECT collversion,pg_collation_actual_version(oid) FROM pg_collation "
+                      "WHERE collname='runtime_icu';")
+        sort_before = sql(previous, sort_query)
+        library_args = ("dpkg-query", "-W", "-f=${Package}=${Version}\\n",
+                        "libc6", "libc-l10n", "locales", "libicu72", "tzdata")
+        libraries_before = docker("exec", previous, *library_args)
         expected = "101:проверка данных"
         query = "SELECT id::text || ':' || note FROM runtime_probe ORDER BY id"
         require(sql(previous, query) == expected, "Test data was not written")
@@ -145,6 +212,24 @@ def check_existing_volume(source, target):
 
         current = create(target, "-current")
         ready(current)
+        require(docker("exec", current, *library_args) == libraries_before,
+                "Runtime libc/ICU/locales/tzdata versions changed")
+        require(sql(current, sort_query) == sort_before, "Existing collations or sort order changed")
+        require(sql(current, "SET enable_seqscan=off; " + sort_query).removeprefix("SET\n") == sort_before,
+                "Index scans changed the existing sort results")
+        sql(current, "SELECT bt_index_parent_check(indexrelid,true) FROM pg_index "
+                     "WHERE indrelid IN ('runtime_probe'::regclass,'sort_probe'::regclass)")
+        print("POSTGRES_COLLATIONS_AND_INDEXES_OK", flush=True)
+        require(sql(current, "SELECT pg_jit_available()") == "f", "LLVM/JIT is still enabled")
+        result = subprocess.run(
+            ["docker", "exec", "--env", "PGPASSWORD=" + password, "--user", "postgres", current,
+             "psql", "-X", "-h", "127.0.0.1",
+             "-U", "postgres", "-d", database, "--set", "ON_ERROR_STOP=1", "-c", "SELECT XMLPARSE(DOCUMENT '<probe/>')"],
+            stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=10,
+        )
+        require(result.returncode == 1 and "unsupported XML feature" in result.stderr,
+                "SQL/XML has not been disabled")
+        print("POSTGRES_OPTIONAL_FEATURES_DISABLED_OK", flush=True)
         require(sql(current, query) == expected, "Existing PostgreSQL data changed")
         sql(current, "INSERT INTO runtime_probe VALUES (202, 'запись после замены');")
         expected += "\n202:запись после замены"
@@ -154,6 +239,12 @@ def check_existing_volume(source, target):
         ready(current)
         require(sql(current, query) == expected, "PostgreSQL data did not persist after restart")
         print("POSTGRES_RESTART_OK", flush=True)
+        docker("stop", "--time", "20", current)
+        rollback = create(source, "-rollback")
+        ready(rollback)
+        require(sql(rollback, query) == expected and sql(rollback, sort_query) == sort_before,
+                "Previous server cannot reopen candidate data")
+        print("POSTGRES_PREVIOUS_SERVER_REOPEN_OK", flush=True)
     finally:
         for container in reversed(containers):
             subprocess.run(["docker", "rm", "-f", container], stdin=subprocess.DEVNULL,
@@ -174,6 +265,15 @@ def main():
     toolchain = json.loads(docker("image", "inspect", args.go_image))[0]
     check_metadata(source["Config"], target["Config"])
     print("POSTGRES_IMAGE_CONFIG_OK", flush=True)
+    output = docker("run", "--rm", "--pull=never", "--network", "none", "--read-only",
+                    "--entrypoint", "sh", target["Id"], "-ec",
+                    "cat /usr/share/score-it/postgres-configure.txt; "
+                    "test -z \"$(dpkg --audit)\"; "
+                    "find /usr/lib/postgresql/17 -type f \\( -name '*.so' -o -name postgres \\) "
+                    "-exec ldd '{}' ';' 2>&1")
+    for flag in ("--without-libxml", "--without-libxslt", "--without-llvm"):
+        require(flag in output, "PostgreSQL configure flag is missing: " + flag)
+    require("not found" not in output, "A PostgreSQL shared library cannot be loaded")
     with tempfile.TemporaryDirectory(prefix="score-it-postgres-runtime-") as temp:
         directory = Path(temp)
         archive = directory / "postgres.tar"

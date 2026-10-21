@@ -33,7 +33,7 @@ bash deploy/make_release.sh /absolute/releases
 ```
 
 В комплект входят приложение, PostgreSQL 17.11 и Caddy `v2.11.7-scoreit.1`.
-Встроенные зависимости Caddy: Go 1.26.9, x/net 0.60.0. Версия 2.11.7 официального
+Встроенные зависимости Caddy: Go 1.26.10, x/net 0.60.0. Версия 2.11.7 официального
 образа сама по себе не покрывает все исправления x/net из аудита. Базовые образы
 закреплены digest; исходный код Caddy — коммитом.
 
@@ -57,7 +57,7 @@ CI дополнительно проверяет HTTPS с синтетическ
 Состав PostgreSQL не меняется на другую major-версию или другой дистрибутив.
 Из runtime PostgreSQL удалён стандартный `ssl-cert-snakeoil` ключ Debian, не
 используемый этой конфигурацией. Для TLS БД нужны отдельно выданные сертификаты.
-Служебный `gosu` 1.19 также пересобран из закреплённого коммита с Go 1.26.9,
+Служебный `gosu` 1.19 также пересобран из закреплённого коммита с Go 1.26.10,
 `moby/sys/user` 0.4.1 и `x/sys` 0.48.0. Это устраняет исправляемые находки старого
 Go в helper, сохраняя штатный entrypoint и версию сервера PostgreSQL.
 
@@ -251,3 +251,77 @@ https://pkg.go.dev/vuln/GO-2026-6604.
 До пересборки и повторного Scout/Trivy эти изменения не закрывают находки нового
 комплекта. Находки Debian в приложении/PostgreSQL, полная история Git, секреты
 нижних слоёв остальных образов и допуск ИБ остаются отдельными проверками.
+
+
+## Extended audit evidence
+
+CI fetches advertised branch, tag and pull-request head refs into a full clone,
+then runs pinned Gitleaks 8.30.1 across all reachable history. Deleted or
+unadvertised refs and external Git LFS payloads are outside this scope. The
+recorded refs and commit count identify the exact checked history.
+
+The isolated release job also scans every regular file in every saved image
+layer separately, including overwritten and deleted content, plus image config
+and archive member/link metadata. Layer diff IDs and image config digests are
+verified against the saved release. Links are never followed. The documented
+limits are 4 GiB of regular payload per image, 250,000 entries per layer, nested
+archive depth 3, and decode depth 5. Scanner failure or findings block CI.
+
+Repository ignore files, inline allows and baselines are disabled. Built-in
+Gitleaks rules and allowlists still apply. Additional exceptions are the
+exact public Python release signing fingerprint
+`7169605F62C751356D054A26A821E680E5FA6305`, documented in
+https://github.com/docker-library/python/blob/master/Dockerfile-linux.template .
+It is neither a private key nor an authentication credential. Findings reports
+retain only rule, path, line and commit metadata; matched values and source
+lines are never published.
+
+Live staging HTTP checks cover anonymous access to private routes, CSRF rejection
+for mutation routes, secure CSRF cookies, framing/MIME headers, login lockout and
+log token privacy. These are bounded automated checks, not a full penetration
+test or approval of residual OS CVEs.
+
+
+### Go crypto/x509 refresh (2026-10-21)
+
+The first PR #19 scan blocked delivery on CVE-2026-111943 in the Go 1.26.9
+standard library embedded in gosu and Caddy. Both builders now pin Go 1.26.10
+and its verified official-image index digest. Runtime build-info checks require
+that version; the HIGH/CRITICAL Go release gate remains enabled. Earlier scan
+records above describe the prior binaries, not the rebuilt release.
+
+References: https://go.dev/doc/devel/release#go1.26.10 and the exact Trivy JSON
+retained for the failed candidate in Actions run 39570909958.
+
+
+DLA-4845-1 also appeared for the Python image CA bundle during this scan. The
+app build upgrades only `ca-certificates` to `20250419~deb12u2`, using normal
+Debian signed repository verification; an apt simulation rejects removal or
+changes to other packages. Both certificate-trust advisories are explicit
+release blockers. The PostgreSQL image does not ship the ca-certificates package.
+
+Caddy also retains its build-time package dependency list and the SHA256 of the
+built executable. Archive checks require that hash to match the delivered
+binary and reject any `golang.org/x/crypto/openpgp` import, including subpackages.
+This is build provenance evidence for GO-2026-5932, not a blanket waiver of
+other x/crypto advisories.
+
+Image path/link metadata is scanned as original text values separated by blank lines, not concatenated JSON fields. This avoids matches manufactured by adjacent unrelated metadata fields without excluding original names or link targets.
+
+
+The path audit also reviews two exact Debian package metadata filenames: the
+amd64 `.triggers` files for libgssapi-krb5-2 and libkeyutils1. The generic API-key
+rule interprets their colon-delimited architecture suffix as a credential.
+Only those complete lines in the generated member-paths.txt are excepted. Their
+file contents, other paths and ordinary credentials remain scanned. This was
+checked against the real pinned scanner with a generated synthetic credential
+that must still be detected. Fully redacted match context is retained for any
+unresolved findings; no matched secret value is written into published reports.
+
+
+The PostgreSQL layer scan additionally reviewed one public C macro documentation
+line in the Perl cop.h header. Only the exact line naming COPHH_KEY_UTF8 in that
+header is excepted; other comments and header contents remain scanned. The
+upstream source is https://github.com/Perl/perl5/blob/v5.36.0/cop.h . A detector
+control with a synthetic credential remains positive. All three layer scans are
+collected before the job fails on any unresolved finding.

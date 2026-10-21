@@ -10,7 +10,7 @@ from test_caddy_payload import binary, layer_bytes, saved_image
 
 
 IMAGE = "score-it-postgres:payload-test"
-BUILD_INFO = """/probe/gosu: go1.26.9
+BUILD_INFO = """/probe/gosu: go1.26.10
     path github.com/tianon/gosu
     dep github.com/moby/sys/user v0.4.1 h1:example
     dep golang.org/x/sys v0.48.0 h1:example
@@ -56,9 +56,24 @@ class PostgresPayloadTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "dynamic loader"):
             self.verify([layer_bytes({GOSU: binary(interpreter=True)}, link=False)])
 
+    def test_rejects_optional_libraries_even_after_deletion(self):
+        for name in ("usr/lib/x86_64-linux-gnu/libxml2.so.2.9.14",
+                     "usr/lib/x86_64-linux-gnu/libLLVM-19.so.1",
+                     "usr/lib/postgresql/17/lib/pgxml.so",
+                     "usr/lib/postgresql/17/lib/llvmjit.so"):
+            with self.subTest(name=name), self.assertRaisesRegex(RuntimeError, "Removed PostgreSQL feature"):
+                self.verify([layer_bytes({name: b"old"}, link=False),
+                             layer_bytes({str(Path(name).parent / (".wh." + Path(name).name)): b"",
+                                          GOSU: binary()}, link=False)])
+
+    def test_rejects_removed_package_inventory(self):
+        with self.assertRaisesRegex(RuntimeError, "Removed PostgreSQL package"):
+            self.verify([layer_bytes({GOSU: binary(), "var/lib/dpkg/status":
+                                     b"Package: libxml2\nStatus: install ok installed\n\n"}, link=False)])
+
     def test_rejects_obsolete_go_or_module_versions(self):
         check_build_info(BUILD_INFO)
-        for before, after in (("go1.26.9", "go1.24.6"), ("v0.4.1", "v0.1.0"),
+        for before, after in (("go1.26.10", "go1.24.6"), ("v0.4.1", "v0.1.0"),
                               ("v0.48.0", "v0.1.0")):
             with self.subTest(before=before):
                 with self.assertRaisesRegex(RuntimeError, "Unexpected gosu"):
@@ -87,6 +102,13 @@ class PostgresPayloadTests(unittest.TestCase):
                 target[key] = value
                 with self.assertRaises(RuntimeError):
                     check_metadata(source, target)
+
+    def test_accepts_only_documented_server_package_revision(self):
+        source = {"Env": ["PG_MAJOR=17", "PG_VERSION=17.11-1.pgdg12+2"]}
+        target = {"Env": ["PG_MAJOR=17", "PG_VERSION=17.11-1.pgdg12+2+scoreit1"]}
+        check_metadata(source, target)
+        with self.assertRaisesRegex(RuntimeError, "environment changed"):
+            check_metadata(source, source)
 
 
 if __name__ == "__main__":

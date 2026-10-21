@@ -56,6 +56,7 @@ trap 'rm -rf "$BUILD_DIR"' EXIT
 git archive HEAD | tar -x -C "$BUILD_DIR"
 docker build "$BUILD_PULL" --platform "$PLATFORM" -f "$BUILD_DIR/Dockerfile.production" \
   --build-arg "PYTHON_IMAGE=$PYTHON_SOURCE_IMAGE" \
+  --build-arg "BUILD_TLS_COMPAT=$TLS_COMPAT" \
   --label "org.opencontainers.image.revision=$RELEASE" \
   -t "$APP_IMAGE" "$BUILD_DIR"
 docker build "$BUILD_PULL" --platform "$PLATFORM" -f "$BUILD_DIR/deploy/Dockerfile.postgres" \
@@ -83,6 +84,12 @@ printf 'RELEASE_PULL=%s\nRELEASE_TLS_COMPAT=%s\n' "${RELEASE_PULL:-1}" "$TLS_COM
 python3 tests/check_sqlite_payload.py --app-image "$APP_IMAGE" --postgres-image "$PG_IMAGE" \
   --python-source-image "$PYTHON_SOURCE_IMAGE" --platform "$PLATFORM" </dev/null | \
   tee "$DEST/security/sqlite-payload.txt"
+python3 tests/check_postgres_runtime.py --image "$PG_IMAGE" --source-image "$PG_SOURCE" \
+  --go-image "$GO_SOURCE_IMAGE" </dev/null | tee "$DEST/security/postgres-runtime.txt"
+docker run --rm --pull=never --network none --read-only --entrypoint cat "$PG_IMAGE" \
+  /usr/share/score-it/postgres-source.txt /usr/share/score-it/postgres-configure.txt \
+  /usr/share/score-it/postgres-regression.txt >"$DEST/security/postgres-build.txt"
+cp deploy/postgres_feature_preflight.sql "$DEST/"
 bash deploy/scan_release.sh "$DEST"
 python3 - "$DEST" <<'PY'
 import hashlib

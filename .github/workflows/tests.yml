@@ -38,14 +38,38 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_postgres_payload.py' -v
       - name: Reject SQLite binaries and package records retained in saved runtime layers
         run: python -m unittest discover -s tests -p 'test_sqlite_payload.py' -v
+      - name: Verify deleted-layer secret scanning and redacted reports
+        run: python -m unittest discover -s tests -p 'test_secret_audit.py' -v
       - name: Audit locked production Python dependencies
         run: |
           python -m pip install pip-audit==2.10.1
           python -m pip_audit -r requirements.production.txt --disable-pip --no-deps
 
+  history-secrets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Fetch advertised branch, tag and pull-request refs
+        run: git fetch origin '+refs/heads/*:refs/audit/heads/*' '+refs/tags/*:refs/audit/tags/*' '+refs/pull/*/head:refs/audit/pulls/*'
+      - name: Install pinned secret scanner
+        run: sh deploy/install_gitleaks.sh "$RUNNER_TEMP/secret-scanner"
+      - name: Scan complete reachable Git history without repository allowlists
+        run: python tests/check_secret_audit.py --gitleaks "$RUNNER_TEMP/secret-scanner/gitleaks" --repository "$GITHUB_WORKSPACE" --output "$RUNNER_TEMP/history-secrets.json"
+      - name: Retain redacted history evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: history-secret-audit
+          path: ${{ runner.temp }}/history-secrets.json
+          if-no-files-found: warn
+
   postgres:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 60
     services:
       postgres:
         image: postgres:17-bookworm
@@ -127,7 +151,7 @@ jobs:
           "${COMPOSE[@]}" exec -T web python -c "import urllib.request; [urllib.request.urlopen('http://127.0.0.1:8000' + path, timeout=5).read() for path in ['/healthz/', '/login/', '/static/css/app.css']]"
           python "$GITHUB_WORKSPACE/tests/check_live_security.py" --project score-it-check-ci --release "$RELEASE" --database score_it_container_ci --output "$RUNNER_TEMP/live-security.json"
           source release.env
-          python "$GITHUB_WORKSPACE/tests/check_postgres_runtime.py" --image "$POSTGRES_IMAGE" --source-image "$POSTGRES_SOURCE_IMAGE" --go-image "$GO_SOURCE_IMAGE" </dev/null | tee "$RUNNER_TEMP/postgres-runtime.txt"
+          cat security/postgres-runtime.txt
           for IMAGE in "$SCORE_IT_IMAGE" "$POSTGRES_IMAGE" "$CADDY_IMAGE"; do
             docker image inspect --format '{{json .Config.Env}}' "$IMAGE" | python -c 'import json, sys; names = {v.split("=", 1)[0] for v in json.load(sys.stdin)}; assert not {"GODEBUG", "OPENSSL_CONF"} & names, names'
           done
@@ -147,6 +171,26 @@ jobs:
           RELEASE="$(git rev-parse HEAD)"
           source "$RUNNER_TEMP/releases/score-it-$RELEASE/release.env"
           python .ci-kidstime/tests/check_caddy_security.py --image "$CADDY_IMAGE" --backend-image "$SCORE_IT_IMAGE" </dev/null
+      - name: Scan every saved image layer, including deleted and overwritten files
+        run: |
+          set -euo pipefail
+          sh deploy/install_gitleaks.sh "$RUNNER_TEMP/secret-scanner"
+          RELEASE="$(git rev-parse HEAD)"
+          ROOT="$RUNNER_TEMP/releases/score-it-$RELEASE"
+          mkdir -p "$RUNNER_TEMP/layer-secrets"
+          SCAN_STATUS=0
+          while IFS=$'\t' read -r IMAGE CONFIG PLATFORM; do
+            case "$IMAGE" in
+              score-it:*) NAME=app ;;
+              score-it-postgres:*) NAME=postgres ;;
+              score-it-caddy:*) NAME=caddy ;;
+              *) exit 1 ;;
+            esac
+            python tests/check_secret_audit.py --gitleaks "$RUNNER_TEMP/secret-scanner/gitleaks" \
+              --archive "$ROOT/images.tar" --image "$IMAGE" --expected-config "$CONFIG" \
+              --platform "$PLATFORM" --output "$RUNNER_TEMP/layer-secrets/$NAME.json" || SCAN_STATUS=1
+          done < "$ROOT/images.tsv"
+          exit "$SCAN_STATUS"
       - name: Retain vulnerability reports and SBOM
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -154,6 +198,7 @@ jobs:
           name: release-security-reports
           path: |
             ${{ runner.temp }}/releases/*/security/
+            ${{ runner.temp }}/layer-secrets/
             ${{ runner.temp }}/live-security.json
             ${{ runner.temp }}/postgres-runtime.txt
           if-no-files-found: warn
