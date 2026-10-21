@@ -159,24 +159,6 @@ jobs:
           grep -Fx 'RELEASE_TLS_COMPAT=1' security/build-options.txt
           docker run --rm --network none -v "$PWD/Caddyfile.score-it.example:/etc/caddy/Caddyfile:ro" "$CADDY_IMAGE" caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile > "$RUNNER_TEMP/caddy-adapted.json"
           test "$(docker network inspect --format '{{.Internal}}' score-it-check-ci_backend)" = true
-      - name: Scan every saved image layer, including deleted and overwritten files
-        run: |
-          set -euo pipefail
-          sh deploy/install_gitleaks.sh "$RUNNER_TEMP/secret-scanner"
-          RELEASE="$(git rev-parse HEAD)"
-          ROOT="$RUNNER_TEMP/releases/score-it-$RELEASE"
-          mkdir -p "$RUNNER_TEMP/layer-secrets"
-          while IFS=$'\t' read -r IMAGE CONFIG PLATFORM; do
-            case "$IMAGE" in
-              score-it:*) NAME=app ;;
-              score-it-postgres:*) NAME=postgres ;;
-              score-it-caddy:*) NAME=caddy ;;
-              *) exit 1 ;;
-            esac
-            python tests/check_secret_audit.py --gitleaks "$RUNNER_TEMP/secret-scanner/gitleaks" \
-              --archive "$ROOT/images.tar" --image "$IMAGE" --expected-config "$CONFIG" \
-              --platform "$PLATFORM" --output "$RUNNER_TEMP/layer-secrets/$NAME.json"
-          done < "$ROOT/images.tsv"
       # Checkout after make_release.sh, which requires a clean source tree.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -189,6 +171,26 @@ jobs:
           RELEASE="$(git rev-parse HEAD)"
           source "$RUNNER_TEMP/releases/score-it-$RELEASE/release.env"
           python .ci-kidstime/tests/check_caddy_security.py --image "$CADDY_IMAGE" --backend-image "$SCORE_IT_IMAGE" </dev/null
+      - name: Scan every saved image layer, including deleted and overwritten files
+        run: |
+          set -euo pipefail
+          sh deploy/install_gitleaks.sh "$RUNNER_TEMP/secret-scanner"
+          RELEASE="$(git rev-parse HEAD)"
+          ROOT="$RUNNER_TEMP/releases/score-it-$RELEASE"
+          mkdir -p "$RUNNER_TEMP/layer-secrets"
+          SCAN_STATUS=0
+          while IFS=$'\t' read -r IMAGE CONFIG PLATFORM; do
+            case "$IMAGE" in
+              score-it:*) NAME=app ;;
+              score-it-postgres:*) NAME=postgres ;;
+              score-it-caddy:*) NAME=caddy ;;
+              *) exit 1 ;;
+            esac
+            python tests/check_secret_audit.py --gitleaks "$RUNNER_TEMP/secret-scanner/gitleaks" \
+              --archive "$ROOT/images.tar" --image "$IMAGE" --expected-config "$CONFIG" \
+              --platform "$PLATFORM" --output "$RUNNER_TEMP/layer-secrets/$NAME.json" || SCAN_STATUS=1
+          done < "$ROOT/images.tsv"
+          exit "$SCAN_STATUS"
       - name: Retain vulnerability reports and SBOM
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

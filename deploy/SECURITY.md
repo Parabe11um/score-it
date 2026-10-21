@@ -317,3 +317,11 @@ file contents, other paths and ordinary credentials remain scanned. This was
 checked against the real pinned scanner with a generated synthetic credential
 that must still be detected. Fully redacted match context is retained for any
 unresolved findings; no matched secret value is written into published reports.
+
+
+The PostgreSQL layer scan additionally reviewed one public C macro documentation
+line in the Perl cop.h header. Only the exact line naming COPHH_KEY_UTF8 in that
+header is excepted; other comments and header contents remain scanned. The
+upstream source is https://github.com/Perl/perl5/blob/v5.36.0/cop.h . A detector
+control with a synthetic credential remains positive. All three layer scans are
+collected before the job fails on any unresolved finding.
