@@ -36,9 +36,13 @@ def scan(gitleaks, mode, target, directory, log_opts=None):
     # Match only this exact public value, never whole paths or generic keys.
     config.write_text(
         '[extend]\nuseDefault = true\n\n'
-        '[allowlist]\ndescription = "Official Python public signing fingerprint"\n'
+        '[[allowlists]]\ndescription = "Official Python public signing fingerprint"\n'
         'regexTarget = "secret"\n'
         'regexes = ["^7169605F62C751356D054A26A821E680E5FA6305$"]\n'
+        '\n[[allowlists]]\ndescription = "Two Debian package trigger filenames, not credentials"\n'
+        'condition = "AND"\npaths = ["(?:^|/)member-paths[.]txt$"]\n'
+        'regexTarget = "line"\n'
+        'regexes = ["^var/lib/dpkg/info/(libgssapi-krb5-2|libkeyutils1):amd64[.]triggers$"]\n'
     )
     ignore = directory / "empty-ignore"
     ignore.mkdir(exist_ok=True)
@@ -167,8 +171,10 @@ def main():
             require(result["config"] == args.expected_config, "Image config differs from release manifest")
             result["findings"] = scan(args.gitleaks, "dir", contents, directory)
     result.update(scanner="Gitleaks 8.30.1", checked_at=datetime.now(timezone.utc).isoformat(),
-                  rule_profile="built-in rules; exact public Python GPG fingerprint exception; no repo config, ignore file, baseline or inline allows",
+                  rule_profile="built-in rules; exact public Python GPG fingerprint and two literal Debian trigger-path exceptions; no repo config, ignore file, baseline or inline allows",
                   reviewed_public_values=["7169605F62C751356D054A26A821E680E5FA6305"],
+                  reviewed_metadata_paths=[f'var/lib/dpkg/info/{package}:amd64.triggers'
+                                           for package in ('libgssapi-krb5-2', 'libkeyutils1')],
                   max_archive_depth=3, max_decode_depth=5)
     output = Path(args.output)
     with output.open("w") as stream:

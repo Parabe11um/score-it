@@ -268,7 +268,7 @@ limits are 4 GiB of regular payload per image, 250,000 entries per layer, nested
 archive depth 3, and decode depth 5. Scanner failure or findings block CI.
 
 Repository ignore files, inline allows and baselines are disabled. Built-in
-Gitleaks rules and allowlists still apply. The sole additional exception is the
+Gitleaks rules and allowlists still apply. Additional exceptions are the
 exact public Python release signing fingerprint
 `7169605F62C751356D054A26A821E680E5FA6305`, documented in
 https://github.com/docker-library/python/blob/master/Dockerfile-linux.template .
@@ -307,3 +307,13 @@ This is build provenance evidence for GO-2026-5932, not a blanket waiver of
 other x/crypto advisories.
 
 Image path/link metadata is scanned as original text values separated by blank lines, not concatenated JSON fields. This avoids matches manufactured by adjacent unrelated metadata fields without excluding original names or link targets.
+
+
+The path audit also reviews two exact Debian package metadata filenames: the
+amd64 `.triggers` files for libgssapi-krb5-2 and libkeyutils1. The generic API-key
+rule interprets their colon-delimited architecture suffix as a credential.
+Only those complete lines in the generated member-paths.txt are excepted. Their
+file contents, other paths and ordinary credentials remain scanned. This was
+checked against the real pinned scanner with a generated synthetic credential
+that must still be detected. Fully redacted match context is retained for any
+unresolved findings; no matched secret value is written into published reports.
