@@ -305,3 +305,5 @@ built executable. Archive checks require that hash to match the delivered
 binary and reject any `golang.org/x/crypto/openpgp` import, including subpackages.
 This is build provenance evidence for GO-2026-5932, not a blanket waiver of
 other x/crypto advisories.
+
+Image path/link metadata is scanned as original text values separated by blank lines, not concatenated JSON fields. This avoids matches manufactured by adjacent unrelated metadata fields without excluding original names or link targets.

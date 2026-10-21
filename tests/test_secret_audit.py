@@ -26,6 +26,9 @@ class SecretAuditTests(unittest.TestCase):
                                  b'earlier secret')
                 self.assertFalse(any(p.is_symlink() for p in target.rglob('*')))
                 self.assertTrue((target / 'image-config.json').is_file())
+                metadata = (target / 'layer-0001/member-paths.txt').read_text()
+                self.assertIn('.wh.old.env', metadata)
+                self.assertIn('etc/ssl/cert.pem\n\ncerts/ca-certificates.crt', metadata)
 
     def test_rejects_path_traversal(self):
         with tempfile.TemporaryDirectory() as temp:

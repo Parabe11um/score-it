@@ -109,7 +109,13 @@ def materialize_layers(archive, image, directory, platform="linux/amd64"):
                         with layer.extractfile(item) as content, (layer_root / name).open("wb") as out:
                             shutil.copyfileobj(content, out)
                         files += 1
-            (layer_root / "member-paths.json").write_text(json.dumps(metadata))
+            # Scan original path/link values as text, separated by blank lines.
+            # A single synthetic JSON line can join a filename ending in "key"
+            # to an unrelated next path and manufacture a generic-key match.
+            # No source value is excluded or put on a scanner allowlist.
+            (layer_root / "member-paths.txt").write_text(
+                '\n\n'.join(value for item in metadata
+                            for value in (item['path'], item['link']) if value) + '\n')
             layers_report.append({"diff_id": expected[number], "regular_files": files,
                                   "entries": len(metadata)})
     return {"image": image, "config": "sha256:" + hashlib.sha256(raw_config).hexdigest(),
