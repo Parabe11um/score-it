@@ -189,7 +189,8 @@ jobs:
       - name: Verify actual parser resource limits and synthetic import corpus in the production image
         run: |
           docker exec score-it-check-ci-web-1 python /app/tests/check_import_resources.py --output /tmp/import-resources.json
-          docker cp score-it-check-ci-web-1:/tmp/import-resources.json "$RUNNER_TEMP/import-resources.json"
+          # Docker's archive API cannot copy files from this tmpfs mount.
+          docker exec score-it-check-ci-web-1 python -c 'from pathlib import Path; import sys; sys.stdout.buffer.write(Path("/tmp/import-resources.json").read_bytes())' > "$RUNNER_TEMP/import-resources.json"
       - name: Scan every saved image layer, including deleted and overwritten files
         run: |
           set -euo pipefail
