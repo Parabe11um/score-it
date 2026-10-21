@@ -150,7 +150,7 @@ def check_inside(args):
             headers = {key.lower(): value for key, value in headers}
             require(status == 404, "Synthetic token unexpectedly exists")
             require("no-store" in headers.get("cache-control", ""), "Token response is cacheable")
-            require(headers.get("referrer-policy") == "no-referrer", "Token response lacks no-referrer")
+            require(headers.get("referrer-policy") == "strict-origin", "Token response lacks strict-origin")
         checks["token_privacy_headers"] = True
         require(request("/security_probe_" + suffix + "/")[0] == 404, "Log control request failed")
     finally:

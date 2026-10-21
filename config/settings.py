@@ -136,7 +136,9 @@ LOGOUT_REDIRECT_URL = "login"
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Lax"
 CSRF_COOKIE_SAMESITE = "Lax"
-SECURE_REFERRER_POLICY = "no-referrer"
+# Native POST forms need a non-null Origin (or an HTTPS Referer) for CSRF.
+# Send only the origin, so room/invitation tokens never enter the Referer.
+SECURE_REFERRER_POLICY = "strict-origin"
 
 if not DEBUG:
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
