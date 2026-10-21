@@ -58,6 +58,11 @@ class PlanningImport:
 
 
 def parse_sprint_file(upload, *, require_status=True):
+    from .import_process import parse_import
+    return parse_import(upload, require_status=require_status)
+
+
+def _parse_sprint_file(upload, *, require_status=True):
     rows = read_task_file_rows(upload)
     columns = _column_mapping(rows[0])
     if require_status and "eva_status" not in columns:
@@ -152,7 +157,7 @@ def sprint_name(value):
     if value.startswith("["):
         try:
             names = json.loads(value)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, RecursionError):
             raise ValueError("не удалось прочитать список спринтов")
         if not isinstance(names, list) or not all(isinstance(name, str) for name in names):
             raise ValueError("ожидается список названий спринтов")

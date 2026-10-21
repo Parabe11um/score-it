@@ -92,10 +92,15 @@ def verify(fixture):
     task = Task.objects.get(pk=fixture['task'])
     require(task.estimate_sum == 10 and task.estimate_count == 2 and task.estimate == 4,
             'Accepted estimate or original vote totals differ')
+    require(project.tasks.count() == 2, 'Rejected import created an unexpected task')
+    imported = project.tasks.get(number='BROWSER-IMPORT-1')
+    require(imported.title == 'Synthetic imported task' and imported.estimate == 8,
+            'Native CSV import did not preserve its task and estimate')
     foreign = Project.objects.get(pk=fixture['foreign_project'], owner__username=names[1])
     require(foreign_digest(foreign) == fixture['foreign_digest'], 'Foreign business data changed')
     return {'database_end_state_verified': True, 'foreign_data_unchanged': True,
-            'room_finished': True, 'participants': 2, 'votes': [2, 8], 'estimate': 4}
+            'room_finished': True, 'participants': 2, 'votes': [2, 8], 'estimate': 4,
+            'native_import_verified': True, 'invalid_uploads_created_no_tasks': True}
 
 
 def cleanup(fixture):

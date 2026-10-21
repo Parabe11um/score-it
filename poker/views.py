@@ -42,6 +42,7 @@ from .models import (
     estimate_on_scale,
 )
 from .task_import import save_task_import
+from .import_process import bounded_import_view
 from .sprint_import import available_sprint_tasks, save_sprint_import
 from .team import add_project_members
 from .eva_readiness import EvaReadiness, unestimated_tasks
@@ -857,6 +858,7 @@ def _import_warnings(request, parsed, saved):
 
 @login_required
 @require_POST
+@bounded_import_view
 def task_import_file(request, pk):
     project = _project_for_user(request.user, pk)
     form = TaskFileImportForm(request.POST, request.FILES)
@@ -1093,6 +1095,7 @@ def session_export_xlsx(request, pk):
 
 @login_required
 @require_POST
+@bounded_import_view
 def session_import_file(request, pk):
     voting_session = _session_for_user(request.user, pk)
     if voting_session.status == VotingSession.Status.FINISHED:
@@ -1862,6 +1865,7 @@ def _sprint_detail_context(sprint, capacity_form=None, import_form=None):
 
 @login_required
 @require_POST
+@bounded_import_view
 def sprint_import(request, pk):
     sprint = _sprint_for_user(request.user, pk)
     form = SprintFileImportForm(request.POST, request.FILES)

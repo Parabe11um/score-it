@@ -101,6 +101,42 @@ async function main() {
             assert(response.headers().location.startsWith('/admin/login/'));
         });
 
+        const importPath = `/projects/${fixture.project}/tasks/import/file/`;
+        const importForm = owner.locator(`form[action="${importPath}"]`);
+        await check('native_malformed_xlsx_returns_a_form_error', async () => {
+            await owner.goto(base + `/projects/${fixture.project}/`);
+            await importForm.locator('[name=task_file]').setInputFiles({name: 'synthetic.xlsx',
+                mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: Buffer.from('PK-bad')});
+            const rejected = owner.waitForResponse(response => response.request().method() === 'POST'
+                && new URL(response.url()).pathname === importPath);
+            await nativePost(owner, importPath, () => importForm.getByRole('button', {name: 'Загрузить задачи из файла'}).click());
+            assert.equal((await rejected).status(), 400);
+            await expect(importForm.locator('.form-error')).toBeVisible();
+        });
+        await check('native_csv_import_succeeds_after_rejection', async () => {
+            const headers = ['Идентификатор объекта', 'Код', 'Наименование', 'Текст',
+                'Логический тип.Имя логического типа', 'Оценка задачи, час', 'Статус.Имя статуса'];
+            const row = ['CmfTask:' + require('node:crypto').randomUUID(), 'BROWSER-IMPORT-1',
+                'Synthetic imported task', '<p>Synthetic description</p>', 'Разработка АБС', '8', 'В работе'];
+            const buffer = Buffer.from('\ufeff' + headers.join(';') + '\r\n' + row.join(';') + '\r\n');
+            await importForm.locator('[name=task_file]').setInputFiles({name: 'synthetic.csv', mimeType: 'text/csv', buffer});
+            await nativePost(owner, importPath, () => importForm.getByRole('button', {name: 'Загрузить задачи из файла'}).click());
+            await expect(owner).toHaveURL(base + `/projects/${fixture.project}/`);
+            await expect(owner.locator('body')).toContainText('BROWSER-IMPORT-1');
+        });
+        await check('oversized_upload_and_body_rejected_while_https_stays_healthy', async () => {
+            const csrf = (await owner.context().cookies(base)).find(cookie => cookie.name === 'csrftoken').value;
+            const headers = {Origin: base, Referer: base + '/'};
+            const file = await owner.context().request.post(base + importPath, {headers, multipart: {
+                csrfmiddlewaretoken: csrf, task_file: {name: 'synthetic.xlsx', mimeType: 'application/octet-stream',
+                    buffer: Buffer.alloc(10 * 1024 * 1024 + 1, 120)}}});
+            assert.equal(file.status(), 413);
+            const body = await owner.context().request.post(base + '/login/', {headers: {...headers, 'X-CSRFToken': csrf},
+                data: Buffer.alloc(11 * 1024 * 1024 + 1, 120)});
+            assert.equal(body.status(), 413);
+            assert.equal((await owner.context().request.get(base + '/healthz/')).status(), 200);
+        });
+
         let publicUrl, roomId;
         await check('native_create_voting_room', async () => {
             await owner.goto(base + `/projects/${fixture.project}/`);

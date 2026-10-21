@@ -7,10 +7,13 @@ from html.parser import HTMLParser
 from io import BytesIO, StringIO
 from itertools import chain
 from pathlib import Path
+from pathlib import PurePosixPath
+import stat
 from uuid import UUID
-from zipfile import BadZipFile, ZipFile
+from zipfile import BadZipFile, ZipFile, ZIP_STORED, ZIP_DEFLATED
 
 from django.core.exceptions import ValidationError
+from defusedxml.ElementTree import iterparse
 from openpyxl import load_workbook
 from openpyxl.utils.exceptions import InvalidFileException
 
@@ -21,6 +24,11 @@ EVA_TASK_URL_PREFIX = "https://projects.cifra.works/project/Kanban/KBB-000451?po
 MAX_FILE_BYTES = 10 * 1024 * 1024
 MAX_ROWS = 5000
 MAX_COLUMNS = 512
+MAX_UNPACKED_BYTES = 64 * 1024 * 1024
+MAX_ZIP_MEMBERS = 1024
+MAX_SHEETS = 32
+MAX_XML_NODES = 2_000_000
+MAX_CELL_CHARS = 131072
 HOUR_ESTIMATE_HEADER = "Оценка задачи, час"
 
 # Deliberately exclude EVA's unrelated fields «Оценка» and «Story Point».
@@ -155,6 +163,7 @@ def _column_mapping(headers):
 
 
 def _csv_rows(data):
+    csv.field_size_limit(MAX_CELL_CHARS)
     if data.startswith((b"\xff\xfe", b"\xfe\xff")):
         text = data.decode("utf-16")
     else:
@@ -163,15 +172,25 @@ def _csv_rows(data):
         except UnicodeDecodeError:
             text = data.decode("cp1251")
     text = text.lstrip("\ufeff")
-    lines = text.splitlines()
+    stream = StringIO(text, newline='')
+    first = stream.readline()
     delimiter = None
-    if lines and re.fullmatch(r"sep=[;,\t]", lines[0], re.IGNORECASE):
-        delimiter = lines[0][-1]
-        text = text.split("\n", 1)[1] if "\n" in text else ""
+    if re.fullmatch(r"sep=[;,\t]", first.rstrip('\r\n'), re.IGNORECASE):
+        delimiter = first.rstrip('\r\n')[-1]
+    else:
+        stream.seek(0)
     if delimiter is None:
         # A comma inside «Оценка задачи, час» is not a CSV delimiter.
         # Match known headings rather than relying on Sniffer's comma preference.
-        header = next((line for line in text.splitlines() if line.strip()), "")
+        header = ''
+        for _ in range(MAX_ROWS + 1):
+            line = stream.readline()
+            if not line or line.strip():
+                header = line.rstrip('\r\n')
+                break
+        else:
+            raise ValidationError(f"Загрузите не более {MAX_ROWS} строк за один раз.")
+        stream.seek(0)
         known_headers = {
             _normalise(alias) for aliases in HEADERS.values() for alias in aliases
         }
@@ -186,7 +205,7 @@ def _csv_rows(data):
                 "Не удалось определить разделитель CSV: используйте запятую, "
                 "точку с запятой или табуляцию."
             )
-    reader = csv.reader(StringIO(text, newline=""), delimiter=delimiter, strict=True)
+    reader = csv.reader(stream, delimiter=delimiter, strict=True)
     return _bounded_rows(reader)
 
 
@@ -201,22 +220,73 @@ def _bounded_rows(rows):
     return result
 
 
-def _xlsx_rows(data):
+def _validate_xlsx(data):
+    total = 0
+    nodes = 0
+    class BoundedMember:
+        def __init__(self, source):
+            self.source = source
+
+        def read(self, size=-1):
+            nonlocal total
+            chunk = self.source.read(min(size, 65536) if size >= 0 else 65536)
+            total += len(chunk)
+            if total > MAX_UNPACKED_BYTES:
+                raise ValidationError('Содержимое XLSX слишком велико. Разделите выгрузку на несколько файлов.')
+            return chunk
+
     with ZipFile(BytesIO(data)) as archive:
-        if sum(item.file_size for item in archive.infolist()) > 64 * 1024 * 1024:
-            raise ValidationError(
-                "Содержимое XLSX слишком велико. Разделите выгрузку на несколько файлов."
-            )
+        members = archive.infolist()
+        if len(members) > MAX_ZIP_MEMBERS or len({item.filename for item in members}) != len(members):
+            raise ValidationError('Некорректный XLSX: слишком много или несколько одинаковых компонентов.')
+        if sum(item.file_size for item in members) > MAX_UNPACKED_BYTES:
+            raise ValidationError('Содержимое XLSX слишком велико. Разделите выгрузку на несколько файлов.')
+        for item in members:
+            path = PurePosixPath(item.filename)
+            if (item.flag_bits & 1 or item.compress_type not in (ZIP_STORED, ZIP_DEFLATED)
+                    or path.is_absolute() or '..' in path.parts or '\\' in item.filename
+                    or ':' in item.filename or stat.S_ISLNK(item.external_attr >> 16)):
+                raise ValidationError('Некорректный XLSX: неподдерживаемый или небезопасный компонент.')
+            if item.is_dir():
+                continue
+            with archive.open(item) as source:
+                stream = BoundedMember(source)
+                if not item.filename.lower().endswith(('.xml', '.rels')):
+                    while stream.read(65536):
+                        pass
+                    continue
+                stack = []
+                for event, element in iterparse(stream, events=('start', 'end'),
+                        forbid_dtd=True, forbid_entities=True, forbid_external=True):
+                    if event == 'start':
+                        stack.append(element)
+                        nodes += 1
+                        if len(stack) > 64 or nodes > MAX_XML_NODES:
+                            raise ValidationError('Структура XLSX слишком сложна. Разделите выгрузку.')
+                    else:
+                        if len(element.text or '') > MAX_CELL_CHARS or len(element.tail or '') > MAX_CELL_CHARS:
+                            raise ValidationError('В XLSX слишком длинное значение ячейки.')
+                        stack.pop()
+                        element.clear()
+                        if stack:
+                            stack[-1].remove(element)
+
+
+def _xlsx_rows(data):
+    _validate_xlsx(data)
     # Keep formulas visible: an estimate formula without a cached value is filled.
     workbook = load_workbook(
         BytesIO(data), read_only=True, data_only=False, keep_links=False,
     )
     try:
+        if len(workbook.worksheets) > MAX_SHEETS:
+            raise ValidationError('В XLSX слишком много листов. Оставьте лист с задачами EVA.')
         candidates = []
         errors = []
         for sheet in workbook:
-            if sheet.max_column and sheet.max_column > MAX_COLUMNS:
-                continue
+            # Dimension metadata is attacker-controlled and can pad small rows
+            # into millions of empty cells. Bound actual rows and columns.
+            sheet.reset_dimensions()
             rows = sheet.iter_rows(values_only=True)
             header = next(rows, ())
             if not any(_text(value) for value in header):
@@ -226,7 +296,12 @@ def _xlsx_rows(data):
             except ValidationError as exc:
                 errors.append(exc)
                 continue
-            candidates.append(_bounded_rows(chain((header,), rows)))
+            if candidates:
+                raise ValidationError('В XLSX несколько листов с задачами. Оставьте один лист для импорта.')
+            # Missing trailing cells are normal in XLSX; pad to the actual
+            # header width, never to the untrusted worksheet dimension.
+            padded = (row + (None,) * max(0, len(header) - len(row)) for row in rows)
+            candidates.append(_bounded_rows(chain((header,), padded)))
         if not candidates:
             if errors:
                 raise errors[0]
