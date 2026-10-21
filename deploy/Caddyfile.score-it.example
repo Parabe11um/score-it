@@ -30,6 +30,6 @@
 
 score-it.example.com {
     import score-it-safe-log
-    header Referrer-Policy no-referrer
+    header >Referrer-Policy strict-origin
     reverse_proxy score-it-web:8000
 }

@@ -163,7 +163,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: Parabe11um/kidsTime
-          ref: 08dac907114be118b57ea281084f0b2bda88879e
+          ref: cdf451d9653a1d7b822bd6b2800b5417b655cace
           path: .ci-kidstime
           persist-credentials: false
       - name: Verify both shared proxy routes and log privacy

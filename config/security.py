@@ -42,7 +42,7 @@ class TokenLinkPrivacyMiddleware:
         response = self.get_response(request)
         if request.path.startswith(("/room/", "/organizer/invite/")):
             response["Cache-Control"] = "private, no-store"
-            response["Referrer-Policy"] = "no-referrer"
+            response["Referrer-Policy"] = settings.SECURE_REFERRER_POLICY
         return response
 
 

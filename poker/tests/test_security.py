@@ -103,4 +103,4 @@ class TokenHeadersTests(TestCase):
             response = self.client.get(path)
             self.assertEqual(response.status_code, 404)
             self.assertEqual(response["Cache-Control"], "private, no-store")
-            self.assertEqual(response["Referrer-Policy"], "no-referrer")
+            self.assertEqual(response["Referrer-Policy"], "strict-origin")
