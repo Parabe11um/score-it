@@ -58,7 +58,13 @@ def scan(gitleaks, mode, target, directory, log_opts=None):
     require(isinstance(values, list), "Invalid secret scanner report")
     require((result.returncode == 1) == bool(values), "Secret scanner exit/report disagree")
     allowed = ("RuleID", "File", "StartLine", "EndLine", "Commit")
-    return [{key: value[key] for key in allowed if key in value} for value in values]
+    findings = []
+    for value in values:
+        finding = {key: value[key] for key in allowed if key in value}
+        if value.get('Secret') == 'REDACTED' and 'REDACTED' in value.get('Match', ''):
+            finding['RedactedMatch'] = value['Match'][:240]
+        findings.append(finding)
+    return findings
 
 
 def materialize_layers(archive, image, directory, platform="linux/amd64"):
