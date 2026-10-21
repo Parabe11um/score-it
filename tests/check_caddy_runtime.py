@@ -277,7 +277,7 @@ def main():
     docker("image", "inspect", args.client_image)
     output = docker("run", "--rm", "--pull=never", "--network", "none",
                     "--entrypoint", "caddy", info["Id"], "build-info")
-    require(re.search(r"^go\s+go1[.]26[.]9$", output, re.M), "Unexpected Go version")
+    require(re.search(r"^go\s+go1[.]26[.]10$", output, re.M), "Unexpected Go version")
     require(re.search(r"^dep\s+golang.org/x/net\s+v0[.]60[.]0\s", output, re.M),
             "Unexpected x/net version")
     with tempfile.TemporaryDirectory(prefix="score-it-caddy-runtime-") as temp:

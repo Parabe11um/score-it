@@ -33,7 +33,7 @@ bash deploy/make_release.sh /absolute/releases
 ```
 
 В комплект входят приложение, PostgreSQL 17.11 и Caddy `v2.11.7-scoreit.1`.
-Встроенные зависимости Caddy: Go 1.26.9, x/net 0.60.0. Версия 2.11.7 официального
+Встроенные зависимости Caddy: Go 1.26.10, x/net 0.60.0. Версия 2.11.7 официального
 образа сама по себе не покрывает все исправления x/net из аудита. Базовые образы
 закреплены digest; исходный код Caddy — коммитом.
 
@@ -57,7 +57,7 @@ CI дополнительно проверяет HTTPS с синтетическ
 Состав PostgreSQL не меняется на другую major-версию или другой дистрибутив.
 Из runtime PostgreSQL удалён стандартный `ssl-cert-snakeoil` ключ Debian, не
 используемый этой конфигурацией. Для TLS БД нужны отдельно выданные сертификаты.
-Служебный `gosu` 1.19 также пересобран из закреплённого коммита с Go 1.26.9,
+Служебный `gosu` 1.19 также пересобран из закреплённого коммита с Go 1.26.10,
 `moby/sys/user` 0.4.1 и `x/sys` 0.48.0. Это устраняет исправляемые находки старого
 Go в helper, сохраняя штатный entrypoint и версию сервера PostgreSQL.
 
@@ -280,3 +280,15 @@ Live staging HTTP checks cover anonymous access to private routes, CSRF rejectio
 for mutation routes, secure CSRF cookies, framing/MIME headers, login lockout and
 log token privacy. These are bounded automated checks, not a full penetration
 test or approval of residual OS CVEs.
+
+
+### Go crypto/x509 refresh (2026-10-21)
+
+The first PR #19 scan blocked delivery on CVE-2026-111943 in the Go 1.26.9
+standard library embedded in gosu and Caddy. Both builders now pin Go 1.26.10
+and its verified official-image index digest. Runtime build-info checks require
+that version; the HIGH/CRITICAL Go release gate remains enabled. Earlier scan
+records above describe the prior binaries, not the rebuilt release.
+
+References: https://go.dev/doc/devel/release#go1.26.10 and the exact Trivy JSON
+retained for the failed candidate in Actions run 39570909958.

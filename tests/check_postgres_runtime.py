@@ -106,7 +106,7 @@ def check_metadata(source, target):
 
 
 def check_build_info(output):
-    require(re.search(r"^\s*/probe/gosu:\s+go1[.]26[.]9$", output, re.M),
+    require(re.search(r"^\s*/probe/gosu:\s+go1[.]26[.]10$", output, re.M),
             "Unexpected gosu Go version")
     for module, version in (("github.com/moby/sys/user", "v0.4.1"),
                             ("golang.org/x/sys", "v0.48.0")):
