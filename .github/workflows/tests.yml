@@ -30,6 +30,8 @@ jobs:
         run: python manage.py test poker.tests --verbosity 2
       - name: Verify release compatibility and rejection cases
         run: python -m unittest discover -s tests -p 'test_release_verification.py' -v
+      - name: Verify source permissions with private release output
+        run: python -m unittest discover -s tests -p 'test_release_source_permissions.py' -v
       - name: Verify temporary TLS profile cleanup and certificate validation
         run: python -m unittest discover -s tests -p 'test_build_tls.py' -v
       - name: Reject obsolete executables in saved Caddy layers
@@ -126,7 +128,10 @@ jobs:
           for IMAGE in "$PYTHON_SOURCE_IMAGE" "$POSTGRES_SOURCE_IMAGE" "$GO_SOURCE_IMAGE" "$CADDY_SOURCE_IMAGE"; do
             docker pull --platform linux/amd64 "$IMAGE"
           done
-          RELEASE_PULL=0 RELEASE_TLS_COMPAT=1 bash deploy/make_release.sh "$RUNNER_TEMP/releases"
+          (
+            umask 077
+            RELEASE_PULL=0 RELEASE_TLS_COMPAT=1 bash deploy/make_release.sh "$RUNNER_TEMP/releases"
+          )
           RELEASE="$(git rev-parse HEAD)"
           cd "$RUNNER_TEMP/releases/score-it-$RELEASE"
           bash load_release.sh

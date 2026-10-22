@@ -53,7 +53,10 @@ DEST="$OUTPUT/score-it-$RELEASE"
 mkdir "$DEST"
 BUILD_DIR="$(mktemp -d)"
 trap 'rm -rf "$BUILD_DIR"' EXIT
-git archive HEAD | tar -x -C "$BUILD_DIR"
+# Keep the context directory private, but make committed sources readable by
+# the non-root runtime user regardless of the caller's umask or tar.umask.
+git -c tar.umask=0022 archive HEAD | \
+  tar --extract --same-permissions --no-same-owner -C "$BUILD_DIR"
 docker build "$BUILD_PULL" --platform "$PLATFORM" -f "$BUILD_DIR/Dockerfile.production" \
   --build-arg "PYTHON_IMAGE=$PYTHON_SOURCE_IMAGE" \
   --build-arg "BUILD_TLS_COMPAT=$TLS_COMPAT" \
