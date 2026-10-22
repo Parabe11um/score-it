@@ -1,4 +1,4 @@
-name: Application layer secret audit
+name: Application image audit
 on:
   pull_request:
 permissions:
@@ -17,6 +17,14 @@ jobs:
           docker build --platform linux/amd64 --build-arg "PYTHON_IMAGE=$PYTHON_SOURCE_IMAGE" --build-arg BUILD_TLS_COMPAT=1 -f Dockerfile.production -t score-it:layer-audit .
           docker image save score-it:layer-audit -o "$RUNNER_TEMP/app.tar"
           docker image inspect --format '{{.Id}}' score-it:layer-audit > "$RUNNER_TEMP/app.config"
+      - name: Verify the app base and retain an early vulnerability report
+        run: |
+          source deploy/images.env
+          python tests/check_app_base.py --image score-it:layer-audit > "$RUNNER_TEMP/app-base.txt"
+          docker run --rm --platform linux/amd64 -e GODEBUG=tlsmlkem=0,tlssecpmlkem=0 \
+            -v "$RUNNER_TEMP:/reports" "$TRIVY_IMAGE" image \
+            --input /reports/app.tar --scanners vuln,secret,misconfig \
+            --image-config-scanners secret,misconfig --format json --output /reports/app.json
       - name: Scan all application layers
         run: |
           sh deploy/install_gitleaks.sh "$RUNNER_TEMP/secret-scanner"
@@ -26,4 +34,8 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: app-layer-audit
-          path: ${{ runner.temp }}/app-layer-audit.json
+          path: |
+            ${{ runner.temp }}/app-layer-audit.json
+            ${{ runner.temp }}/app-base.txt
+            ${{ runner.temp }}/app.json
+            ${{ runner.temp }}/app.config
