@@ -22,6 +22,17 @@ import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 
+# The fixture is a test tool, never a file shipped in the production image.
+# Both the controller and its private request travel over stdin, not argv.
+FIXTURE_PROGRAM = r"""
+import hashlib, io, json, sys
+payload = json.load(sys.stdin)
+source = payload['source']
+assert hashlib.sha256(source.encode()).hexdigest() == payload['sha256'], 'Fixture transport differs'
+sys.stdin = io.StringIO(json.dumps(payload['request']))
+exec(compile(source, '<score-it-browser-fixture>', 'exec'), {'__name__': '__main__'})
+"""
+
 
 def require(condition, message):
     if not condition:
@@ -76,12 +87,10 @@ def preflight(args):
 
 def fixture_action(web, args, action, fixture=None, nonce=None):
     controller = ROOT / 'tests/browser/fixture.py'
-    checksum = hashlib.sha256(controller.read_bytes()).hexdigest()
-    program = ("import hashlib,pathlib,sys; p=pathlib.Path('/app/tests/browser/fixture.py'); "
-               "assert hashlib.sha256(p.read_bytes()).hexdigest()==sys.argv[1], 'Fixture source differs'; "
-               "exec(compile(p.read_text(),str(p),'exec'))")
-    payload = json.dumps(dict(database=args.database, action=action, fixture=fixture, nonce=nonce))
-    output = docker('exec', '-i', web, 'python', '-c', program, checksum, source=payload)
+    source = controller.read_text()
+    payload = json.dumps(dict(source=source, sha256=hashlib.sha256(source.encode()).hexdigest(),
+        request=dict(database=args.database, action=action, fixture=fixture, nonce=nonce)))
+    output = docker('exec', '-i', web, 'python', '-c', FIXTURE_PROGRAM, source=payload)
     return json.loads(output)
 
 
@@ -140,6 +149,8 @@ def run(args):
         required = json.loads((ROOT / 'tests/browser/package.json').read_text())['devDependencies']['@playwright/test']
         require(version == required, 'Installed Playwright version differs from the locked version')
         selected = preflight(args)
+        report['fixture_source_sha256'] = hashlib.sha256((ROOT / 'tests/browser/fixture.py').read_bytes()).hexdigest()
+        report['fixture_delivery'] = 'stdin; executed in memory after isolated staging preflight'
         web = selected['web']['Name'].lstrip('/')
         network = next(iter(selected['web']['NetworkSettings']['Networks']))
         caddy_image = 'score-it-caddy:' + args.release

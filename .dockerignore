@@ -1,4 +1,6 @@
 .git
+.github
+.ci-kidstime
 .env
 .env.*
 .venv
@@ -13,5 +15,12 @@ releases
 upload
 *.tar
 *.tar.gz
+*.zip
 **/node_modules
+docs
+README.md
+tests
+poker/tests
+deploy/README.md
+deploy/SECURITY.md
 

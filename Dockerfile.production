@@ -13,9 +13,17 @@ RUN python -m pip install --no-cache-dir --require-hashes -r requirements.bootst
     && python -m pip install --no-cache-dir --require-hashes -r requirements.production.txt \
     && python -m pip check \
     && python -m pip uninstall --yes pip \
+    && rm requirements.bootstrap.txt requirements.production.txt \
     && rm -rf /usr/local/lib/python3.12/ensurepip \
     && useradd --uid 10001 --create-home app
-COPY . /app
+# Only application code and runtime/maintenance entry points belong in the image.
+# Tests and docs stay in Git; audit tools are supplied by the build/test host.
+COPY manage.py /app/
+COPY config /app/config/
+COPY poker /app/poker/
+COPY static /app/static/
+COPY templates /app/templates/
+COPY deploy/configure_db_roles.py deploy/gunicorn.conf.py deploy/gunicorn_logger.py /app/deploy/
 # This is a build-time key only; the runtime key must be supplied separately.
 RUN DJANGO_SECRET_KEY=build-only-static-files DJANGO_DEBUG=0 DB_ENGINE=sqlite \
     DATABASE_PATH=/tmp/build.sqlite3 python manage.py collectstatic --noinput --no-post-process \

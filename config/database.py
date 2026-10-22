@@ -1,4 +1,4 @@
-"""Database configuration shared by Passenger and container deployments."""
+"""Database configuration for local development and PostgreSQL deployments."""
 
 from pathlib import Path
 

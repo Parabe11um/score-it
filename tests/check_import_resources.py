@@ -6,17 +6,65 @@ import hashlib
 from importlib.metadata import version
 import json
 from pathlib import Path
+import re
 import sys
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+# Materialize only these two test tools in a disposable container's tmpfs.
+# /app remains the exact, read-only production payload under test.
+IMAGE_PROGRAM = r"""
+import json, pathlib, runpy, sys, tempfile
+payload = json.load(sys.stdin)
+with tempfile.TemporaryDirectory(prefix='score-it-import-check-') as directory:
+    root = pathlib.Path(directory)
+    tools = root / 'tests'
+    tools.mkdir()
+    for name in ('check_import_resources.py', 'import_security_corpus.py'):
+        (tools / name).write_text(payload[name])
+    sys.path.insert(0, str(tools))
+    report = root / 'result.json'
+    sys.argv = [str(tools / 'check_import_resources.py'), '--app-root', '/app', '--output', str(report)]
+    runpy.run_path(sys.argv[0], run_name='__main__')
+    print('IMPORT_RESOURCE_REPORT=' + json.dumps(json.loads(report.read_text())))
+"""
+
+
+def check_image(args):
+    from check_caddy_runtime import docker, require
+    require(bool(re.fullmatch(r'(?:score-it:[0-9a-f]{40}|sha256:[0-9a-f]{64})', args.image)),
+            'Use a local release image with its full commit SHA or image ID')
+    image = json.loads(docker('image', 'inspect', args.image))[0]
+    sources = {name: (ROOT / 'tests' / name).read_text()
+               for name in ('check_import_resources.py', 'import_security_corpus.py')}
+    output = docker('run', '--rm', '-i', '--pull=never', '--network', 'none', '--read-only',
+                    '--tmpfs', '/tmp:size=64m,mode=1777', '--cap-drop', 'ALL',
+                    '--security-opt', 'no-new-privileges:true', '--entrypoint', 'python',
+                    image['Id'], '-c', IMAGE_PROGRAM, input=json.dumps(sources), timeout=180)
+    markers, separator, raw = output.rpartition('IMPORT_RESOURCE_REPORT=')
+    require(bool(separator), 'Import check returned no structured report')
+    report = json.loads(raw)
+    require(report.get('ok'), 'Import resource check failed')
+    report.update(image_reference=args.image, runtime_image_id=image['Id'], network_mode='none',
+                  tool_delivery='build-host sources in disposable container tmpfs')
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n')
+    print(markers.strip())
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', required=True, type=Path)
+    parser.add_argument('--image', help='Run against a local release image, without a database or network')
+    parser.add_argument('--app-root', type=Path, default=ROOT, help=argparse.SUPPRESS)
     args = parser.parse_args()
+    if args.image:
+        check_image(args)
+        return
+    app_root = args.app_root.resolve()
+    sys.path.insert(0, str(app_root))
     from django.conf import settings
     settings.configure(INSTALLED_APPS=['django.contrib.auth', 'django.contrib.contenttypes', 'poker'],
         DATABASES={'default': {'ENGINE': 'django.db.backends.dummy'}}, SECRET_KEY='parser',
@@ -33,9 +81,11 @@ def main():
     report = dict(started_utc=datetime.now(timezone.utc).isoformat(), synthetic_only=True,
         database_engine=settings.DATABASES['default']['ENGINE'], ok=False, cases=[],
         packages={name: version(name) for name in ('Django', 'openpyxl', 'defusedxml')},
-        source_sha256={name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest() for name in (
+        source_sha256={name: hashlib.sha256((app_root / name).read_bytes()).hexdigest() for name in (
             'poker/import_process.py', 'poker/import_worker.py', 'poker/task_import.py',
-            'poker/sprint_import.py', 'tests/import_security_corpus.py')})
+            'poker/sprint_import.py')})
+    report['source_sha256']['tests/import_security_corpus.py'] = hashlib.sha256(
+        (ROOT / 'tests/import_security_corpus.py').read_bytes()).hexdigest()
     cases = [
         ('csv_79', lambda: csv_file(79), 'csv', 79),
         ('xlsx_79', lambda: xlsx_rows(79), 'xlsx', 79),
