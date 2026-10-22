@@ -33,7 +33,8 @@ def check_inventory(report):
         require(bool(version) and subprocess.run(['dpkg', '--compare-versions', version, 'ge', minimum],
                                                 check=False).returncode == 0,
                 'Missing app security update: ' + package)
-    require(not {'libsqlite3-0', 'libssl3'} & report['packages'].keys(), 'Old/removed runtime package retained')
+    require(not {'libsqlite3-0', 'libssl3', 'util-linux', 'liblastlog2-2', 'libwtmpdb0'} & report['packages'].keys(),
+            'Old/removed runtime package retained')
 
 
 def main():

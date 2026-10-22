@@ -39,6 +39,8 @@ class AppBaseTests(unittest.TestCase):
         cases = ({'codename': 'bookworm'}, {'os_id': 'ubuntu'},
                  {'uid': 0}, {'python': '3.13.0'},
                  {'packages': {**MINIMUM, 'libsqlite3-0': '3.46.1-7'}},
+                 {'packages': {**MINIMUM, 'util-linux': '2.41.5-0+deb13u1'}},
+                 {'packages': {**MINIMUM, 'liblastlog2-2': '2.41.5-0+deb13u1'}},
                  {'packages': {**MINIMUM, 'libssl3': '3.0.22-1~deb12u1'}})
         for change in cases:
             with self.subTest(change=change), self.assertRaises(RuntimeError):
