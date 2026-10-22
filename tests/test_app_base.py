@@ -20,7 +20,7 @@ class AppBaseTests(unittest.TestCase):
     def test_rejects_old_or_absent_security_packages(self):
         for package, old in (('ca-certificates', '20250419'),
                              ('openssl', '3.5.7-1~deb13u2'),
-                             ('libssl3t64', '3.5.6-1')):
+                             ('libssl3t64', '3.5.6-1'), ('liblzma5', '5.8.1-1+deb13u1')):
             for version in (old, None):
                 with self.subTest(package=package, version=version):
                     report = copy.deepcopy(self.report)

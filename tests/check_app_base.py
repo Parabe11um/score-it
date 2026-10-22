@@ -11,6 +11,7 @@ MINIMUM = {
     "ca-certificates": "20250419+deb13u1",
     "libssl3t64": "3.5.7-1~deb13u3",
     "openssl": "3.5.7-1~deb13u3",
+    "liblzma5": "5.8.1-1+deb13u2",
 }
 INVENTORY = r'''
 import json, os, platform, ssl, subprocess

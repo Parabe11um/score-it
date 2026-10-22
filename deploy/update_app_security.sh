@@ -2,13 +2,15 @@
 # Build-host-only, reviewed Debian 13 updates; never run on the deployment host.
 # https://security-tracker.debian.org/tracker/DSA-6531-1 (OpenSSL)
 # https://security-tracker.debian.org/tracker/DSA-6572-1 (CA roots)
+# https://security-tracker.debian.org/tracker/DSA-6549-1 (liblzma)
 set -eu
 export LC_ALL=C DEBIAN_FRONTEND=noninteractive
 . /etc/os-release
 test "$ID:$VERSION_CODENAME" = debian:trixie
 
 SSL_VERSION='3.5.7-1~deb13u3'
-set -- 'ca-certificates=20250419+deb13u1' "libssl3t64=$SSL_VERSION" "openssl=$SSL_VERSION"
+set -- 'ca-certificates=20250419+deb13u1' "libssl3t64=$SSL_VERSION" "openssl=$SSL_VERSION" \
+       'liblzma5=5.8.1-1+deb13u2'
 # Keep a provider already shipped by the base in sync, without adding one.
 if [ "$(dpkg-query -W -f='${db:Status-Status}' openssl-provider-legacy 2>/dev/null || true)" = installed ]; then
     set -- "$@" "openssl-provider-legacy=$SSL_VERSION"
