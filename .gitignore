@@ -1,12 +1,16 @@
 .env
-.env.production
+.env.*
+!.env.example
 transfer/
 releases/
 .venv/
 venv/
 __pycache__/
 *.py[cod]
-*.sqlite3
+*.sqlite3*
+*.tar
+*.tar.gz
+*.zip
 data/*
 !data/.gitkeep
 staticfiles/
@@ -17,4 +21,5 @@ htmlcov/
 .idea/
 .vscode/
 .DS_Store
+.ci-kidstime/
 

@@ -8,6 +8,7 @@ import tarfile
 import tempfile
 
 from check_caddy_runtime import Archive, docker, layer_names, require
+from check_app_payload import check_app_archive
 
 STATUS = "var/lib/dpkg/status"
 
@@ -83,6 +84,9 @@ assert os.environ['DB_ENGINE'] == 'postgresql'
 assert (Path('/app/data').stat().st_uid, Path('/app/data').stat().st_gid) == (10001, 10001)
 assert all(importlib.util.find_spec(n) is None for n in ('sqlite3','_sqlite3','pysqlite3','pip','ensurepip'))
 assert Path(ssl.get_default_verify_paths().cafile).is_file()
+assert {p.name for p in Path('/app').iterdir()} == {
+    'config', 'poker', 'static', 'staticfiles', 'templates', 'deploy', 'data', 'manage.py'}
+assert not Path('/app/poker/tests').exists()
 try:
     database_config({'SCORE_IT_REQUIRE_POSTGRESQL':'1','DB_ENGINE':'sqlite'}, Path('/tmp'))
 except ImproperlyConfigured:
@@ -110,6 +114,9 @@ def main():
             archive = Path(temp) / (name + ".tar")
             docker("image", "save", "--platform", args.platform, "--output", str(archive), image, timeout=120)
             check_archive(archive, image, postgres=postgres, platform=args.platform)
+            if not postgres:
+                check_app_archive(archive, image, args.platform)
+                print('APP_ARCHIVE_PAYLOAD_OK', flush=True)
             require(json.loads(docker("image", "inspect", image))[0]["Id"] == identity,
                     "Runtime image tag changed during export")
             archive.unlink()
