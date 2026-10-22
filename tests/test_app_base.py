@@ -8,7 +8,8 @@ from check_app_base import MINIMUM, check_inventory
 class AppBaseTests(unittest.TestCase):
     def setUp(self):
         self.report = {'os_id': 'debian', 'codename': 'trixie', 'python': '3.12.15',
-                       'uid': 10001, 'openssl_version': [3, 5, 7, 0, 15],
+                       'uid': 10001, 'openssl_version': [3, 5, 0, 7, 0],
+                       'openssl_number': 0x30500070,
                        'packages': dict(MINIMUM)}
 
     def test_accepts_reviewed_versions_and_security_revisions(self):
@@ -31,7 +32,14 @@ class AppBaseTests(unittest.TestCase):
                         check_inventory(report)
 
     def test_rejects_loading_an_old_library_despite_new_package_metadata(self):
-        self.report['openssl_version'] = [3, 0, 22, 0, 15]
+        self.report['openssl_version'] = [3, 0, 0, 22, 0]
+        self.report['openssl_number'] = 0x30000160
+        with self.assertRaisesRegex(RuntimeError, 'Python loaded an old'):
+            check_inventory(self.report)
+
+    def test_rejects_an_old_patch_release_in_openssl_3_number_format(self):
+        self.report['openssl_version'] = [3, 5, 0, 6, 0]
+        self.report['openssl_number'] = 0x30500060
         with self.assertRaisesRegex(RuntimeError, 'Python loaded an old'):
             check_inventory(self.report)
 

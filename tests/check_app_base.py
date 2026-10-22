@@ -20,14 +20,17 @@ raw = subprocess.check_output(['dpkg-query', '-W', '-f=${Package}\t${Version}\t$
 packages = {name: version for name, version, status in (line.split('\t') for line in raw.splitlines()) if status == 'installed'}
 report = {'os_id': release['ID'].strip('"'), 'codename': release['VERSION_CODENAME'].strip('"'),
           'python': platform.python_version(), 'openssl': ssl.OPENSSL_VERSION,
-          'openssl_version': list(ssl.OPENSSL_VERSION_INFO), 'uid': os.geteuid(), 'packages': packages}
+          'openssl_version': list(ssl.OPENSSL_VERSION_INFO), 'openssl_number': ssl.OPENSSL_VERSION_NUMBER,
+          'uid': os.geteuid(), 'packages': packages}
 '''
 
 
 def check_inventory(report):
     require((report['os_id'], report['codename']) == ('debian', 'trixie'), 'Expected Debian 13 app base')
     require(report['python'] == '3.12.15' and report['uid'] == 10001, 'Python/user contract changed')
-    require(tuple(report['openssl_version'][:3]) >= (3, 5, 7), 'Python loaded an old OpenSSL library')
+    # OpenSSL 3.5.7 is reported as (3, 5, 0, 7, 0) by Python's legacy tuple.
+    require(report['openssl_number'] >= 0x30500070,
+            'Python loaded an old OpenSSL library: ' + str(report['openssl_version']))
     for package, minimum in MINIMUM.items():
         version = report['packages'].get(package)
         require(bool(version) and subprocess.run(['dpkg', '--compare-versions', version, 'ge', minimum],
