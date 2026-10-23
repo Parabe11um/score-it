@@ -1,5 +1,13 @@
 ARG POSTGRES_IMAGE=postgres:17.11-bookworm@sha256:3645570cccdfa447589da9f57dd740faa29b30938e861289a5574b6ca6b03826
 ARG GO_IMAGE=golang:1.26.10-alpine3.24@sha256:9ce231b28998b32e116927c61aa5c406183061d4f3f2d61b292c88e7f6bdf7ca
+FROM ${POSTGRES_IMAGE} AS gzip-builder
+ARG BUILD_TLS_COMPAT=0
+RUN --mount=type=bind,source=deploy/build_tls.sh,target=/run/score-it-build-tls.sh,readonly \
+    --mount=type=bind,source=deploy/build_gzip_security.sh,target=/run/score-it-build-gzip.sh,readonly \
+    --mount=type=bind,source=deploy/patches/gzip/e7378c2-lzh-state.patch,target=/run/score-it-gzip-followup.patch,readonly \
+    --mount=type=bind,source=deploy/gzip_lzh_state_probe.c,target=/run/score-it-gzip-probe.c,readonly \
+    sh /run/score-it-build-tls.sh "$BUILD_TLS_COMPAT" sh /run/score-it-build-gzip.sh
+
 FROM ${GO_IMAGE} AS gosu-builder
 ARG BUILD_TLS_COMPAT=0
 ENV GOTOOLCHAIN=local CGO_ENABLED=0
@@ -43,6 +51,8 @@ RUN --mount=type=bind,source=deploy/build_tls.sh,target=/run/score-it-build-tls.
     sh /run/score-it-build-tls.sh "$BUILD_TLS_COMPAT" sh /run/score-it-build-libpq.sh
 
 FROM ${POSTGRES_IMAGE} AS runtime-files
+RUN --mount=type=bind,from=gzip-builder,source=/out,target=/run/score-it-gzip,readonly \
+    dpkg -i /run/score-it-gzip/gzip_1.13-1+deb13u1+scoreit12.1_amd64.deb
 RUN --mount=type=bind,from=libpq-builder,source=/out,target=/run/score-it-libpq,readonly \
     dpkg -i /run/score-it-libpq/libpq5_18.6-1.pgdg12+2+scoreit1_amd64.deb
 RUN --mount=type=bind,from=postgres-builder,source=/out,target=/run/score-it-postgres,readonly \
@@ -62,6 +72,7 @@ RUN --mount=type=bind,source=deploy/prune_runtime_tools.sh,target=/run/score-it-
     sh /run/score-it-prune-tools.sh postgres
 COPY --from=postgres-builder /out/postgres-*.txt /out/postgres-build-packages.tsv /usr/share/score-it/
 COPY --from=libpq-builder /out/libpq-*.txt /usr/share/score-it/
+COPY --from=gzip-builder /out/gzip-*.txt /out/gzip-binary.sha256 /usr/share/score-it/
 
 # Copy the resulting filesystem, not the upstream image's layers: those still
 # contain the original gosu and the image-wide test certificate/key.

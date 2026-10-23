@@ -38,6 +38,8 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_caddy_payload.py' -v
       - name: Reject obsolete gosu, deleted test keys and changed PostgreSQL configuration
         run: python -m unittest discover -s tests -p 'test_postgres_payload.py' -v
+      - name: Reject partial gzip fixes and stale saved binaries/package records
+        run: python -m unittest discover -s tests -p 'test_gzip_payload.py' -v
       - name: Reject SQLite binaries and package records retained in saved runtime layers
         run: python -m unittest discover -s tests -p 'test_sqlite_payload.py' -v
       - name: Reject test tools and build files in every production app layer

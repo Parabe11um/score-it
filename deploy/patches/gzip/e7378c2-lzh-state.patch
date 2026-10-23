@@ -1,0 +1,62 @@
+From e7378c2d421be6a286922374425680bbe9ad8b7d Mon Sep 17 00:00:00 2001
+From: Paul Eggert <eggert@cs.ucla.edu>
+Date: Fri, 24 Jul 2026 23:15:13 -0700
+Subject: =?UTF-8?q?gzip:=20don=E2=80=99t=20mishandle=20.lzh=20after=20.Z?=
+ =?UTF-8?q?=20(better=20fix)?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+* unlzh.c (read_c_len): Move clearing of left and right from here ...
+(huf_decode_start): ... to here.
+Problem and fix reported by Elias Hasas.
+---
+ THANKS  |  1 +
+ unlzh.c | 12 ++++++------
+ 2 files changed, 7 insertions(+), 6 deletions(-)
+
+diff --git a/THANKS b/THANKS
+index 9359bab..dac5ae8 100644
+--- a/THANKS
++++ b/THANKS
+@@ -81,6 +81,7 @@ John Eaton              jwe@che.utexas.edu
+ Will Edgington          wedgingt@ptolemy.arc.nasa.gov
+ Brian Edmonds           edmonds@edmonds.home.cs.ubc.ca
+ Paul Eggert             eggert@cs.ucla.edu
++Elias Hasas		ehasas17@outlook.com
+ Enami                   enami@sys.ptg.sony.co.jp
+ Kristoffer Eriksson     ske@pkmab.se
+ Daniel Eriksson         m91der@bellatrix.tdb.uu.se
+diff --git a/unlzh.c b/unlzh.c
+index 2522764..c3e92ff 100644
+--- a/unlzh.c
++++ b/unlzh.c
+@@ -232,12 +232,6 @@ read_c_len ()
+         c = getbits(CBIT);
+         for (i = 0; i < NC; i++) c_len[i] = 0;
+         for (i = 0; i < 4096; i++) c_table[i] = c;
+-
+-        /* Needed in case LEFT and RIGHT are reused from a previous
+-           LZW decompression.  It may be overkill to clear all of both
+-           arrays, but nobody has had time to analyze this carefully.  */
+-        memzero(left, (2 * NC - 1) * sizeof *left);
+-        memzero(right, (2 * NC - 1) * sizeof *left);
+     } else {
+         i = 0;
+         while (i < n) {
+@@ -313,6 +307,12 @@ decode_p ()
+ static void
+ huf_decode_start ()
+ {
++    /* Needed in case LEFT and RIGHT are reused from a previous
++       LZW decompression.  It may be overkill to clear all of both
++       arrays, but nobody has had time to analyze this carefully.  */
++    memzero (left, (2 * NC - 1) * sizeof *left);
++    memzero (right, (2 * NC - 1) * sizeof *right);
++
+     init_getbits();  blocksize = 0;
+ }
+ 
+-- 
+cgit v1.2.3
+

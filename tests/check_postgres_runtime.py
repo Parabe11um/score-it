@@ -6,6 +6,7 @@ a new volume are used, with no network or host ports. No production data is read
 """
 
 import argparse
+import gzip
 import hashlib
 import json
 from pathlib import Path, PurePosixPath
@@ -121,15 +122,18 @@ def check_existing_volume(source, target):
     prefix = "score-it-postgres-runtime-" + uuid.uuid4().hex
     volume = prefix + "-data"
     containers = []
-    volume_created = False
+    volumes = []
     database = "score_it_runtime_check"
     password = secrets.token_hex(24)
 
-    def create(image, suffix):
+    def create(image, suffix, data_volume=None, init_file=None):
+        init_mount = (['--mount', 'type=bind,source=' + str(init_file)
+                       + ',target=/docker-entrypoint-initdb.d/01-gzip.sql.gz,readonly'] if init_file else [])
         container = docker(
             "create", "--pull=never", "--network", "none", "--name", prefix + suffix,
             "--env", "POSTGRES_DB=" + database, "--env", "POSTGRES_PASSWORD=" + password,
-            "--mount", f"type=volume,source={volume},target=/var/lib/postgresql/data", image,
+            "--mount", f"type=volume,source={data_volume or volume},target=/var/lib/postgresql/data",
+            *init_mount, image,
         )
         containers.append(container)
         docker("start", container)
@@ -174,7 +178,7 @@ def check_existing_volume(source, target):
 
     try:
         docker("volume", "create", volume)
-        volume_created = True
+        volumes.append(volume)
         previous = create(source, "-previous")
         ready(previous)
         preflight(previous)
@@ -311,11 +315,38 @@ def check_existing_volume(source, target):
         require(sql(rollback, query) == expected and sql(rollback, sort_query) == sort_before,
                 "Previous server cannot reopen candidate data")
         print("POSTGRES_PREVIOUS_SERVER_REOPEN_OK", flush=True)
+        # A fresh target volume exercises gzip in the real upstream entrypoint;
+        # the existing-volume path above intentionally skips init scripts.
+        with tempfile.TemporaryDirectory(prefix='score-it-pg-gzip-init-') as temporary:
+            init = Path(temporary) / '01-gzip.sql.gz'
+            init.write_bytes(gzip.compress(b'CREATE TABLE gzip_init_probe (id integer PRIMARY KEY);\n'
+                                           b'INSERT INTO gzip_init_probe VALUES (1742);\n', mtime=0))
+            init.chmod(0o444)
+            gzip_volume = prefix + '-gzip-data'
+            docker('volume', 'create', gzip_volume)
+            volumes.append(gzip_volume)
+            fresh = create(target, '-gzip', data_volume=gzip_volume, init_file=init)
+            ready(fresh)
+            require(sql(fresh, 'SELECT id FROM gzip_init_probe') == '1742', '.sql.gz initialization failed')
+            print('POSTGRES_GZIP_INIT_OK', flush=True)
+            docker('exec', '--env', 'PGPASSWORD=' + password, '--user', 'postgres', fresh, 'sh', '-ec', r'''
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+pg_dump -h 127.0.0.1 -U postgres -d "$POSTGRES_DB" --format=plain --no-owner --no-privileges >"$work/dump.sql"
+gzip -n -c "$work/dump.sql" >"$work/dump.sql.gz"
+gzip -t "$work/dump.sql.gz"
+gzip -dc "$work/dump.sql.gz" >"$work/restored.sql"
+createdb -h 127.0.0.1 -U postgres "${POSTGRES_DB}_gzip_restore"
+psql -X -h 127.0.0.1 -U postgres -d "${POSTGRES_DB}_gzip_restore" -v ON_ERROR_STOP=1 -f "$work/restored.sql"
+''')
+            require(sql(fresh, 'SELECT id FROM gzip_init_probe', database + '_gzip_restore') == '1742',
+                    'Compressed SQL dump/restore changed data')
+            print('POSTGRES_GZIP_DUMP_RESTORE_OK', flush=True)
     finally:
         for container in reversed(containers):
             subprocess.run(["docker", "rm", "-f", container], stdin=subprocess.DEVNULL,
                            capture_output=True, timeout=30)
-        if volume_created:
+        for volume in reversed(volumes):
             subprocess.run(["docker", "volume", "rm", volume], stdin=subprocess.DEVNULL,
                            capture_output=True, timeout=30)
 
