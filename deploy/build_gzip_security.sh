@@ -15,7 +15,7 @@ SOURCE=https://deb.debian.org/debian/pool/main/g/gzip
 PATCH=/run/score-it-gzip-followup.patch
 PROBE=/run/score-it-gzip-probe.c
 apt-get update
-apt-get install -y --no-install-recommends build-essential ca-certificates curl dpkg-dev debhelper texinfo less
+apt-get install -y --no-install-recommends build-essential ca-certificates curl dpkg-dev debhelper texinfo less util-linux
 mkdir -p /src/gzip /out
 cd /src/gzip
 for FILE in gzip_1.13.orig.tar.xz gzip_1.13-1+deb13u1.debian.tar.xz gzip_1.13-1+deb13u1.dsc; do
@@ -46,10 +46,17 @@ export DEB_BUILD_OPTIONS="parallel=$(nproc)"
 # Do not use nocheck: Debian's build invokes the upstream regression suite.
 dpkg-buildpackage --build=binary --no-sign --no-pre-clean
 dpkg-source --before-build .
+# The packaging build runs as root, which skips write-error. Rerun the entire
+# suite unprivileged so that this normal filesystem-permission case is tested.
+useradd --system --user-group --no-create-home gzipcheck
+chown -R gzipcheck:gzipcheck /src/gzip
+rm -f builddir/tests/*.log builddir/tests/*.trs
+runuser -u gzipcheck -- make -C builddir check
 test -f builddir/tests/test-suite.log
 grep -E '^# TOTAL: +[1-9][0-9]*$' builddir/tests/test-suite.log
 grep -E '^# FAIL: +0$' builddir/tests/test-suite.log
 grep -E '^# ERROR: +0$' builddir/tests/test-suite.log
+grep -E '^# SKIP: +0$' builddir/tests/test-suite.log
 # Test the actual upstream decoder before its first input read. The first
 # Debian patch must fail this control; the complete follow-up must pass.
 cc -O2 -ffunction-sections -fdata-sections -Wl,--gc-sections \
@@ -60,7 +67,8 @@ test "$STATUS" = 42
 cc -O2 -ffunction-sections -fdata-sections -Wl,--gc-sections \
     -Ibuilddir -I. -Ilib -Ibuilddir/lib "$PROBE" -o ../fixed-probe
 ../fixed-probe >/out/gzip-regression.txt
-printf '%s\n' 'GZIP_FIRST_PATCH_CONTROL_REJECTED exit=42' 'GZIP_UPSTREAM_REGRESSION_OK' >>/out/gzip-regression.txt
+printf '%s\n' 'GZIP_FIRST_PATCH_CONTROL_REJECTED exit=42' 'GZIP_UPSTREAM_REGRESSION_OK' \
+    'GZIP_UPSTREAM_NONROOT_OK' >>/out/gzip-regression.txt
 cat builddir/tests/test-suite.log >>/out/gzip-regression.txt
 PACKAGE="../gzip_${REVISION}_amd64.deb"
 test "$(dpkg-deb --field "$PACKAGE" Version)" = "$REVISION"

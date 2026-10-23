@@ -19,7 +19,7 @@ def payload():
             'followup_commit=' + FOLLOWUP + '\nfollowup_sha256=' + FOLLOWUP_SHA256 + '\n').encode(),
         PREFIX + 'gzip-binary.sha256': (hashlib.sha256(raw).hexdigest() + '  /usr/bin/gzip\n').encode(),
         PREFIX + 'gzip-regression.txt': b'GZIP_LZH_STATE_RESET_OK\nGZIP_FIRST_PATCH_CONTROL_REJECTED exit=42\n'
-            b'GZIP_UPSTREAM_REGRESSION_OK\n# TOTAL: 28\n# FAIL: 0\n# ERROR: 0\n'}
+            b'GZIP_UPSTREAM_REGRESSION_OK\nGZIP_UPSTREAM_NONROOT_OK\n# TOTAL: 28\n# SKIP: 0\n# FAIL: 0\n# ERROR: 0\n'}
 
 
 class GzipPayloadTests(unittest.TestCase):

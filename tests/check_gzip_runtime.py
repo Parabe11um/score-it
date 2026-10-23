@@ -77,9 +77,11 @@ def check_archive(path, image, profile):
             and hashlib.sha256(found['binary']).hexdigest() == match[1].decode(), 'gzip binary/build hash differs')
     evidence = found['gzip-regression.txt'].decode()
     require({'GZIP_LZH_STATE_RESET_OK', 'GZIP_FIRST_PATCH_CONTROL_REJECTED exit=42',
-             'GZIP_UPSTREAM_REGRESSION_OK'} <= set(evidence.splitlines()), 'Incomplete gzip regression evidence')
+             'GZIP_UPSTREAM_REGRESSION_OK', 'GZIP_UPSTREAM_NONROOT_OK'} <= set(evidence.splitlines()),
+            'Incomplete gzip regression evidence')
     require(re.search(r'^# TOTAL: +[1-9][0-9]*$', evidence, re.M)
             and re.search(r'^# FAIL: +0$', evidence, re.M)
+            and re.search(r'^# SKIP: +0$', evidence, re.M)
             and re.search(r'^# ERROR: +0$', evidence, re.M), 'gzip upstream tests did not pass')
     return {'version': version, 'binary_sha256': match[1].decode(), 'distribution': distribution}
 
