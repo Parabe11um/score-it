@@ -270,14 +270,22 @@ def check_existing_volume(source, target):
              '-d', database, '-c', 'SELECT ssl FROM pg_stat_ssl WHERE pid=pg_backend_pid()'],
             stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=15)
         require(result.returncode == 0 and result.stdout.strip() == 't',
-                'Rebuilt libpq could not verify the TLS server certificate')
+                'Rebuilt libpq could not verify the TLS server certificate: ' + result.stderr[-2000:])
+        # A minimal PostgreSQL image need not contain a system CA bundle.
+        # Use an actual unrelated CA so a missing file cannot satisfy/fail this test.
+        docker('exec', '--user', 'postgres', current, 'sh', '-ec',
+               'umask 077; openssl req -x509 -newkey rsa:2048 -nodes -days 1 '
+               '-subj /CN=unrelated-postgres-test-ca '
+               '-keyout /tmp/score-it-unrelated-ca.key -out /tmp/score-it-unrelated-ca.crt; '
+               'rm /tmp/score-it-unrelated-ca.key')
         bad_trust = subprocess.run(
             ['docker', 'exec', '--env', 'PGPASSWORD=' + password, '--env', 'PGSSLMODE=verify-full',
-             '--env', 'PGSSLROOTCERT=/etc/ssl/certs/ca-certificates.crt', '--user', 'postgres', current,
+             '--env', 'PGSSLROOTCERT=/tmp/score-it-unrelated-ca.crt', '--user', 'postgres', current,
              'psql', '-X', '-h', '127.0.0.1', '-U', 'postgres', '-d', database, '-c', 'SELECT 1'],
             stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=15)
         require(bad_trust.returncode != 0 and 'certificate verify failed' in bad_trust.stderr.lower(),
-                'Rebuilt libpq accepted an untrusted TLS server certificate')
+                'Untrusted TLS server certificate was not rejected as expected: '
+                + str(bad_trust.returncode) + ' ' + bad_trust.stderr[-2000:])
         print('POSTGRES_TLS_CLIENT_TRUST_OK', flush=True)
         restored_database = database + '_restored'
         docker('exec', '--env', 'PGPASSWORD=' + password, '--env', 'PGSSLMODE=verify-full',
