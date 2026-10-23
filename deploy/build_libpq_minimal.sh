@@ -3,7 +3,7 @@
 # Signed APT source indices authenticate all source bytes before extraction.
 set -eu
 export LC_ALL=C DEBIAN_FRONTEND=noninteractive
-VERSION=18.6-3.pgdg12+1
+VERSION=18.6-1.pgdg12+2
 REVISION=${VERSION}+scoreit1
 mkdir -p /src/libpq /out
 cd /src/libpq

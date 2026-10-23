@@ -330,7 +330,7 @@ def main():
                     "grep -F -- --without-ldap \"$config\" >/dev/null; "
                     "grep -F -- --with-openssl \"$config\" >/dev/null; "
                     "grep -F -- --with-gssapi \"$config\" >/dev/null; done; "
-                    "test \"$(dpkg-query -W -f='${Version}' libpq5)\" = 18.6-3.pgdg12+1+scoreit1; "
+                    "test \"$(dpkg-query -W -f='${Version}' libpq5)\" = 18.6-1.pgdg12+2+scoreit1; "
                     "test -z \"$(dpkg --audit)\"; "
                     "ldd /usr/lib/x86_64-linux-gnu/libpq.so.5; "
                     "find /usr/lib/postgresql/17 -type f \\( -name '*.so' -o -name postgres \\) "
