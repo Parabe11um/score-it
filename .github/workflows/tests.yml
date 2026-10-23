@@ -42,6 +42,8 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_sqlite_payload.py' -v
       - name: Reject test tools and build files in every production app layer
         run: python -m unittest discover -s tests -p 'test_app_payload.py' -v
+      - name: Reject retired OS commands and file privilege elevation in every saved layer
+        run: python -m unittest discover -s tests -p 'test_runtime_tools.py' -v
       - name: Reject stale app OpenSSL, CA roots and a changed runtime contract
         run: python -m unittest discover -s tests -p 'test_app_base.py' -v
       - name: Verify external audit tool delivery without changing the app image
