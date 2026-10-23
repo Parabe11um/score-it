@@ -52,6 +52,9 @@ for name in ('app', 'postgres', 'caddy'):
         blocked.append(name + ': secret findings require review')
     if any(v['VulnerabilityID'] in ('CVE-2026-111943', 'DLA-4845-1') for v in vulnerabilities):
         blocked.append(name + ': certificate trust security update is still missing')
+    if name == 'app' and any(v['VulnerabilityID'] in ('CVE-2026-84782', 'DSA-6549-1', 'TEMP-1147318-639065')
+                             for v in vulnerabilities):
+        blocked.append('app: targeted OpenSSL/liblzma security fix is still missing')
     if name in ('app', 'postgres'):
         sqlite = [p for result in report.get('Results', [])
                   for p in result.get('Packages') or []

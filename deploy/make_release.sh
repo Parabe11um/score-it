@@ -84,6 +84,8 @@ python3 deploy/verify_release.py manifest --archive "$DEST/images.tar" \
 printf 'RELEASE=%s\nPLATFORM=%s\n' "$RELEASE" "$PLATFORM" > "$DEST/VERSION"
 mkdir -p "$DEST/security"
 printf 'RELEASE_PULL=%s\nRELEASE_TLS_COMPAT=%s\n' "${RELEASE_PULL:-1}" "$TLS_COMPAT" > "$DEST/security/build-options.txt"
+python3 tests/check_app_base.py --image "$APP_IMAGE" --platform "$PLATFORM" </dev/null | \
+  tee "$DEST/security/app-base.txt"
 python3 tests/check_sqlite_payload.py --app-image "$APP_IMAGE" --postgres-image "$PG_IMAGE" \
   --python-source-image "$PYTHON_SOURCE_IMAGE" --platform "$PLATFORM" </dev/null | \
   tee "$DEST/security/sqlite-payload.txt"
