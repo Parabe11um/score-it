@@ -9,6 +9,7 @@ import tempfile
 
 from check_caddy_runtime import Archive, docker, layer_names, require
 from check_app_payload import check_app_archive
+from check_runtime_tools import check_runtime_member, check_runtime_packages
 
 STATUS = "var/lib/dpkg/status"
 
@@ -39,6 +40,7 @@ def check_archive(path, image, postgres=False, platform="linux/amd64"):
             with source.tar.extractfile(member) as stream:
                 with tarfile.open(fileobj=stream, mode="r|*") as layer:
                     for item in layer:
+                        check_runtime_member(item)
                         name = str(PurePosixPath(item.name))
                         require(not PurePosixPath(name).is_absolute()
                                 and ".." not in PurePosixPath(name).parts, "Unsafe runtime path")
@@ -53,6 +55,7 @@ def check_archive(path, image, postgres=False, platform="linux/amd64"):
                                 statuses.append(installed_packages(content.read()))
     require(bool(statuses), "Runtime package inventory is missing")
     for packages in statuses:
+        check_runtime_packages(packages)
         require("libsqlite3-0" not in packages, "SQLite package retained in image layers")
         if postgres:
             require(not {"gpg", "gnupg", "gpg-wks-client", "gpg-wks-server"} & packages,
@@ -121,6 +124,7 @@ def main():
                     "Runtime image tag changed during export")
             archive.unlink()
             print("SQLITE_ARCHIVE_PAYLOAD_OK=" + name, flush=True)
+            print("RUNTIME_TOOLS_ARCHIVE_OK=" + name, flush=True)
     print(docker("run", "--rm", "--pull=never", "--network", "none", "--read-only",
                  "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true",
                  "--entrypoint", "python", app["Id"], "-c", APP_CHECK), flush=True)

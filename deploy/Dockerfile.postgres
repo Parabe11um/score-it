@@ -44,6 +44,8 @@ RUN --mount=type=bind,source=deploy/prune_runtime_sqlite.sh,target=/run/score-it
     sh /run/score-it-prune-sqlite.sh postgres
 RUN --mount=type=bind,source=deploy/prune_postgres_features.sh,target=/run/score-it-prune-features.sh,readonly \
     sh /run/score-it-prune-features.sh
+RUN --mount=type=bind,source=deploy/prune_runtime_tools.sh,target=/run/score-it-prune-tools.sh,readonly \
+    sh /run/score-it-prune-tools.sh postgres
 COPY --from=postgres-builder /out/postgres-*.txt /out/postgres-build-packages.tsv /usr/share/score-it/
 
 # Copy the resulting filesystem, not the upstream image's layers: those still

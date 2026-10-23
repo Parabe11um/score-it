@@ -31,6 +31,8 @@ RUN DJANGO_SECRET_KEY=build-only-static-files DJANGO_DEBUG=0 DB_ENGINE=sqlite \
     && chown app:app /app/data
 RUN --mount=type=bind,source=deploy/prune_runtime_sqlite.sh,target=/run/score-it-prune-sqlite.sh,readonly \
     sh /run/score-it-prune-sqlite.sh app
+RUN --mount=type=bind,source=deploy/prune_runtime_tools.sh,target=/run/score-it-prune-tools.sh,readonly \
+    sh /run/score-it-prune-tools.sh app
 
 # Do not deliver the SQLite library/modules from earlier Python image layers.
 FROM scratch
