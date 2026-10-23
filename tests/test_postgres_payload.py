@@ -59,6 +59,9 @@ class PostgresPayloadTests(unittest.TestCase):
     def test_rejects_optional_libraries_even_after_deletion(self):
         for name in ("usr/lib/x86_64-linux-gnu/libxml2.so.2.9.14",
                      "usr/lib/x86_64-linux-gnu/libLLVM-19.so.1",
+                     "usr/lib/x86_64-linux-gnu/libldap-2.5.so.0",
+                     "usr/lib/x86_64-linux-gnu/liblber-2.5.so.0",
+                     "usr/lib/x86_64-linux-gnu/libsasl2.so.2",
                      "usr/lib/postgresql/17/lib/pgxml.so",
                      "usr/lib/postgresql/17/lib/llvmjit.so"):
             with self.subTest(name=name), self.assertRaisesRegex(RuntimeError, "Removed PostgreSQL feature"):
@@ -67,9 +70,11 @@ class PostgresPayloadTests(unittest.TestCase):
                                           GOSU: binary()}, link=False)])
 
     def test_rejects_removed_package_inventory(self):
-        with self.assertRaisesRegex(RuntimeError, "Removed PostgreSQL package"):
-            self.verify([layer_bytes({GOSU: binary(), "var/lib/dpkg/status":
-                                     b"Package: libxml2\nStatus: install ok installed\n\n"}, link=False)])
+        for package in ('libxml2', 'libldap-2.5-0', 'libsasl2-2', 'libsasl2-modules-db'):
+            for oci in (False, True):
+                with self.subTest(package=package, oci=oci), self.assertRaisesRegex(RuntimeError, "Removed PostgreSQL package"):
+                    self.verify([layer_bytes({GOSU: binary(), "var/lib/dpkg/status":
+                                             ('Package: ' + package + '\nStatus: install ok installed\n\n').encode()}, link=False)], oci)
 
     def test_rejects_obsolete_go_or_module_versions(self):
         check_build_info(BUILD_INFO)
@@ -105,7 +110,7 @@ class PostgresPayloadTests(unittest.TestCase):
 
     def test_accepts_only_documented_server_package_revision(self):
         source = {"Env": ["PG_MAJOR=17", "PG_VERSION=17.11-1.pgdg12+2"]}
-        target = {"Env": ["PG_MAJOR=17", "PG_VERSION=17.11-1.pgdg12+2+scoreit1"]}
+        target = {"Env": ["PG_MAJOR=17", "PG_VERSION=17.11-1.pgdg12+2+scoreit2"]}
         check_metadata(source, target)
         with self.assertRaisesRegex(RuntimeError, "environment changed"):
             check_metadata(source, source)

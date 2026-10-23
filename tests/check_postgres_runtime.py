@@ -31,12 +31,14 @@ REMOVED_PACKAGES = {
     "libxml2", "libxslt1.1", "libllvm19", "libz3-4", "dirmngr", "gnupg-l10n",
     "gnupg-utils", "gpg-agent", "gpgconf", "gpgsm", "pinentry-curses",
     "libksba8", "libnpth0", "libassuan0", "libncursesw6",
+    "libldap-2.5-0", "libsasl2-2", "libsasl2-modules-db",
 }
 
 
 def optional_feature_path(name):
     basename = PurePosixPath(name).name.removeprefix(".wh.")
-    return (basename.startswith(("libxml2.so", "libxslt.so", "libexslt.so", "libLLVM", "libz3.so"))
+    return (basename.startswith(("libxml2.so", "libxslt.so", "libexslt.so", "libLLVM", "libz3.so",
+                                 "libldap", "liblber", "libsasl2.so"))
             or basename in {"pgxml.so", "llvmjit.so", "llvmjit_types.bc"}
             or "/postgresql/17/lib/bitcode/" in "/" + name
             or basename in {"dirmngr", "gpg-agent", "gpgconf", "gpgsm", "pinentry-curses"})
@@ -98,7 +100,7 @@ def check_metadata(source, target):
     expected_env = environments[0].copy()
     if "PG_VERSION" in expected_env:
         require(expected_env["PG_VERSION"] == "17.11-1.pgdg12+2", "Unexpected upstream PostgreSQL")
-        expected_env["PG_VERSION"] += "+scoreit1"
+        expected_env["PG_VERSION"] += "+scoreit2"
     require(expected_env == environments[1], "PostgreSQL image environment changed")
     require(environments[1].get("PG_MAJOR") == "17", "Expected PostgreSQL 17")
     require(not {"GODEBUG", "OPENSSL_CONF"}.intersection(environments[1]),
@@ -133,11 +135,11 @@ def check_existing_volume(source, target):
         docker("start", container)
         return container
 
-    def sql(container, statement):
+    def sql(container, statement, dbname=database):
         return docker("exec", "--env", "PGPASSWORD=" + password, "--user", "postgres",
                       container, "psql", "-X", "-A", "-t", "--host", "127.0.0.1",
                       "--set", "ON_ERROR_STOP=1", "--username", "postgres",
-                      "--dbname", database, "--command", statement)
+                      "--dbname", dbname, "--command", statement)
 
     def preflight(container, blocked=False):
         script = (Path(__file__).resolve().parents[1] /
@@ -149,7 +151,7 @@ def check_existing_volume(source, target):
             input=script, capture_output=True, text=True, timeout=15)
         if blocked:
             require(result.returncode != 0 and 'POSTGRES_PREFLIGHT_BLOCKED' in result.stderr,
-                    'Feature preflight accepted an XML column')
+                    'Feature preflight accepted an incompatible feature')
         else:
             require(result.returncode == 0 and 'POSTGRES_FEATURE_PREFLIGHT_OK' in result.stdout,
                     'Feature preflight rejected a compatible database')
@@ -179,6 +181,22 @@ def check_existing_volume(source, target):
         sql(previous, 'CREATE TABLE xml_feature_probe (payload xml)')
         preflight(previous, blocked=True)
         sql(previous, 'DROP TABLE xml_feature_probe')
+        original_hba = sql(previous, "SELECT pg_read_file(current_setting('hba_file'))")
+
+        def write_hba(text):
+            result = subprocess.run(
+                ['docker', 'exec', '-i', '--user', 'postgres', previous, 'sh', '-ec',
+                 'cat > "$PGDATA/pg_hba.conf"'], input=text, text=True,
+                capture_output=True, timeout=10)
+            require(result.returncode == 0, 'Could not write synthetic HBA fixture')
+
+        try:
+            write_hba(original_hba + '\nhost all all 192.0.2.0/24 ldap ldapserver=ldap.invalid\n')
+            preflight(previous, blocked=True)
+            write_hba(original_hba + '\nhost all all 192.0.2.0/24 invalid_method\n')
+            preflight(previous, blocked=True)
+        finally:
+            write_hba(original_hba + '\n')
         preflight(previous)
         print('POSTGRES_FEATURE_PREFLIGHT_REJECTIONS_OK', flush=True)
         sql(previous, "CREATE TABLE runtime_probe (id integer PRIMARY KEY, note text NOT NULL); "
@@ -235,6 +253,54 @@ def check_existing_volume(source, target):
         expected += "\n202:запись после замены"
         require(sql(current, query) == expected, "Replacement PostgreSQL cannot write")
         print("POSTGRES_EXISTING_VOLUME_OK", flush=True)
+        # Exercise the rebuilt libpq over TLS/TCP, including certificate trust.
+        # These keys exist only in the uniquely named synthetic test volume.
+        docker('exec', '--user', 'postgres', current, 'sh', '-ec',
+               'umask 077; openssl req -x509 -newkey rsa:2048 -nodes -days 1 '
+               '-subj /CN=score-it-postgres-test -addext subjectAltName=IP:127.0.0.1 '
+               '-keyout "$PGDATA/server.key" -out "$PGDATA/server.crt"')
+        sql(current, "ALTER SYSTEM SET ssl='on'")
+        docker('restart', '--time', '20', current)
+        ready(current)
+        tls_args = ['docker', 'exec', '--env', 'PGPASSWORD=' + password,
+                    '--env', 'PGSSLMODE=verify-full', '--user', 'postgres', current,
+                    'sh', '-ec', 'export PGSSLROOTCERT="$PGDATA/server.crt"; exec "$@"', 'tls-probe']
+        result = subprocess.run(
+            [*tls_args, 'psql', '-X', '-A', '-t', '-h', '127.0.0.1', '-U', 'postgres',
+             '-d', database, '-c', 'SELECT ssl FROM pg_stat_ssl WHERE pid=pg_backend_pid()'],
+            stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=15)
+        require(result.returncode == 0 and result.stdout.strip() == 't',
+                'Rebuilt libpq could not verify the TLS server certificate: ' + result.stderr[-2000:])
+        # A minimal PostgreSQL image need not contain a system CA bundle.
+        # Use an actual unrelated CA so a missing file cannot satisfy/fail this test.
+        docker('exec', '--user', 'postgres', current, 'sh', '-ec',
+               'umask 077; openssl req -x509 -newkey rsa:2048 -nodes -days 1 '
+               '-subj /CN=unrelated-postgres-test-ca '
+               '-keyout /tmp/score-it-unrelated-ca.key -out /tmp/score-it-unrelated-ca.crt; '
+               'rm /tmp/score-it-unrelated-ca.key')
+        bad_trust = subprocess.run(
+            ['docker', 'exec', '--env', 'PGPASSWORD=' + password, '--env', 'PGSSLMODE=verify-full',
+             '--env', 'PGSSLROOTCERT=/tmp/score-it-unrelated-ca.crt', '--user', 'postgres', current,
+             'psql', '-X', '-h', '127.0.0.1', '-U', 'postgres', '-d', database, '-c', 'SELECT 1'],
+            stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=15)
+        require(bad_trust.returncode != 0 and 'certificate verify failed' in bad_trust.stderr.lower(),
+                'Untrusted TLS server certificate was not rejected as expected: '
+                + str(bad_trust.returncode) + ' ' + bad_trust.stderr[-2000:])
+        print('POSTGRES_TLS_CLIENT_TRUST_OK', flush=True)
+        restored_database = database + '_restored'
+        docker('exec', '--env', 'PGPASSWORD=' + password, '--env', 'PGSSLMODE=verify-full',
+               '--user', 'postgres', current,
+               'sh', '-ec',
+               'export PGSSLROOTCERT="$PGDATA/server.crt"; '
+               'pg_dump -h 127.0.0.1 -U postgres -Fc -d "$1" -f /tmp/score-it-probe.dump; '
+               'createdb -h 127.0.0.1 -U postgres "$2"; '
+               'pg_restore -h 127.0.0.1 -U postgres --exit-on-error -d "$2" /tmp/score-it-probe.dump; '
+               'rm /tmp/score-it-probe.dump', 'probe', database, restored_database)
+        require(sql(current, query, restored_database) == expected,
+                'Client dump/restore changed the test data')
+        require(sql(current, sort_query, restored_database) == sort_before,
+                'Client dump/restore changed collations or indexes')
+        print('POSTGRES_CLIENT_DUMP_RESTORE_OK', flush=True)
         docker("restart", "--time", "20", current)
         ready(current)
         require(sql(current, query) == expected, "PostgreSQL data did not persist after restart")
@@ -267,13 +333,20 @@ def main():
     print("POSTGRES_IMAGE_CONFIG_OK", flush=True)
     output = docker("run", "--rm", "--pull=never", "--network", "none", "--read-only",
                     "--entrypoint", "sh", target["Id"], "-ec",
-                    "cat /usr/share/score-it/postgres-configure.txt; "
+                    "cat /usr/share/score-it/postgres-configure.txt /usr/share/score-it/libpq-configure.txt; "
+                    "for config in /usr/share/score-it/postgres-configure.txt /usr/share/score-it/libpq-configure.txt; do "
+                    "grep -F -- --without-ldap \"$config\" >/dev/null; "
+                    "grep -F -- --with-openssl \"$config\" >/dev/null; "
+                    "grep -F -- --with-gssapi \"$config\" >/dev/null; done; "
+                    "test \"$(dpkg-query -W -f='${Version}' libpq5)\" = 18.6-1.pgdg12+2+scoreit1; "
                     "test -z \"$(dpkg --audit)\"; "
+                    "ldd /usr/lib/x86_64-linux-gnu/libpq.so.5; "
                     "find /usr/lib/postgresql/17 -type f \\( -name '*.so' -o -name postgres \\) "
                     "-exec ldd '{}' ';' 2>&1")
-    for flag in ("--without-libxml", "--without-libxslt", "--without-llvm"):
+    for flag in ("--without-libxml", "--without-libxslt", "--without-llvm", "--without-ldap"):
         require(flag in output, "PostgreSQL configure flag is missing: " + flag)
     require("not found" not in output, "A PostgreSQL shared library cannot be loaded")
+    require(not re.search(r'lib(?:ldap|lber|sasl2)', output), 'LDAP is still linked by PostgreSQL/libpq')
     with tempfile.TemporaryDirectory(prefix="score-it-postgres-runtime-") as temp:
         directory = Path(temp)
         archive = directory / "postgres.tar"
@@ -292,6 +365,7 @@ def main():
         require(runtime_hash.split()[0] == hashlib.sha256(binary).hexdigest(),
                 "Saved gosu differs from runtime gosu")
         print("POSTGRES_ARCHIVE_PAYLOAD_OK", flush=True)
+        print("POSTGRES_LDAP_DEPENDENCIES_ABSENT_OK", flush=True)
     check_existing_volume(source["Id"], target["Id"])
     print("POSTGRES_RUNTIME_OK", flush=True)
 

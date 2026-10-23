@@ -93,7 +93,8 @@ python3 tests/check_postgres_runtime.py --image "$PG_IMAGE" --source-image "$PG_
   --go-image "$GO_SOURCE_IMAGE" </dev/null | tee "$DEST/security/postgres-runtime.txt"
 docker run --rm --pull=never --network none --read-only --entrypoint cat "$PG_IMAGE" \
   /usr/share/score-it/postgres-source.txt /usr/share/score-it/postgres-configure.txt \
-  /usr/share/score-it/postgres-regression.txt >"$DEST/security/postgres-build.txt"
+  /usr/share/score-it/postgres-regression.txt /usr/share/score-it/libpq-source.txt \
+  /usr/share/score-it/libpq-configure.txt >"$DEST/security/postgres-build.txt"
 cp deploy/postgres_feature_preflight.sql "$DEST/"
 bash deploy/scan_release.sh "$DEST"
 python3 - "$DEST" <<'PY'

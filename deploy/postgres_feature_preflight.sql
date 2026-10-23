@@ -5,6 +5,12 @@ DO $score_it$
 DECLARE
     affected bigint;
 BEGIN
+    -- This view reads the current HBA files, including their include directives.
+    -- Never print rules/options: LDAP options can contain a bind password.
+    IF EXISTS (SELECT 1 FROM pg_hba_file_rules
+               WHERE auth_method='ldap' OR error IS NOT NULL) THEN
+        RAISE EXCEPTION 'POSTGRES_PREFLIGHT_BLOCKED: LDAP or invalid HBA rules need review';
+    END IF;
     WITH RECURSIVE xml_types(oid) AS (
         SELECT 'pg_catalog.xml'::regtype::oid
         UNION
