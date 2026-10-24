@@ -5,14 +5,16 @@ export LC_ALL=C DEBIAN_FRONTEND=noninteractive
 PROFILE="${1:?Expected app or postgres}"
 . /etc/os-release
 case "$PROFILE:$ID:$VERSION_CODENAME" in
-    app:debian:trixie) set -- mount ncurses-bin ;;
-    postgres:debian:bookworm) set -- mount ncurses-bin util-linux util-linux-extra ;;
+    app:debian:trixie) set -- mount ncurses-bin libmount1 libblkid1 ;;
+    postgres:debian:bookworm) set -- mount ncurses-bin util-linux util-linux-extra e2fsprogs libmount1 libblkid1 ;;
     *) echo 'Unexpected runtime tools profile or base.' >&2; exit 1 ;;
 esac
 
 # ncurses-bin (and util-linux in PG) are Essential for a general Debian system.
 # These fixed container runtimes need neither terminal administration, OS login
-# nor namespace/mount commands. Keep required shared libraries and terminfo.
+# nor namespace/mount commands. ext filesystem administration belongs to the
+# host; e2fsprogs is the remaining PG libblkid consumer after mount is removed.
+# Keep ACL, OpenSSL, libc/ICU and the other required libraries and terminfo.
 # The exception is scoped to this exact purge list; no host installs use it.
 PLAN="$(mktemp)"
 trap 'rm -f "$PLAN" "$PLAN.packages"' EXIT HUP INT TERM
@@ -25,7 +27,9 @@ fi
 awk '$1 == "Purg" || $1 == "Remv" { sub(/:.*/, "", $2); print $2 }' "$PLAN" >"$PLAN.packages"
 while IFS= read -r PACKAGE; do
     case "$PROFILE:$PACKAGE" in
-        app:mount|app:ncurses-bin|postgres:mount|postgres:ncurses-bin|postgres:util-linux|postgres:util-linux-extra) ;;
+        app:mount|app:ncurses-bin|app:libmount1|app:libblkid1|\
+        postgres:mount|postgres:ncurses-bin|postgres:util-linux|postgres:util-linux-extra|\
+        postgres:e2fsprogs|postgres:libmount1|postgres:libblkid1) ;;
         *) echo "Unexpected runtime tools package removal: $PACKAGE" >&2; exit 1 ;;
     esac
 done <"$PLAN.packages"

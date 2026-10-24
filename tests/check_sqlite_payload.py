@@ -9,7 +9,7 @@ import tempfile
 
 from check_caddy_runtime import Archive, docker, layer_names, require
 from check_app_payload import check_app_archive
-from check_runtime_tools import check_runtime_member, check_runtime_packages
+from check_runtime_tools import check_runtime_binary, check_runtime_member, check_runtime_packages
 
 STATUS = "var/lib/dpkg/status"
 
@@ -32,6 +32,7 @@ def installed_packages(raw):
 
 def check_archive(path, image, postgres=False, platform="linux/amd64"):
     statuses = []
+    elf_count = 0
     with Archive(path) as source:
         _, layers = layer_names(source, image, platform)
         for layer_name in layers:
@@ -53,6 +54,13 @@ def check_archive(path, image, postgres=False, platform="linux/amd64"):
                                     "Invalid runtime package database")
                             with layer.extractfile(item) as content:
                                 statuses.append(installed_packages(content.read()))
+                        elif item.isfile():
+                            with layer.extractfile(item) as content:
+                                first = content.read(4)
+                                if first == b'\x7fELF':
+                                    require(item.size < 256 * 1024 * 1024, 'Oversized runtime ELF file')
+                                    check_runtime_binary(first + content.read())
+                                    elf_count += 1
     require(bool(statuses), "Runtime package inventory is missing")
     for packages in statuses:
         check_runtime_packages(packages)
@@ -60,6 +68,25 @@ def check_archive(path, image, postgres=False, platform="linux/amd64"):
         if postgres:
             require(not {"gpg", "gnupg", "gpg-wks-client", "gpg-wks-server"} & packages,
                     "Unused gpg package retained in PostgreSQL layers")
+    return elf_count
+
+
+BASE_COMMANDS = r'''
+set -eu
+test "$(id -u)" = "$1"
+probe_dir="$(mktemp -d)"
+trap 'rm -rf "$probe_dir"' EXIT
+printf 'source\n' >"$probe_dir/input"
+cp "$probe_dir/input" "$probe_dir/copied"
+mv "$probe_dir/copied" "$probe_dir/moved"
+sed 's/source/checked/' "$probe_dir/moved" >"$probe_dir/result"
+tar -C "$probe_dir" -cf "$probe_dir/roundtrip.tar" result
+mkdir "$probe_dir/restored"
+tar -C "$probe_dir/restored" -xf "$probe_dir/roundtrip.tar"
+cmp "$probe_dir/result" "$probe_dir/restored/result"
+test "$(cat "$probe_dir/restored/result")" = checked
+printf 'RUNTIME_BASE_COMMANDS_OK uid=%s\n' "$(id -u)"
+'''
 
 def check_app_metadata(source, target):
     expected_env = dict(v.split("=", 1) for v in source.get("Env", []))
@@ -116,7 +143,8 @@ def main():
             identity = json.loads(docker("image", "inspect", image))[0]["Id"]
             archive = Path(temp) / (name + ".tar")
             docker("image", "save", "--platform", args.platform, "--output", str(archive), image, timeout=120)
-            check_archive(archive, image, postgres=postgres, platform=args.platform)
+            elf_count = check_archive(archive, image, postgres=postgres, platform=args.platform)
+            require(elf_count > 0, 'Runtime ELF dependency inventory is missing')
             if not postgres:
                 check_app_archive(archive, image, args.platform)
                 print('APP_ARCHIVE_PAYLOAD_OK', flush=True)
@@ -125,6 +153,15 @@ def main():
             archive.unlink()
             print("SQLITE_ARCHIVE_PAYLOAD_OK=" + name, flush=True)
             print("RUNTIME_TOOLS_ARCHIVE_OK=" + name, flush=True)
+            print("UNUSED_MOUNT_LIBRARIES_ARCHIVE_OK=" + name + " elf_files=" + str(elf_count), flush=True)
+            uid = '999' if postgres else '10001'
+            output = docker('run', '--rm', '--pull=never', '--network', 'none', '--read-only',
+                            '--user', uid + ':' + uid, '--cap-drop', 'ALL',
+                            '--security-opt', 'no-new-privileges:true', '--memory', '128m', '--pids-limit', '32',
+                            '--tmpfs', '/tmp:rw,nosuid,nodev,noexec,size=16m', '--entrypoint', 'sh',
+                            identity, '-ec', BASE_COMMANDS, 'sh', uid)
+            require(output == 'RUNTIME_BASE_COMMANDS_OK uid=' + uid, 'Base command runtime check differs')
+            print(output + ' profile=' + name, flush=True)
     print(docker("run", "--rm", "--pull=never", "--network", "none", "--read-only",
                  "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true",
                  "--entrypoint", "python", app["Id"], "-c", APP_CHECK), flush=True)
