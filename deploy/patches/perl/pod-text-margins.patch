@@ -1,0 +1,76 @@
+Description: Backport the width guard to all four Pod::Text formatters in Perl 5.36.
+Origin: https://github.com/rra/podlators/commit/70510174f69eb54aa6d617bde4e1402cd9b7c61f
+Forwarded: not-needed
+
+--- a/cpan/podlators/lib/Pod/Text.pm
++++ b/cpan/podlators/lib/Pod/Text.pm
+@@ -238,6 +238,15 @@
+     my $output = '';
+     my $spaces = ' ' x $$self{MARGIN};
+     my $width = $$self{opt_width} - $$self{MARGIN};
++
++    # Upstream 7051017: a nonpositive effective width makes the wrapping
++    # expression match an empty string forever. Report it and omit padding.
++    if ($width <= 0) {
++        my $error = 'Margin is wider than the output width';
++        $self->whine($self->line_count(), $error);
++        $spaces = q{};
++        $width = $self->{opt_width};
++    }
+     while (length > $width) {
+         if (s/^([^\n]{0,$width})[ \t\n]+// || s/^([^\n]{$width})//) {
+             $output .= $spaces . $1 . "\n";
+--- a/cpan/podlators/lib/Pod/Text/Color.pm
++++ b/cpan/podlators/lib/Pod/Text/Color.pm
+@@ -91,6 +91,15 @@
+     my $output = '';
+     my $spaces = ' ' x $$self{MARGIN};
+     my $width = $$self{opt_width} - $$self{MARGIN};
++
++    # Upstream 7051017: a nonpositive effective width makes the wrapping
++    # expression match an empty string forever. Report it and omit padding.
++    if ($width <= 0) {
++        my $error = 'Margin is wider than the output width';
++        $self->whine($self->line_count(), $error);
++        $spaces = q{};
++        $width = $self->{opt_width};
++    }
+ 
+     # $codes matches a single special sequence.  $char matches any number of
+     # special sequences preceding a single character other than a newline.
+--- a/cpan/podlators/lib/Pod/Text/Overstrike.pm
++++ b/cpan/podlators/lib/Pod/Text/Overstrike.pm
+@@ -111,6 +111,15 @@
+     my $output = '';
+     my $spaces = ' ' x $$self{MARGIN};
+     my $width = $$self{opt_width} - $$self{MARGIN};
++
++    # Upstream 7051017: a nonpositive effective width makes the wrapping
++    # expression match an empty string forever. Report it and omit padding.
++    if ($width <= 0) {
++        my $error = 'Margin is wider than the output width';
++        $self->whine($self->line_count(), $error);
++        $spaces = q{};
++        $width = $self->{opt_width};
++    }
+     while (length > $width) {
+         # This regex represents a single character, that's possibly underlined
+         # or in bold (in which case, it's three characters; the character, a
+--- a/cpan/podlators/lib/Pod/Text/Termcap.pm
++++ b/cpan/podlators/lib/Pod/Text/Termcap.pm
+@@ -152,6 +152,15 @@
+     # If we were unable to find any termcap sequences, use Pod::Text wrapping.
+     if ($self->{BOLD} eq q{} && $self->{UNDL} eq q{} && $self->{NORM} eq q{}) {
+         return $self->SUPER::wrap($_);
++    }
++
++    # Upstream 7051017: a nonpositive effective width makes the wrapping
++    # expression match an empty string forever. Report it and omit padding.
++    if ($width <= 0) {
++        my $error = 'Margin is wider than the output width';
++        $self->whine($self->line_count(), $error);
++        $spaces = q{};
++        $width = $self->{opt_width};
+     }
+ 
+     # $code matches a single special sequence.  $char matches any number of
