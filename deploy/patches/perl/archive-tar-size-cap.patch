@@ -1,0 +1,52 @@
+Description: Backport the Archive::Tar per-entry size bound to Perl 5.36.
+Origin: https://github.com/jib/archive-tar-new/commit/f9af01426038e29d9578825a0cd3626946ab08c7
+Forwarded: not-needed
+
+--- a/cpan/Archive-Tar/lib/Archive/Tar.pm
++++ b/cpan/Archive-Tar/lib/Archive/Tar.pm
+@@ -23,7 +23,7 @@
+ use strict;
+ use vars qw[$DEBUG $error $VERSION $WARN $FOLLOW_SYMLINK $CHOWN $CHMOD
+             $DO_NOT_USE_PREFIX $HAS_PERLIO $HAS_IO_STRING $SAME_PERMISSIONS
+-            $INSECURE_EXTRACT_MODE $ZERO_PAD_NUMBERS @ISA @EXPORT $RESOLVE_SYMLINK
++            $INSECURE_EXTRACT_MODE $ZERO_PAD_NUMBERS @ISA @EXPORT $RESOLVE_SYMLINK $MAX_FILE_SIZE
+          ];
+ 
+ @ISA                    = qw[Exporter];
+@@ -39,6 +39,7 @@
+ $INSECURE_EXTRACT_MODE  = 0;
+ $ZERO_PAD_NUMBERS       = 0;
+ $RESOLVE_SYMLINK        = $ENV{'PERL5_AT_RESOLVE_SYMLINK'} || 'speed';
++$MAX_FILE_SIZE          = 1024 * 1024 * 1024;
+ 
+ BEGIN {
+     use Config;
+@@ -441,6 +442,14 @@
+             }
+ 
+             my $block = BLOCK_SIZE->( $entry->size );
++
++            if ( $MAX_FILE_SIZE && $entry->size > $MAX_FILE_SIZE ) {
++                $self->_error( qq[Entry '] . $entry->full_path .
++                    qq[' declared size ] . $entry->size .
++                    qq[ bytes exceeds \$Archive::Tar::MAX_FILE_SIZE ] .
++                    qq[($MAX_FILE_SIZE); refusing to allocate] );
++                next LOOP;
++            }
+ 
+             $data = $entry->get_content_by_ref;
+ 
+@@ -2196,6 +2205,13 @@
+ 
+ =cut
+ 
++=head2 $Archive::Tar::MAX_FILE_SIZE
++
++This variable holds an upper bound on the per-entry declared size that
++C<Archive::Tar> will accept when reading an archive. Entries whose header
++claims a larger size are refused with an error before any read allocation.
++Defaults to 1 GiB. Set to 0 to disable the cap.
++
+ =head1 FAQ
+ 
+ =over 4

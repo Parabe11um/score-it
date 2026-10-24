@@ -99,6 +99,14 @@ for PROFILE in app postgres; do
     /usr/share/score-it/gzip-source.txt /usr/share/score-it/gzip-binary.sha256 \
     /usr/share/score-it/gzip-regression.txt >"$DEST/security/$PROFILE-gzip-build.txt"
 done
+for PROFILE in app postgres; do
+  case "$PROFILE" in app) IMAGE="$APP_IMAGE" ;; postgres) IMAGE="$PG_IMAGE" ;; esac
+  python3 tests/check_perl_runtime.py --image "$IMAGE" --profile "$PROFILE" </dev/null | \
+    tee "$DEST/security/$PROFILE-perl-runtime.txt"
+done
+docker run --rm --pull=never --network none --read-only --entrypoint cat "$PG_IMAGE" \
+  /usr/share/score-it/perl-security-source.txt /usr/share/score-it/perl-modules.sha256 \
+  /usr/share/score-it/perl-security-tests.txt >"$DEST/security/postgres-perl-build.txt"
 python3 tests/check_postgres_runtime.py --image "$PG_IMAGE" --source-image "$PG_SOURCE" \
   --go-image "$GO_SOURCE_IMAGE" </dev/null | tee "$DEST/security/postgres-runtime.txt"
 docker run --rm --pull=never --network none --read-only --entrypoint cat "$PG_IMAGE" \

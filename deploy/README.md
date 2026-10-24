@@ -36,6 +36,11 @@ Docker Engine >=29.8.2 и доступом к реестрам и зависим
 пакет с полным upstream-исправлением LZH. Проверяются его слои/хеши, распаковка,
 инициализация PostgreSQL из .sql.gz и восстановление сжатого SQL-дампа.
 Отчёты находятся в security/*-gzip-build.txt и security/*-gzip-runtime.txt.
+Perl образа PostgreSQL пересобирается под Debian 12 с backport-исправлениями
+Archive::Tar и четырёх форматтеров Pod::Text. Отчёты security/postgres-perl-build.txt
+и security/*-perl-runtime.txt связывают патчи, тесты, пакеты и хеши модулей.
+В APP отдельно проверяется отсутствие этих необязательных модулей во всех слоях.
+Статус дополнения Archive::Tar и границы проверок описаны в SECURITY.md.
 
 Базовые образы закреплены digest в deploy/images.env; Python-зависимости —
 версиями и SHA256 в requirements.production.txt. Исходники сохраняют права

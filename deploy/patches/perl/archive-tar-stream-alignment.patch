@@ -1,0 +1,24 @@
+Description: Advance rejected Archive::Tar entries in bounded chunks; stop at EOF.
+Origin: https://github.com/jib/archive-tar-new/pull/53 (head aeb258562a758400fb0e11f5944d06f749ac413a; not merged upstream)
+Forwarded: not-needed
+
+--- a/cpan/Archive-Tar/lib/Archive/Tar.pm
++++ b/cpan/Archive-Tar/lib/Archive/Tar.pm
+@@ -448,6 +448,17 @@
+                     qq[' declared size ] . $entry->size .
+                     qq[ bytes exceeds \$Archive::Tar::MAX_FILE_SIZE ] .
+                     qq[($MAX_FILE_SIZE); refusing to allocate] );
++
++                # Keep the stream aligned after a rejected entry. This also
++                # supports compressed/non-seekable handles without allocating
++                # the declared size or parsing its contents as new headers.
++                my $amt = $block;
++                while ($amt > 0) {
++                    my $this = 64 * BLOCK;
++                    $this = $amt if $this > $amt;
++                    last LOOP if $handle->read( my $junk, $this ) < $this;
++                    $amt -= $this;
++                }
+                 next LOOP;
+             }
+ 
