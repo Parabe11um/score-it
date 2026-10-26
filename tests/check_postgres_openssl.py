@@ -14,6 +14,7 @@ VERSION = '3.0.22-1~deb12u2'
 PACKAGES = {'libssl3': VERSION, 'openssl': VERSION}
 FILES = {'usr/bin/openssl', 'usr/lib/x86_64-linux-gnu/libssl.so.3',
          'usr/lib/x86_64-linux-gnu/libcrypto.so.3'}
+MANIFESTS = {'var/lib/dpkg/info/libssl3:amd64.md5sums', 'var/lib/dpkg/info/openssl.md5sums'}
 
 
 def package_inventory(raw):
@@ -29,7 +30,7 @@ def package_inventory(raw):
 
 
 def check_archive(path, image):
-    hashes, libraries, inventories = {}, [], 0
+    hashes, md5s, packaged, manifests, libraries, inventories = {}, {}, {}, set(), [], 0
     with Archive(path) as archive:
         _, layers = layer_names(archive, image, 'linux/amd64')
         for layer_name in layers:
@@ -42,7 +43,17 @@ def check_archive(path, image):
                             'Unsafe OpenSSL layer path')
                     require(name not in {'var/lib/dpkg/status-old', *(str(PurePosixPath(p).parent / ('.wh.'+PurePosixPath(p).name)) for p in FILES)},
                             'Deleted old OpenSSL evidence retained')
-                    if name == 'var/lib/dpkg/status':
+                    if name in MANIFESTS:
+                        require(item.isfile() and item.size < 4*1024*1024 and name not in manifests,
+                                'Invalid or overwritten OpenSSL package manifest')
+                        manifests.add(name)
+                        for row in layer.extractfile(item).read().decode().splitlines():
+                            fields = row.split()
+                            if len(fields) == 2 and fields[1] in FILES:
+                                require(re.fullmatch('[0-9a-f]{32}', fields[0]) and fields[1] not in packaged,
+                                        'Invalid or duplicate packaged OpenSSL hash')
+                                packaged[fields[1]] = fields[0]
+                    elif name == 'var/lib/dpkg/status':
                         require(item.isfile() and item.size < 16*1024*1024, 'Invalid OpenSSL package inventory')
                         package_inventory(layer.extractfile(item).read())
                         inventories += 1
@@ -56,6 +67,7 @@ def check_archive(path, image):
                                 if name in FILES:
                                     require(name not in hashes and first == b'\x7fELF', 'Overwritten or invalid OpenSSL file')
                                     hashes[name] = digest
+                                    md5s[name] = hashlib.md5(raw).hexdigest()
                                 if first == b'\x7fELF':
                                     soname = elf(raw)['soname']
                                     if soname in {'libssl.so.3','libcrypto.so.3'}:
@@ -63,6 +75,9 @@ def check_archive(path, image):
                     elif name in FILES:
                         require(False, 'OpenSSL file is not a regular file')
     require(inventories > 0 and set(hashes) == FILES, 'Missing saved OpenSSL files/package inventory')
+    # Slim Debian intentionally omits documentation/manpages. Verify the exact
+    # executable/library payload using its package manifests, not absent docs.
+    require(manifests == MANIFESTS and packaged == md5s, 'OpenSSL files differ from package manifests')
     require({name for name,_ in libraries} == {'libssl.so.3','libcrypto.so.3'}, 'Missing OpenSSL library SONAME')
     require(all(digest == hashes['usr/lib/x86_64-linux-gnu/'+name] for name,digest in libraries),
             'Renamed or old OpenSSL library retained')
@@ -71,17 +86,21 @@ def check_archive(path, image):
 
 RUNTIME = r'''
 set -eu
+stage=user
+trap 'status=$?; if [ "$status" -ne 0 ]; then printf "OPENSSL_RUNTIME_CHECK_FAILED stage=%s exit=%s\n" "$stage" "$status" >&2; fi' EXIT
 test "$(id -u)" = 999
+stage=distribution
 . /etc/os-release
 test "$ID:$VERSION_CODENAME" = debian:bookworm
 printf 'POSTGRES_OPENSSL_UID=%s\n' "$(id -u)"
 for package in libssl3 openssl; do
+    stage="package:$package"
     test "$(dpkg-query -W -f='${db:Status-Status}' "$package")" = installed
     printf '%s\t%s\n' "$package" "$(dpkg-query -W -f='${Version}' "$package")"
 done
-verification="$(dpkg --verify libssl3 openssl)"
-test -z "$verification"
+stage=openssl_version
 openssl version
+stage=sha256
 sha256sum /usr/bin/openssl /usr/lib/x86_64-linux-gnu/libssl.so.3 /usr/lib/x86_64-linux-gnu/libcrypto.so.3
 '''
 

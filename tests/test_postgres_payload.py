@@ -29,6 +29,10 @@ class PostgresOpenSSLTests(unittest.TestCase):
             'usr/bin/openssl': elf_bytes(['libssl.so.3','libcrypto.so.3'])}
         for name in ('libssl.so.3','libcrypto.so.3'):
             files['usr/lib/x86_64-linux-gnu/'+name] = elf_bytes([],name)
+        files['var/lib/dpkg/info/libssl3:amd64.md5sums'] = ''.join(hashlib.md5(files[name]).hexdigest()+'  '+name+'\n'
+            for name in sorted(FILES) if name != 'usr/bin/openssl').encode()
+        files['var/lib/dpkg/info/openssl.md5sums'] = (hashlib.md5(files['usr/bin/openssl']).hexdigest()+'  usr/bin/openssl\n'
+            + '0'*32+'  usr/share/man/man1/openssl.1ssl.gz\n').encode()
         return files
 
     def verify(self, files, preceding=(), oci=False):
@@ -73,6 +77,17 @@ class PostgresOpenSSLTests(unittest.TestCase):
                               (hashes['usr/bin/openssl'],'0'*64),('OpenSSL 3.0.22','OpenSSL 3.0.20')):
             with self.subTest(before=before),self.assertRaises(RuntimeError):
                 check_runtime(output.replace(before,after),hashes)
+
+    def test_missing_slim_documentation_is_accepted_but_changed_crypto_payload_is_rejected(self):
+        files = self.files()
+        self.verify(files)  # Package-listed manual intentionally absent.
+        for name in FILES:
+            changed = dict(files); changed[name] += b'corrupt'
+            with self.subTest(name=name), self.assertRaisesRegex(RuntimeError,'package manifests'):
+                self.verify(changed)
+        del files['var/lib/dpkg/info/openssl.md5sums']
+        with self.assertRaisesRegex(RuntimeError,'package manifests'):
+            self.verify(files)
 
 
 class PostgresOpenSSLUpdatePlanTests(unittest.TestCase):
