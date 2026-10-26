@@ -31,7 +31,7 @@ for PACKAGE in coreutils sed tar; do
         trixie:sed) VERSION=4.9-2+deb13u1 ;;
         trixie:tar) VERSION=1.35+dfsg-3.1 ;;
     esac
-    REVISION="$VERSION+scoreitnoacl1"
+    REVISION="$VERSION+~scoreitnoacl1"
     mkdir "/src/noacl/$PACKAGE"
     cd "/src/noacl/$PACKAGE"
     PREFIX="$VERSION_CODENAME/$PACKAGE/"

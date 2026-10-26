@@ -1,6 +1,7 @@
 """Reject old ACL callers, missing native proof and saved/runtime substitution."""
 import hashlib
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 
@@ -67,7 +68,7 @@ class NoACLArchiveTests(unittest.TestCase):
     def test_rejects_original_or_incomplete_package_versions(self):
         for replacement in (b'9.7-3',b'9.7-3+wrong'):
             files,_=fixture()
-            files['var/lib/dpkg/status']=files['var/lib/dpkg/status'].replace(b'9.7-3+scoreitnoacl1',replacement)
+            files['var/lib/dpkg/status']=files['var/lib/dpkg/status'].replace(b'9.7-3+~scoreitnoacl1',replacement)
             with self.assertRaisesRegex(RuntimeError,'tool packages'):self.verify(files)
         files,_=fixture();files['var/lib/dpkg/status']=b'Package: libc6\nStatus: install ok installed\n\n'
         with self.assertRaisesRegex(RuntimeError,'tool packages'):self.verify(files)
@@ -111,6 +112,18 @@ class NoACLArchiveTests(unittest.TestCase):
 
 
 class NoACLRuntimeTests(unittest.TestCase):
+    def test_custom_revisions_do_not_mask_future_distribution_security_updates(self):
+        following = {'9.7-3':'9.7-3+deb13u1', '9.1-1':'9.1-1+deb12u1',
+                     '4.9-2+deb13u1':'4.9-2+deb13u2', '4.9-1+deb12u1':'4.9-1+deb12u2',
+                     '1.35+dfsg-3.1':'1.35+dfsg-3.1+deb13u1',
+                     '1.34+dfsg-1.2+deb12u1':'1.34+dfsg-1.2+deb12u2'}
+        for distro,packages in VERSIONS.values():
+            for custom in packages.values():
+                original=custom.removesuffix('+~scoreitnoacl1')
+                with self.subTest(custom=custom):
+                    self.assertEqual(subprocess.run(['dpkg','--compare-versions',custom,'gt',original]).returncode,0)
+                    self.assertEqual(subprocess.run(['dpkg','--compare-versions',custom,'lt',following[original]]).returncode,0)
+
     def output(self,profile):
         _,evidence=fixture(profile);uid=10001 if profile=='app' else 999
         text=f'NOACL_POSIX_TOOLS_OK uid={uid}\n'
@@ -126,7 +139,7 @@ class NoACLRuntimeTests(unittest.TestCase):
     def test_rejects_root_and_substituted_packages_or_binaries(self):
         output,evidence=self.output('app')
         for bad in (output.replace('uid=10001','uid=0'),
-                    output.replace('+scoreitnoacl1',''),
+                    output.replace('+~scoreitnoacl1',''),
                     output.replace(evidence['binary_sha256']['cp'],'0'*64)):
             with self.assertRaises(RuntimeError):parse_runtime(bad,'app',evidence)
 

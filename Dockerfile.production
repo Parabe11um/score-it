@@ -24,9 +24,9 @@ RUN --mount=type=bind,from=gzip-builder,source=/out,target=/run/score-it-gzip,re
     dpkg -i /run/score-it-gzip/gzip_1.13-1+deb13u1+scoreit13.1_amd64.deb
 COPY --from=gzip-builder /out/gzip-*.txt /out/gzip-binary.sha256 /usr/share/score-it/
 RUN --mount=type=bind,from=tools-builder,source=/out,target=/run/score-it-tools,readonly \
-    dpkg -i /run/score-it-tools/coreutils_9.7-3+scoreitnoacl1_amd64.deb \
-            /run/score-it-tools/sed_4.9-2+deb13u1+scoreitnoacl1_amd64.deb \
-            /run/score-it-tools/tar_1.35+dfsg-3.1+scoreitnoacl1_amd64.deb
+    dpkg -i /run/score-it-tools/coreutils_9.7-3+~scoreitnoacl1_amd64.deb \
+            /run/score-it-tools/sed_4.9-2+deb13u1+~scoreitnoacl1_amd64.deb \
+            /run/score-it-tools/tar_1.35+dfsg-3.1+~scoreitnoacl1_amd64.deb
 COPY --from=tools-builder /out/acl-tools-*.txt /out/acl-tools-binaries.sha256 /usr/share/score-it/
 
 ENV PYTHONDONTWRITEBYTECODE=1 \

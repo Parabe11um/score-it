@@ -84,9 +84,9 @@ RUN --mount=type=bind,from=postgres-builder,source=/out,target=/run/score-it-pos
     dpkg -i /run/score-it-postgres/postgresql-client-17_17.11-1.pgdg12+2+scoreit2_amd64.deb \
             /run/score-it-postgres/postgresql-17_17.11-1.pgdg12+2+scoreit2_amd64.deb
 RUN --mount=type=bind,from=tools-builder,source=/out,target=/run/score-it-tools,readonly \
-    dpkg -i /run/score-it-tools/coreutils_9.1-1+scoreitnoacl1_amd64.deb \
-            /run/score-it-tools/sed_4.9-1+deb12u1+scoreitnoacl1_amd64.deb \
-            /run/score-it-tools/tar_1.34+dfsg-1.2+deb12u1+scoreitnoacl1_amd64.deb
+    dpkg -i /run/score-it-tools/coreutils_9.1-1+~scoreitnoacl1_amd64.deb \
+            /run/score-it-tools/sed_4.9-1+deb12u1+~scoreitnoacl1_amd64.deb \
+            /run/score-it-tools/tar_1.34+dfsg-1.2+deb12u1+~scoreitnoacl1_amd64.deb
 COPY --from=tools-builder /out/acl-tools-*.txt /out/acl-tools-binaries.sha256 /usr/share/score-it/
 COPY --from=gosu-builder /out/gosu /usr/local/bin/gosu
 RUN gosu --version && gosu postgres id

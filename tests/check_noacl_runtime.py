@@ -13,10 +13,10 @@ from check_runtime_tools import check_runtime_binary, check_runtime_member, chec
 PREFIX = 'usr/share/score-it/'
 FILES = {'cp','install','mv','sed','tar'}
 VERSIONS = {
-    'app': ('trixie', {'coreutils':'9.7-3+scoreitnoacl1', 'sed':'4.9-2+deb13u1+scoreitnoacl1',
-                      'tar':'1.35+dfsg-3.1+scoreitnoacl1'}),
-    'postgres': ('bookworm', {'coreutils':'9.1-1+scoreitnoacl1', 'sed':'4.9-1+deb12u1+scoreitnoacl1',
-                           'tar':'1.34+dfsg-1.2+deb12u1+scoreitnoacl1'}),
+    'app': ('trixie', {'coreutils':'9.7-3+~scoreitnoacl1', 'sed':'4.9-2+deb13u1+~scoreitnoacl1',
+                      'tar':'1.35+dfsg-3.1+~scoreitnoacl1'}),
+    'postgres': ('bookworm', {'coreutils':'9.1-1+~scoreitnoacl1', 'sed':'4.9-1+deb12u1+~scoreitnoacl1',
+                           'tar':'1.34+dfsg-1.2+deb12u1+~scoreitnoacl1'}),
 }
 PROBE = (Path(__file__).resolve().parents[1] / 'deploy/runtime_tools_probe.sh').read_text()
 

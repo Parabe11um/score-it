@@ -69,7 +69,8 @@ UNUSED_MOUNT_LIBRARIES_ARCHIVE_OK и RUNTIME_BASE_COMMANDS_OK.
 Расширенные POSIX ACL приложению и PostgreSQL не требуются. Чтобы удалить
 libacl целиком, coreutils/sed/tar пересобираются с --disable-acl из тех же
 Debian-исходников под каждую свою базу, с сохранением Debian-патчей и обычных
-зависимостей. Пакеты получают revision +scoreitnoacl1. Архивы исходников, DSC и
+зависимостей. Пакеты получают revision +~scoreitnoacl1, которая старше исходной,
+но ниже следующего штатного Debian security update. Архивы исходников, DSC и
 Debian-изменения закреплены SHA-256 в acl_tools_sources.sha256; подпись DSC
 при каждой сборке отдельно не проверяется. USE_ACL=0, зависимости каждого ELF
 пакета и отсутствие ACL API проверяются до выдачи пакета. Стандартные тесты
