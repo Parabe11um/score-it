@@ -77,8 +77,8 @@ Debian-изменения закреплены SHA-256 в acl_tools_sources.sha2
 sed/tar выполняются без root. Debian отключает полный upstream suite coreutils;
 для всех трёх пакетов дополнительно проверяются установленные команды.
 
-В app после создания UID 10001 также удаляется пакет passwd: его useradd/usermod
-были последними оставшимися потребителями libacl. /etc/passwd и /etc/group
+В app после создания UID 10001 также удаляются passwd и зависимый от него
+adduser: useradd/usermod были последними оставшимися потребителями libacl. /etc/passwd и /etc/group
 сохраняются побайтно, учётная запись app остаётся. В PostgreSQL пакет passwd
 сохраняется: его Bookworm-сборка с ACL не связана. APT разрешает только точный
 список удаления, без auto-remove, обновления или установки других пакетов.

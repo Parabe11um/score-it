@@ -33,7 +33,8 @@ def package_inventory(raw, profile):
     check_runtime_packages(set(packages))
     require({name:packages.get(name) for name in VERSIONS[profile][1]} == VERSIONS[profile][1],
             'Old or incomplete ACL-dependent tool packages')
-    require(profile != 'app' or 'passwd' not in packages, 'APP retains ACL-dependent account tools')
+    require(profile != 'app' or not {'passwd','adduser'}.intersection(packages),
+            'APP retains ACL-dependent account tools')
 
 
 def check_archive(path, image, profile):

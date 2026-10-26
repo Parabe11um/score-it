@@ -74,7 +74,7 @@ class NoACLArchiveTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError,'tool packages'):self.verify(files)
 
     def test_rejects_retained_acl_or_app_account_package(self):
-        for package in ('acl','libacl1','libacl1-dev','passwd'):
+        for package in ('acl','libacl1','libacl1-dev','passwd','adduser'):
             files,_=fixture()
             files['var/lib/dpkg/status']+=f'Package: {package}\nStatus: install ok installed\nVersion: 1\n\n'.encode()
             with self.subTest(package=package), self.assertRaises(RuntimeError):self.verify(files)

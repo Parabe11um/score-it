@@ -139,17 +139,17 @@ def elf_bytes(needed, soname=None, undefined=()):
 
 
 class PurgePlanGuards(unittest.TestCase):
-    def invoke(self, profile, extra='', missing=None):
+    def invoke(self, profile, extra='', missing=None, changed_identity=False):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            selected = ['mount', 'ncurses-bin', 'libmount1', 'libblkid1', 'passwd', 'libacl1'] if profile == 'app' else [
+            selected = ['mount', 'ncurses-bin', 'libmount1', 'libblkid1', 'adduser', 'passwd', 'libacl1'] if profile == 'app' else [
                 'mount', 'ncurses-bin', 'util-linux', 'util-linux-extra', 'e2fsprogs', 'libmount1', 'libblkid1', 'libacl1']
             plan = ''.join('Purg ' + package + ' [fixture]\n' for package in selected if package != missing) + extra
             (root / 'plan').write_text(plan)
             (root / 'apt-get').write_text('''#!/bin/sh
 case "$1" in
  --simulate) cat "$MOCK_ROOT/plan" ;;
- -y) touch "$MOCK_ROOT/applied" ;;
+ -y) touch "$MOCK_ROOT/applied"; if [ "$CHANGE_IDENTITY" = 1 ]; then printf 'changed\\n' >>"$MOCK_ROOT/passwd"; fi ;;
  check) ;;
  *) exit 95 ;;
 esac
@@ -161,8 +161,12 @@ esac
             source = (Path(__file__).resolve().parents[1] / 'deploy/prune_runtime_tools.sh').read_text()
             source = source.replace('. /etc/os-release', 'ID=debian\nVERSION_CODENAME=' + ('trixie' if profile == 'app' else 'bookworm'))
             source = source.replace('/var/lib/dpkg/status-old', str(root / 'status-old'))
+            for identity in ('passwd','group'):
+                (root / identity).write_text('unchanged fixture\n')
+                source=source.replace('/etc/'+identity,str(root / identity))
             result = subprocess.run(['sh', '-s', profile], input=source, capture_output=True, text=True,
-                env={**os.environ, 'PATH': str(root) + ':' + os.environ['PATH'], 'MOCK_ROOT': str(root)}, timeout=10)
+                env={**os.environ, 'PATH': str(root) + ':' + os.environ['PATH'], 'MOCK_ROOT': str(root),
+                     'CHANGE_IDENTITY':'1' if changed_identity else '0'}, timeout=10)
             return result, (root / 'applied').exists()
 
     def test_exact_profiles_allow_only_reviewed_removals(self):
@@ -182,6 +186,16 @@ esac
             result, applied = self.invoke('postgres', missing=package)
             self.assertNotEqual(result.returncode, 0)
             self.assertFalse(applied)
+        for package in ('libacl1','passwd','adduser'):
+            result,applied=self.invoke('app',missing=package)
+            self.assertNotEqual(result.returncode,0)
+            self.assertFalse(applied)
+
+    def test_account_identity_change_invalidates_the_disposable_build(self):
+        result,applied=self.invoke('app',changed_identity=True)
+        self.assertTrue(applied)
+        self.assertNotEqual(result.returncode,0)
+        self.assertIn('FAILED',result.stdout)
 
 
 if __name__ == '__main__':
