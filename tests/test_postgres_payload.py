@@ -1,12 +1,17 @@
 """Reject obsolete gosu, deleted test keys and incompatible PostgreSQL metadata."""
 
 import copy
+import hashlib
+import os
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 
 from check_postgres_runtime import GOSU, check_archive, check_build_info, check_metadata
 from test_caddy_payload import binary, layer_bytes, saved_image
+from check_postgres_openssl import FILES, PACKAGES, VERSION, check_archive as check_openssl_archive, check_runtime
+from test_runtime_tools import elf_bytes
 
 
 IMAGE = "score-it-postgres:payload-test"
@@ -15,6 +20,124 @@ BUILD_INFO = """/probe/gosu: go1.26.10
     dep github.com/moby/sys/user v0.4.1 h1:example
     dep golang.org/x/sys v0.48.0 h1:example
 """
+
+
+class PostgresOpenSSLTests(unittest.TestCase):
+    def files(self, version=VERSION):
+        files = {'var/lib/dpkg/status': ''.join('Package: '+name+'\nVersion: '+version+
+            '\nStatus: install ok installed\n\n' for name in PACKAGES).encode(),
+            'usr/bin/openssl': elf_bytes(['libssl.so.3','libcrypto.so.3'])}
+        for name in ('libssl.so.3','libcrypto.so.3'):
+            files['usr/lib/x86_64-linux-gnu/'+name] = elf_bytes([],name)
+        files['var/lib/dpkg/info/libssl3:amd64.md5sums'] = ''.join(hashlib.md5(files[name]).hexdigest()+'  '+name+'\n'
+            for name in sorted(FILES) if name != 'usr/bin/openssl').encode()
+        files['var/lib/dpkg/info/openssl.md5sums'] = (hashlib.md5(files['usr/bin/openssl']).hexdigest()+'  usr/bin/openssl\n'
+            + '0'*32+'  usr/share/man/man1/openssl.1ssl.gz\n').encode()
+        return files
+
+    def verify(self, files, preceding=(), oci=False):
+        with tempfile.TemporaryDirectory() as directory:
+            archive = Path(directory)/'openssl.tar'
+            saved_image(archive,[*preceding,layer_bytes(files,link=False)],oci=oci,image=IMAGE)
+            return check_openssl_archive(archive,IMAGE)
+
+    def test_updated_classic_and_oci_files_are_bound_to_package_inventory(self):
+        files = self.files()
+        for oci in (False,True):
+            self.assertEqual(self.verify(files,oci=oci),
+                {name:hashlib.sha256(files[name]).hexdigest() for name in FILES})
+
+    def test_old_or_missing_package_inventory_stops(self):
+        with self.assertRaisesRegex(RuntimeError,'Old or incomplete'):
+            self.verify(self.files('3.0.22-1~deb12u1'))
+        files = self.files(); files['var/lib/dpkg/status'] = b'Package: openssl\nVersion: '+VERSION.encode()+b'\nStatus: install ok installed\n\n'
+        with self.assertRaisesRegex(RuntimeError,'Old or incomplete'):
+            self.verify(files)
+
+    def test_old_package_or_binary_in_an_earlier_layer_stops(self):
+        with self.assertRaisesRegex(RuntimeError,'Old or incomplete'):
+            self.verify(self.files(),preceding=[layer_bytes(self.files('3.0.22-1~deb12u1'),link=False)])
+        with self.assertRaisesRegex(RuntimeError,'Overwritten'):
+            self.verify(self.files(),preceding=[layer_bytes({'usr/bin/openssl':elf_bytes([])},link=False)])
+
+    def test_renamed_old_library_and_whiteout_stop(self):
+        for path,raw in (('opt/renamed.bin',elf_bytes([], 'libssl.so.3')+b'old'),
+                         ('usr/lib/x86_64-linux-gnu/.wh.libssl.so.3',b'')):
+            files = self.files(); files[path] = raw
+            with self.subTest(path=path),self.assertRaises(RuntimeError):
+                self.verify(files)
+
+    def test_runtime_old_package_changed_binary_or_root_stop(self):
+        files = self.files(); hashes = {name:hashlib.sha256(files[name]).hexdigest() for name in FILES}
+        output = 'POSTGRES_OPENSSL_UID=999\n'+''.join(name+'\t'+version+'\n' for name,version in PACKAGES.items())
+        output += 'OpenSSL 3.0.22 2026-06-09 (Library: OpenSSL 3.0.22 2026-06-09)\n'
+        output += ''.join(value+'  /'+name+'\n' for name,value in hashes.items())
+        self.assertTrue(check_runtime(output,hashes).startswith('OpenSSL 3.0.22 '))
+        for before,after in ((VERSION,'3.0.22-1~deb12u1'),('UID=999','UID=0'),
+                              (hashes['usr/bin/openssl'],'0'*64),('OpenSSL 3.0.22','OpenSSL 3.0.20')):
+            with self.subTest(before=before),self.assertRaises(RuntimeError):
+                check_runtime(output.replace(before,after),hashes)
+
+    def test_missing_slim_documentation_is_accepted_but_changed_crypto_payload_is_rejected(self):
+        files = self.files()
+        self.verify(files)  # Package-listed manual intentionally absent.
+        for name in FILES:
+            changed = dict(files); changed[name] += b'corrupt'
+            with self.subTest(name=name), self.assertRaisesRegex(RuntimeError,'package manifests'):
+                self.verify(changed)
+        del files['var/lib/dpkg/info/openssl.md5sums']
+        with self.assertRaisesRegex(RuntimeError,'package manifests'):
+            self.verify(files)
+
+
+class PostgresOpenSSLUpdatePlanTests(unittest.TestCase):
+    def invoke(self, extra='', wrong_version=False):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            (root/'plan').write_text('Inst libssl3 [old] ('+VERSION+' Debian:12-security [amd64])\n'
+                'Inst openssl [old] ('+VERSION+' Debian:12-security [amd64])\n'+extra)
+            (root/'apt-get').write_text('''#!/bin/sh
+case "$1" in
+ update|check) ;;
+ --simulate) cat "$MOCK_ROOT/plan" ;;
+ install) touch "$MOCK_ROOT/applied" ;;
+ *) exit 90 ;;
+esac
+''')
+            (root/'dpkg-query').write_text('''#!/bin/sh
+case "$2" in
+ *Status*) echo installed ;;
+ *) echo "${MOCK_VERSION}" ;;
+esac
+''')
+            (root/'dpkg').write_text('#!/bin/sh\nexit 0\n')
+            for name in ('apt-get','dpkg-query','dpkg'): (root/name).chmod(0o755)
+            source=(Path(__file__).resolve().parents[1]/'deploy/update_postgres_security.sh').read_text()
+            source=source.replace('. /etc/os-release','ID=debian\nVERSION_CODENAME=bookworm')
+            source=source.replace('/var/lib/apt/lists/',str(root/'lists')+'/').replace('/var/lib/dpkg/status-old',str(root/'status-old'))
+            result=subprocess.run(['sh','-s'],input=source,capture_output=True,text=True,timeout=10,
+                env={**os.environ,'PATH':str(root)+':'+os.environ['PATH'],'MOCK_ROOT':str(root),
+                     'MOCK_VERSION':'3.0.22-1~deb12u1' if wrong_version else VERSION})
+            return result,(root/'applied').exists()
+
+    def test_only_the_coordinated_openssl_packages_are_allowed(self):
+        result,applied=self.invoke()
+        self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        self.assertTrue(applied)
+        self.assertIn('POSTGRES_OPENSSL_SECURITY_UPDATE_OK',result.stdout)
+
+    def test_libc_icu_installation_and_any_removal_stop_before_apply(self):
+        for extra in ('Inst libc6 [old] (new)\n','Conf libicu72 (new)\n',
+                      'Remv unrelated [old]\n','Purg libssl3 [old]\n'):
+            with self.subTest(extra=extra):
+                result,applied=self.invoke(extra)
+                self.assertNotEqual(result.returncode,0)
+                self.assertFalse(applied)
+
+    def test_incomplete_or_downgraded_result_is_rejected(self):
+        result,_=self.invoke(wrong_version=True)
+        self.assertNotEqual(result.returncode,0)
+        self.assertNotIn('POSTGRES_OPENSSL_SECURITY_UPDATE_OK',result.stdout)
 
 
 class PostgresPayloadTests(unittest.TestCase):
