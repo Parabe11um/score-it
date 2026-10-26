@@ -22,6 +22,7 @@ import uuid
 # Reuse the tested Docker-save/OCI archive traversal and Docker command wrapper.
 from check_caddy_runtime import Archive, docker, layer_names, require
 from check_sqlite_payload import installed_packages
+from check_postgres_openssl import verify as verify_openssl
 
 
 GOSU = "usr/local/bin/gosu"
@@ -397,6 +398,7 @@ def main():
                 "Saved gosu differs from runtime gosu")
         print("POSTGRES_ARCHIVE_PAYLOAD_OK", flush=True)
         print("POSTGRES_LDAP_DEPENDENCIES_ABSENT_OK", flush=True)
+        verify_openssl(args.image, archive)
     check_existing_volume(source["Id"], target["Id"])
     print("POSTGRES_RUNTIME_OK", flush=True)
 

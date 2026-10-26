@@ -59,6 +59,10 @@ RUN --mount=type=bind,source=deploy/build_tls.sh,target=/run/score-it-build-tls.
     sh /run/score-it-build-tls.sh "$BUILD_TLS_COMPAT" sh /run/score-it-build-libpq.sh
 
 FROM ${POSTGRES_IMAGE} AS runtime-files
+ARG BUILD_TLS_COMPAT=0
+RUN --mount=type=bind,source=deploy/build_tls.sh,target=/run/score-it-build-tls.sh,readonly \
+    --mount=type=bind,source=deploy/update_postgres_security.sh,target=/run/score-it-update-postgres.sh,readonly \
+    sh /run/score-it-build-tls.sh "$BUILD_TLS_COMPAT" sh /run/score-it-update-postgres.sh
 RUN --mount=type=bind,from=perl-builder,source=/out,target=/run/score-it-perl,readonly \
     dpkg -i /run/score-it-perl/perl-base_5.36.0-7+deb12u4+scoreit1_amd64.deb \
             /run/score-it-perl/perl-modules-5.36_5.36.0-7+deb12u4+scoreit1_all.deb \
@@ -90,7 +94,7 @@ COPY --from=gzip-builder /out/gzip-*.txt /out/gzip-binary.sha256 /usr/share/scor
 
 # Copy the resulting filesystem, not the upstream image's layers: those still
 # contain the original gosu and the image-wide test certificate/key.
-# Retained Debian libraries keep their pinned runtime versions. The rebuilt
+# OpenSSL uses the pinned Bookworm security update; libc/ICU/locales stay unchanged. The rebuilt
 # PostgreSQL package retains Debian's patches, paths and package inventory.
 FROM scratch
 COPY --from=runtime-files / /
