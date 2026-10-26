@@ -4,7 +4,7 @@ ARG BUILD_TLS_COMPAT=0
 RUN --mount=type=bind,source=deploy/build_tls.sh,target=/run/score-it-build-tls.sh,readonly \
     --mount=type=bind,source=deploy/build_runtime_noacl.sh,target=/run/score-it-build-noacl.sh,readonly \
     --mount=type=bind,source=deploy/acl_tools_sources.sha256,target=/run/score-it-acl-sources.sha256,readonly \
-    --mount=type=bind,source=tests/runtime_tools_probe.sh,target=/run/score-it-noacl-probe.sh,readonly \
+    --mount=type=bind,source=deploy/runtime_tools_probe.sh,target=/run/score-it-noacl-probe.sh,readonly \
     sh /run/score-it-build-tls.sh "$BUILD_TLS_COMPAT" sh /run/score-it-build-noacl.sh
 
 FROM ${PYTHON_IMAGE} AS gzip-builder

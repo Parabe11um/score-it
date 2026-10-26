@@ -1,5 +1,5 @@
 #!/bin/sh
-# Normal rwx permissions, links, in-place editing and archive roundtrips.
+# Build/host-supplied probe: rwx permissions, links, editing and archives.
 set -eu
 test "$(id -u)" = "${1:?Expected unprivileged UID}"
 test "$1" -gt 0

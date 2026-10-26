@@ -18,7 +18,7 @@ VERSIONS = {
     'postgres': ('bookworm', {'coreutils':'9.1-1+scoreitnoacl1', 'sed':'4.9-1+deb12u1+scoreitnoacl1',
                            'tar':'1.34+dfsg-1.2+deb12u1+scoreitnoacl1'}),
 }
-PROBE = Path(__file__).with_name('runtime_tools_probe.sh').read_text()
+PROBE = (Path(__file__).resolve().parents[1] / 'deploy/runtime_tools_probe.sh').read_text()
 
 
 def package_inventory(raw, profile):
