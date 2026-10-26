@@ -89,6 +89,14 @@ python3 tests/check_app_base.py --image "$APP_IMAGE" --platform "$PLATFORM" </de
 python3 tests/check_sqlite_payload.py --app-image "$APP_IMAGE" --postgres-image "$PG_IMAGE" \
   --python-source-image "$PYTHON_SOURCE_IMAGE" --platform "$PLATFORM" </dev/null | \
   tee "$DEST/security/sqlite-payload.txt"
+for PROFILE in app postgres; do
+  case "$PROFILE" in app) IMAGE="$APP_IMAGE" ;; postgres) IMAGE="$PG_IMAGE" ;; esac
+  python3 tests/check_noacl_runtime.py --image "$IMAGE" --profile "$PROFILE" \
+    --archive "$DEST/images.tar" </dev/null | tee "$DEST/security/$PROFILE-acl-runtime.txt"
+  docker run --rm --pull=never --network none --read-only --entrypoint cat "$IMAGE" \
+    /usr/share/score-it/acl-tools-source.txt /usr/share/score-it/acl-tools-tests.txt \
+    /usr/share/score-it/acl-tools-binaries.sha256 >"$DEST/security/$PROFILE-acl-build.txt"
+done
 python3 tests/check_gzip_runtime.py --image "$APP_IMAGE" --profile app </dev/null | \
   tee "$DEST/security/app-gzip-runtime.txt"
 python3 tests/check_gzip_runtime.py --image "$PG_IMAGE" --profile postgres </dev/null | \

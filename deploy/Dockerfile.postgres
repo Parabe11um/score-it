@@ -1,5 +1,13 @@
 ARG POSTGRES_IMAGE=postgres:17.11-bookworm@sha256:3645570cccdfa447589da9f57dd740faa29b30938e861289a5574b6ca6b03826
 ARG GO_IMAGE=golang:1.26.10-alpine3.24@sha256:9ce231b28998b32e116927c61aa5c406183061d4f3f2d61b292c88e7f6bdf7ca
+FROM ${POSTGRES_IMAGE} AS tools-builder
+ARG BUILD_TLS_COMPAT=0
+RUN --mount=type=bind,source=deploy/build_tls.sh,target=/run/score-it-build-tls.sh,readonly \
+    --mount=type=bind,source=deploy/build_runtime_noacl.sh,target=/run/score-it-build-noacl.sh,readonly \
+    --mount=type=bind,source=deploy/acl_tools_sources.sha256,target=/run/score-it-acl-sources.sha256,readonly \
+    --mount=type=bind,source=tests/runtime_tools_probe.sh,target=/run/score-it-noacl-probe.sh,readonly \
+    sh /run/score-it-build-tls.sh "$BUILD_TLS_COMPAT" sh /run/score-it-build-noacl.sh
+
 FROM ${POSTGRES_IMAGE} AS perl-builder
 ARG BUILD_TLS_COMPAT=0
 RUN --mount=type=bind,source=deploy/build_tls.sh,target=/run/score-it-build-tls.sh,readonly \
@@ -75,6 +83,11 @@ RUN --mount=type=bind,from=libpq-builder,source=/out,target=/run/score-it-libpq,
 RUN --mount=type=bind,from=postgres-builder,source=/out,target=/run/score-it-postgres,readonly \
     dpkg -i /run/score-it-postgres/postgresql-client-17_17.11-1.pgdg12+2+scoreit2_amd64.deb \
             /run/score-it-postgres/postgresql-17_17.11-1.pgdg12+2+scoreit2_amd64.deb
+RUN --mount=type=bind,from=tools-builder,source=/out,target=/run/score-it-tools,readonly \
+    dpkg -i /run/score-it-tools/coreutils_9.1-1+scoreitnoacl1_amd64.deb \
+            /run/score-it-tools/sed_4.9-1+deb12u1+scoreitnoacl1_amd64.deb \
+            /run/score-it-tools/tar_1.34+dfsg-1.2+deb12u1+scoreitnoacl1_amd64.deb
+COPY --from=tools-builder /out/acl-tools-*.txt /out/acl-tools-binaries.sha256 /usr/share/score-it/
 COPY --from=gosu-builder /out/gosu /usr/local/bin/gosu
 RUN gosu --version && gosu postgres id
 # Debian's ssl-cert package ships an image-wide test key. PostgreSQL in this
