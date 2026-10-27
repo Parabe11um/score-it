@@ -61,6 +61,10 @@ for name in ('app', 'postgres', 'caddy'):
                   if p.get('Name') in ('libsqlite3-0', 'pysqlite3', 'pysqlite3-binary')]
         if sqlite:
             blocked.append(name + ': SQLite package is not allowed in PostgreSQL-only runtime')
+        acl = [p for result in report.get('Results', []) for p in result.get('Packages') or []
+               if p.get('Name') in ('acl', 'libacl1', 'libacl1-dev')]
+        if acl:
+            blocked.append(name + ': unused ACL package returned to runtime')
     # Explicit release gate for all of the public proxy's embedded Go modules.
     if name in ('caddy', 'postgres'):
         high_go = [v for result in report.get('Results', []) if result.get('Type') == 'gobinary'

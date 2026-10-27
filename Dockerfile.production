@@ -1,4 +1,12 @@
 ARG PYTHON_IMAGE=python:3.12.15-slim-trixie@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1
+FROM ${PYTHON_IMAGE} AS tools-builder
+ARG BUILD_TLS_COMPAT=0
+RUN --mount=type=bind,source=deploy/build_tls.sh,target=/run/score-it-build-tls.sh,readonly \
+    --mount=type=bind,source=deploy/build_runtime_noacl.sh,target=/run/score-it-build-noacl.sh,readonly \
+    --mount=type=bind,source=deploy/acl_tools_sources.sha256,target=/run/score-it-acl-sources.sha256,readonly \
+    --mount=type=bind,source=deploy/runtime_tools_probe.sh,target=/run/score-it-noacl-probe.sh,readonly \
+    sh /run/score-it-build-tls.sh "$BUILD_TLS_COMPAT" sh /run/score-it-build-noacl.sh
+
 FROM ${PYTHON_IMAGE} AS gzip-builder
 ARG BUILD_TLS_COMPAT=0
 RUN --mount=type=bind,source=deploy/build_tls.sh,target=/run/score-it-build-tls.sh,readonly \
@@ -15,6 +23,11 @@ RUN --mount=type=bind,source=deploy/build_tls.sh,target=/run/score-it-build-tls.
 RUN --mount=type=bind,from=gzip-builder,source=/out,target=/run/score-it-gzip,readonly \
     dpkg -i /run/score-it-gzip/gzip_1.13-1+deb13u1+scoreit13.1_amd64.deb
 COPY --from=gzip-builder /out/gzip-*.txt /out/gzip-binary.sha256 /usr/share/score-it/
+RUN --mount=type=bind,from=tools-builder,source=/out,target=/run/score-it-tools,readonly \
+    dpkg -i /run/score-it-tools/coreutils_9.7-3+~scoreitnoacl1_amd64.deb \
+            /run/score-it-tools/sed_4.9-2+deb13u1+~scoreitnoacl1_amd64.deb \
+            /run/score-it-tools/tar_1.35+dfsg-3.1+~scoreitnoacl1_amd64.deb
+COPY --from=tools-builder /out/acl-tools-*.txt /out/acl-tools-binaries.sha256 /usr/share/score-it/
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
