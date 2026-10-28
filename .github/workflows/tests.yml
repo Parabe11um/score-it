@@ -36,6 +36,8 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_build_tls.py' -v
       - name: Reject obsolete executables in saved Caddy layers
         run: python -m unittest discover -s tests -p 'test_caddy_payload.py' -v
+      - name: Reject partial Caddy backports and unreviewed HIGH findings
+        run: python -m unittest discover -s tests -p 'test_caddy_jose.py' -v
       - name: Reject obsolete gosu, deleted test keys and changed PostgreSQL configuration
         run: python -m unittest discover -s tests -p 'test_postgres_payload.py' -v
       - name: Reject partial gzip fixes and stale saved binaries/package records
@@ -89,7 +91,61 @@ jobs:
           path: ${{ runner.temp }}/history-secrets.json
           if-no-files-found: warn
 
+  caddy-security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Build and test the proxy before the long database build
+        run: |
+          set -euo pipefail
+          source deploy/images.env
+          for IMAGE in "$GO_SOURCE_IMAGE" "$CADDY_SOURCE_IMAGE" "$PYTHON_SOURCE_IMAGE"; do
+            docker pull --platform linux/amd64 "$IMAGE"
+          done
+          docker build --platform linux/amd64 -f deploy/Dockerfile.caddy \
+            --build-arg "GO_IMAGE=$GO_SOURCE_IMAGE" --build-arg "CADDY_IMAGE=$CADDY_SOURCE_IMAGE" \
+            --build-arg BUILD_TLS_COMPAT=1 -t score-it-caddy:security-ci . \
+            2>&1 | tee "$RUNNER_TEMP/caddy-build.log"
+          docker image save --output "$RUNNER_TEMP/caddy.tar" score-it-caddy:security-ci
+          python tests/check_caddy_runtime.py --image score-it-caddy:security-ci \
+            --client-image "$PYTHON_SOURCE_IMAGE" | tee "$RUNNER_TEMP/caddy-runtime.txt"
+          docker run --rm -e GODEBUG=tlsmlkem=0,tlssecpmlkem=0 \
+            -v "$RUNNER_TEMP:/reports" -v score_it_trivy_cache:/root/.cache/trivy "$TRIVY_IMAGE" image \
+            --input /reports/caddy.tar --scanners vuln,secret,misconfig \
+            --image-config-scanners secret,misconfig --format json --output /reports/caddy.json
+          python tests/check_caddy_jose.py --archive "$RUNNER_TEMP/caddy.tar" \
+            --image score-it-caddy:security-ci --report "$RUNNER_TEMP/caddy.json" \
+            --output "$RUNNER_TEMP/caddy-jose.json"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: Parabe11um/kidsTime
+          ref: cdf451d9653a1d7b822bd6b2800b5417b655cace
+          path: .ci-kidstime
+          persist-credentials: false
+      - name: Verify both proxy routes and private logs
+        run: |
+          set -euo pipefail
+          source deploy/images.env
+          python .ci-kidstime/tests/check_caddy_security.py --image score-it-caddy:security-ci \
+            --backend-image "$PYTHON_SOURCE_IMAGE" | tee "$RUNNER_TEMP/caddy-routes.txt"
+      - name: Retain proxy proof and raw scanner findings
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: caddy-security-reports
+          path: |
+            ${{ runner.temp }}/caddy-build.log
+            ${{ runner.temp }}/caddy-runtime.txt
+            ${{ runner.temp }}/caddy-routes.txt
+            ${{ runner.temp }}/caddy.json
+            ${{ runner.temp }}/caddy-jose.json
+          if-no-files-found: warn
+
   postgres:
+    needs: caddy-security
     runs-on: ubuntu-latest
     timeout-minutes: 150
     services:

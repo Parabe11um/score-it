@@ -46,6 +46,10 @@ security/*-perl-regex-build.json и *-perl-regex-runtime.txt связывают 
 патчи, нативные тесты и упакованные/запущенные ELF-файлы.
 В APP отдельно проверяется отсутствие этих необязательных модулей во всех слоях.
 Статус дополнения Archive::Tar и границы проверок описаны в SECURITY.md.
+Для опционального Caddy обновлены chi/x/net/go-jose v4. Совместимое исправление
+go-jose v3 проверяется нативно и связано с бинарным файлом в
+security/caddy-jose.json. Сырая High-запись остаётся в JSON/SBOM; условия
+строго ограниченного решения по backport описаны в SECURITY.md.
 
 Базовые образы закреплены digest в deploy/images.env; Python-зависимости —
 версиями и SHA256 в requirements.production.txt. Исходники сохраняют права

@@ -22,7 +22,7 @@ while IFS=$'\t' read -r IMAGE CONFIG PLATFORM; do
   case "$IMAGE" in
     score-it:*) NAME=app ;;
     score-it-postgres:*) NAME=postgres ;;
-    score-it-caddy:*) NAME=caddy ;;
+    score-it-caddy:*) NAME=caddy; CADDY_SCAN_IMAGE="$IMAGE" ;;
     *) echo 'Unexpected image in the release manifest' >&2; exit 1 ;;
   esac
   docker image save --output "$TEMP/$NAME.tar" "$IMAGE"
@@ -37,8 +37,11 @@ while IFS=$'\t' read -r IMAGE CONFIG PLATFORM; do
   docker run --rm "${TRIVY_TLS_ARGS[@]}" -v "$ROOT/security:/reports" "$TRIVY_IMAGE" convert \
     --format spdx-json --output "/reports/$NAME.spdx.json" "/reports/$NAME.json"
 done < "$ROOT/images.tsv"
+SOURCE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+python3 "$SOURCE_ROOT/tests/check_caddy_jose.py" --archive "$TEMP/caddy.tar" \
+  --image "$CADDY_SCAN_IMAGE" --report "$ROOT/security/caddy.json" --output "$ROOT/security/caddy-jose.json"
 python3 - "$ROOT/security" <<'PY'
-import json, sys
+import hashlib, json, sys
 from pathlib import Path
 root = Path(sys.argv[1])
 blocked = []
@@ -69,6 +72,21 @@ for name in ('app', 'postgres', 'caddy'):
     if name in ('caddy', 'postgres'):
         high_go = [v for result in report.get('Results', []) if result.get('Type') == 'gobinary'
                    for v in result.get('Vulnerabilities') or [] if v['Severity'] in ('HIGH', 'CRITICAL')]
+        if name == 'caddy':
+            review = json.loads((root / 'caddy-jose.json').read_text())
+            if (review['check'] != 'caddy_jose_review'
+                    or review['image_config_id'] != report['Metadata']['ImageID']
+                    or review['report_sha256'] != hashlib.sha256((root / 'caddy.json').read_bytes()).hexdigest()
+                    or review['raw_report_modified'] is not False):
+                raise SystemExit('Caddy backport evidence/scan identity differs')
+            expected = [{'id': v['VulnerabilityID'], 'package': v['PkgName'], 'installed_version': v['InstalledVersion']}
+                        for v in high_go]
+            if expected != review['raw_high_backports']:
+                raise SystemExit('Unreviewed Caddy HIGH/CRITICAL findings')
+            # check_caddy_jose.py permits ONLY the pinned v3.0.5 backport after
+            # source/native controls and ELF/config/scan hashes all match.
+            high_go = []
+            summary.append('caddy: reviewed_backport_high_records=' + str(len(expected)) + '; raw JSON/SBOM unchanged')
         if high_go:
             blocked.append(name + ': unresolved Go module HIGH/CRITICAL findings')
     if name == 'postgres':

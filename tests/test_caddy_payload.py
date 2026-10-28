@@ -10,6 +10,7 @@ import tempfile
 import unittest
 
 from check_caddy_runtime import PAYLOAD, check_archive
+from caddy_jose_policy import POLICY
 
 
 IMAGE = "score-it-caddy:payload-test"
@@ -31,6 +32,11 @@ def payload(interpreter=False):
         'github.com/caddyserver/caddy/v2\n' + hashlib.sha256(values['usr/bin/caddy']).hexdigest()
         + '  /out/caddy\n').encode()
     values["etc/ssl/certs/ca-certificates.crt"] = b"-----BEGIN CERTIFICATE-----\n" * 21
+    values['usr/share/caddy/jose-backport.json']=json.dumps({
+        'check':'caddy_jose_backport','policy':POLICY,
+        'binary_sha256':hashlib.sha256(values['usr/bin/caddy']).hexdigest(),
+        'native_tests':{'go':'go1.26.10','probe_cases':16,'negative_controls':2,
+                        'suite_packages':POLICY['suite_packages'],'xnet_html':True}}).encode()
     return values
 
 

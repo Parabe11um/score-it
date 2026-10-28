@@ -17,6 +17,7 @@ import tarfile
 import tempfile
 import time
 import uuid
+from caddy_jose_policy import verify_proof
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "deploy"))
 from verify_release import Archive, image_name  # noqa: E402
@@ -28,6 +29,7 @@ PAYLOAD = {
     "usr/share/licenses/caddy/LICENSE", "usr/share/licenses/go/LICENSE",
     "usr/share/zoneinfo/zoneinfo.zip",
     "usr/share/caddy/build-deps.txt",
+    "usr/share/caddy/jose-backport.json",
 }
 TLS_CLIENT = r'''
 import ssl, sys, time, urllib.error, urllib.request
@@ -116,14 +118,16 @@ def layer_names(source, image, platform):
     return json.loads(raw), candidates[0]
 
 
-def check_archive(path, image, platform="linux/amd64"):
+def check_archive(path, image, platform="linux/amd64", include_proof=False):
     """Inspect every layer, including files later overwritten or deleted."""
     files = {}
     links = []
     roots = b""
     binary = b""
     dependencies = b""
+    proof = None
     with Archive(path) as source:
+        config_id='sha256:'+hashlib.sha256(source.config(image,platform)).hexdigest()
         config, layers = layer_names(source, image, platform)
         require(config["config"].get("User")=="10002:10002", "Caddy must start as UID/GID 10002")
         env = dict(v.split("=", 1) for v in config["config"].get("Env", []))
@@ -151,13 +155,16 @@ def check_archive(path, image, platform="linux/amd64"):
                         require(name not in files, "Overwritten file retained in layers: " + name)
                         files[name] = item.size
                         if name in ("usr/bin/caddy", "etc/ssl/certs/ca-certificates.crt",
-                                    "usr/share/caddy/build-deps.txt"):
+                                    "usr/share/caddy/build-deps.txt", "usr/share/caddy/jose-backport.json"):
                             with layer.extractfile(item) as content:
                                 raw = content.read()
                             if name == "usr/bin/caddy":
                                 binary = raw
                             elif name == "usr/share/caddy/build-deps.txt":
                                 dependencies = raw
+                            elif name == "usr/share/caddy/jose-backport.json":
+                                require(len(raw)<2*1024**2,'Oversized Caddy JOSE proof')
+                                proof=json.loads(raw)
                             else:
                                 roots = raw
     require(set(files) == PAYLOAD, "Required runtime data files are missing")
@@ -178,6 +185,9 @@ def check_archive(path, image, platform="linux/amd64"):
     require(size >= 4 and offset + size * count <= len(binary), "Invalid ELF program headers")
     require(all(struct.unpack_from("<I", binary, offset + i * size)[0] != 3
                 for i in range(count)), "Caddy requires a dynamic loader")
+    digest=hashlib.sha256(binary).hexdigest()
+    verify_proof(proof,digest)
+    if include_proof:return roots,proof,config_id,digest
     return roots
 
 
@@ -306,9 +316,10 @@ def main():
     output = docker("run", "--rm", "--pull=never", "--network", "none",
                     "--entrypoint", "caddy", info["Id"], "build-info")
     require(re.search(r"^go\s+go1[.]26[.]10$", output, re.M), "Unexpected Go version")
-    require(re.search(r"^dep\s+golang.org/x/net\s+v0[.]60[.]0\s", output, re.M),
+    require(re.search(r"^dep\s+golang.org/x/net\s+v0[.]62[.]0\s", output, re.M),
             "Unexpected x/net version")
     require(re.search(r"^dep\s+github.com/go-chi/chi/v5\s+v5[.]4[.]0\s",output,re.M), "Unexpected chi version")
+    require(re.search(r"^dep\s+github.com/go-jose/go-jose/v4\s+v4[.]1[.]6\s",output,re.M), "Unexpected JOSE v4 version")
     with tempfile.TemporaryDirectory(prefix="score-it-caddy-runtime-") as temp:
         directory = Path(temp)
         path = directory / "caddy.tar"
@@ -318,6 +329,7 @@ def main():
                 "Caddy tag changed during export")
         print("CADDY_ARCHIVE_PAYLOAD_OK", flush=True)
         print("CADDY_OPENPGP_NOT_IMPORTED_OK", flush=True)
+        print("CADDY_JOSE_SOURCE_AND_NATIVE_PROOF_OK", flush=True)
         check_runtime(info["Id"], args.client_image, roots, directory)
     print("CADDY_RUNTIME_OK", flush=True)
 
