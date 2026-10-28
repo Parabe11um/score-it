@@ -180,7 +180,7 @@ jobs:
           for IMAGE in "$SCORE_IT_IMAGE" "$POSTGRES_IMAGE" "$CADDY_IMAGE"; do
             docker image inspect --format '{{json .Config.Env}}' "$IMAGE" | python -c 'import json, sys; names = {v.split("=", 1)[0] for v in json.load(sys.stdin)}; assert not {"GODEBUG", "OPENSSL_CONF"} & names, names'
           done
-          python "$GITHUB_WORKSPACE/tests/check_caddy_runtime.py" --image "$CADDY_IMAGE" --client-image "$SCORE_IT_IMAGE" </dev/null
+          python "$GITHUB_WORKSPACE/tests/check_caddy_runtime.py" --image "$CADDY_IMAGE" --client-image "$SCORE_IT_IMAGE" </dev/null | tee "$RUNNER_TEMP/caddy-runtime.txt"
           grep -Fx 'RELEASE_TLS_COMPAT=1' security/build-options.txt
           docker run --rm --network none -v "$PWD/Caddyfile.score-it.example:/etc/caddy/Caddyfile:ro" "$CADDY_IMAGE" caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile > "$RUNNER_TEMP/caddy-adapted.json"
           test "$(docker network inspect --format '{{.Internal}}' score-it-check-ci_backend)" = true
@@ -245,4 +245,5 @@ jobs:
             ${{ runner.temp }}/browser-security.json
             ${{ runner.temp }}/import-resources.json
             ${{ runner.temp }}/postgres-runtime.txt
+            ${{ runner.temp }}/caddy-runtime.txt
           if-no-files-found: warn

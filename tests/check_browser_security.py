@@ -165,6 +165,10 @@ def run(args):
                             '-keyout', str(directory / 'key.pem'), '-out', str(directory / 'cert.pem'),
                             '-subj', '/CN=localhost', '-addext', 'subjectAltName=DNS:localhost'],
                            capture_output=True, text=True, check=True, timeout=20)
+            # Only synthetic, one-day test keys. The host parent stays 0700;
+            # bind individual files so UID 10002 need not traverse that parent.
+            for name in ('cert.pem','key.pem'):
+                (directory / name).chmod(0o444)
             template = (ROOT / 'deploy/Caddyfile.score-it.example').read_text()
             require(template.count('score-it.example.com {') == 1 and template.count('score-it-web:8000') == 1,
                     'Proxy template changed; review the test adaptation')
@@ -174,6 +178,7 @@ def run(args):
             template = template.replace('score-it-web:8000', web + ':8000')
             config = directory / 'Caddyfile'
             config.write_text(template)
+            config.chmod(0o444)
             # Docker does not publish ports for an internal-only endpoint.
             # Only the ephemeral proxy joins this second bridge; web and DB
             # remain on their original private network without host ports.
@@ -185,7 +190,8 @@ def run(args):
                            '--tmpfs', '/data:rw,mode=1777', '--tmpfs', '/config:rw,mode=1777',
                            '--tmpfs', '/tmp:rw,mode=1777', '--security-opt', 'no-new-privileges:true',
                            '--mount', 'type=bind,source=' + str(config) + ',target=/etc/caddy/Caddyfile,readonly',
-                           '--mount', 'type=bind,source=' + str(directory) + ',target=/certs,readonly',
+                           '--mount', 'type=bind,source=' + str(directory/'cert.pem') + ',target=/certs/cert.pem,readonly',
+                           '--mount', 'type=bind,source=' + str(directory/'key.pem') + ',target=/certs/key.pem,readonly',
                            '--entrypoint', 'caddy', caddy_image, 'run', '--config', '/etc/caddy/Caddyfile',
                            '--adapter', 'caddyfile').strip()
             docker('network', 'connect', network, proxy)
