@@ -18,10 +18,10 @@ RUN --mount=type=bind,source=deploy/build_tls.sh,target=/run/score-it-build-tls.
     && cp cmd/caddy/main.go /build/main.go \
     && cd /build \
     && go mod init score-it-caddy-build \
-    && go get github.com/caddyserver/caddy/v2@v2.11.7 golang.org/x/net@v0.60.0 \
+    && go get github.com/caddyserver/caddy/v2@v2.11.7 golang.org/x/net@v0.60.0 github.com/go-chi/chi/v5@v5.4.0 \
     && go mod tidy \
     && go mod verify \
-    && go build -trimpath -ldflags "-s -w -X github.com/caddyserver/caddy/v2.CustomVersion=v2.11.7-scoreit.1" -o /out/caddy . \
+    && go build -trimpath -ldflags "-s -w -X github.com/caddyserver/caddy/v2.CustomVersion=v2.11.7-scoreit.2" -o /out/caddy . \
     && go version -m /out/caddy \
     && go list -deps . > /out/caddy-build-deps.txt \
     && ! grep -E "^golang.org/x/crypto/openpgp(/|$)" /out/caddy-build-deps.txt \
@@ -37,10 +37,14 @@ RUN set -eu; \
     mkdir -p /runtime/usr/bin /runtime/etc/ssl/certs /runtime/etc/caddy \
         /runtime/usr/share/caddy /runtime/config/caddy /runtime/data/caddy \
         /runtime/srv /runtime/tmp; \
-    chmod 1777 /runtime/tmp /runtime/config/caddy /runtime/data/caddy; \
+    chmod 1777 /runtime/tmp; \
+    chown 10002:10002 /runtime/config/caddy /runtime/data/caddy; \
+    chmod 0700 /runtime/config/caddy /runtime/data/caddy; \
     cp /etc/ssl/certs/ca-certificates.crt /runtime/etc/ssl/certs/; \
     ln -s certs/ca-certificates.crt /runtime/etc/ssl/cert.pem; \
     cp /etc/mime.types /etc/passwd /etc/group /runtime/etc/; \
+    printf 'scoreitcaddy:x:10002:10002:Caddy:/nonexistent:/sbin/nologin\n' >>/runtime/etc/passwd; \
+    printf 'scoreitcaddy:x:10002:\n' >>/runtime/etc/group; \
     cp /etc/caddy/Caddyfile /runtime/etc/caddy/; \
     cp /usr/share/caddy/index.html /runtime/usr/share/caddy/
 COPY --from=builder /out/caddy /runtime/usr/bin/caddy
@@ -52,18 +56,18 @@ COPY --from=builder /usr/local/go/lib/time/zoneinfo.zip /runtime/usr/share/zonei
 FROM scratch
 COPY --from=runtime-files /runtime/ /
 ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-    CADDY_VERSION=v2.11.7-scoreit.1 \
+    CADDY_VERSION=v2.11.7-scoreit.2 \
     XDG_CONFIG_HOME=/config \
     XDG_DATA_HOME=/data \
     ZONEINFO=/usr/share/zoneinfo/zoneinfo.zip
 LABEL org.opencontainers.image.title="Caddy" \
-    org.opencontainers.image.version="v2.11.7-scoreit.1" \
+    org.opencontainers.image.version="v2.11.7-scoreit.2" \
     org.opencontainers.image.description="Caddy rebuilt with pinned Go dependencies for score-it" \
     org.opencontainers.image.url="https://caddyserver.com" \
     org.opencontainers.image.documentation="https://caddyserver.com/docs" \
     org.opencontainers.image.source="https://github.com/Parabe11um/score-it" \
     org.opencontainers.image.licenses="Apache-2.0"
 EXPOSE 80 443 443/udp 2019
-USER 0:0
+USER 10002:10002
 WORKDIR /srv
 CMD ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]

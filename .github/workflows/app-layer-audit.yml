@@ -6,7 +6,7 @@ permissions:
 jobs:
   audit-app:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -23,6 +23,8 @@ jobs:
           python tests/check_app_base.py --image score-it:layer-audit > "$RUNNER_TEMP/app-base.txt"
           python tests/check_noacl_runtime.py --image score-it:layer-audit --profile app \
             --archive "$RUNNER_TEMP/app.tar" > "$RUNNER_TEMP/app-acl-runtime.txt"
+          python tests/check_perl_regex.py --image score-it:layer-audit --profile app \
+            --archive "$RUNNER_TEMP/app.tar" > "$RUNNER_TEMP/app-perl-regex-runtime.txt"
           docker run --rm --platform linux/amd64 -e GODEBUG=tlsmlkem=0,tlssecpmlkem=0 \
             -v "$RUNNER_TEMP:/reports" "$TRIVY_IMAGE" image \
             --input /reports/app.tar --scanners vuln,secret,misconfig \
@@ -40,5 +42,6 @@ jobs:
             ${{ runner.temp }}/app-layer-audit.json
             ${{ runner.temp }}/app-base.txt
             ${{ runner.temp }}/app-acl-runtime.txt
+            ${{ runner.temp }}/app-perl-regex-runtime.txt
             ${{ runner.temp }}/app.json
             ${{ runner.temp }}/app.config

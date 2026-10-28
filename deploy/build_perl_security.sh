@@ -7,12 +7,12 @@ unset PERL5LIB PERLLIB PERL5OPT
 test "$ID:$VERSION_CODENAME" = debian:bookworm
 test "$(dpkg --print-architecture)" = amd64
 SOURCE_VERSION=5.36.0-7+deb12u4
-VERSION="$SOURCE_VERSION+scoreit1"
+VERSION="$SOURCE_VERSION+scoreit2"
 PATCHES=/run/score-it-perl-patches
 PROBE=/run/score-it-perl-probe.pl
 apt-get update
 apt-get install -y --no-install-recommends build-essential ca-certificates curl dpkg-dev \
-    debhelper fakeroot file cpio libdb-dev libgdbm-dev libgdbm-compat-dev netbase procps \
+    debhelper fakeroot file cpio python3 libdb-dev libgdbm-dev libgdbm-compat-dev netbase procps \
     zlib1g-dev libbz2-dev dist util-linux
 mkdir -p /src/perl /out
 cd /src/perl
@@ -48,6 +48,7 @@ for NAME in archive-tar-size-cap archive-tar-stream-alignment pod-text-margins; 
         cp cpan/Archive-Tar/lib/Archive/Tar.pm ../first-control/Archive/
     fi
 done
+sh /run/score-it-perl-regex-build.sh apply postgres
 sed -i "1s/$SOURCE_VERSION/$VERSION/" debian/changelog
 useradd --system --user-group --no-create-home perlbuild
 chown -R perlbuild:perlbuild /src/perl
@@ -102,3 +103,6 @@ printf '%s\n' "debian_source=$SOURCE_VERSION" "runtime_package=$VERSION" 'abi=5.
     >/out/perl-security-source.txt
 sha256sum "$PROBE" | awk '{print "probe_sha256=" $1}' >>/out/perl-security-source.txt
 cat /out/perl-security-source.txt /out/perl-modules.sha256 /out/perl-security-tests.txt
+
+sh /run/score-it-perl-regex-build.sh test postgres
+sh /run/score-it-perl-regex-build.sh manifest postgres

@@ -88,6 +88,8 @@ test "$(cat "$probe_dir/restored/result")" = checked
 printf 'RUNTIME_BASE_COMMANDS_OK uid=%s\n' "$(id -u)"
 '''
 
+from runtime_policy import APP_HEALTHCHECK, health_matches
+
 def check_app_metadata(source, target):
     expected_env = dict(v.split("=", 1) for v in source.get("Env", []))
     expected_env.update(PYTHONDONTWRITEBYTECODE="1", PYTHONUNBUFFERED="1",
@@ -100,7 +102,8 @@ def check_app_metadata(source, target):
         "ExposedPorts": {"8000/tcp": {}},
     }.items():
         require(target.get(key) == expected, "Application runtime configuration changed: " + key)
-    for key in ("Entrypoint", "Healthcheck", "Volumes", "StopSignal", "OnBuild", "Shell"):
+    require(health_matches(target.get("Healthcheck"),APP_HEALTHCHECK), "Unexpected application healthcheck")
+    for key in ("Entrypoint", "Volumes", "StopSignal", "OnBuild", "Shell"):
         require(not target.get(key), "Unexpected application runtime configuration: " + key)
 
 APP_CHECK = r"""

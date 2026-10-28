@@ -18,6 +18,21 @@ services:
       timeout: 5s
       retries: 20
     restart: unless-stopped
+    user: "999:999"
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+      - /var/run/postgresql:size=8m,mode=0775,uid=999,gid=999
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "5"
 
   web:
     image: ${SCORE_IT_IMAGE:?Set SCORE_IT_IMAGE in .env.production}
@@ -51,6 +66,7 @@ services:
       retries: 5
     restart: unless-stopped
     init: true
+    pids_limit: 128
     read_only: true
     tmpfs:
       - /tmp:size=64m,mode=1777

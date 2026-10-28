@@ -9,6 +9,7 @@ import tempfile
 import unittest
 
 from check_postgres_runtime import GOSU, check_archive, check_build_info, check_metadata
+from runtime_policy import PG_HEALTHCHECK
 from test_caddy_payload import binary, layer_bytes, saved_image
 from check_postgres_openssl import FILES, PACKAGES, VERSION, check_archive as check_openssl_archive, check_runtime
 from test_runtime_tools import elf_bytes
@@ -107,7 +108,7 @@ esac
             (root/'dpkg-query').write_text('''#!/bin/sh
 case "$2" in
  *Status*) echo installed ;;
- *) echo "${MOCK_VERSION}" ;;
+ *) case "$3" in tzdata) echo 2026e-0+deb12u1 ;; *) echo "${MOCK_VERSION}" ;; esac ;;
 esac
 ''')
             (root/'dpkg').write_text('#!/bin/sh\nexit 0\n')
@@ -214,29 +215,32 @@ class PostgresPayloadTests(unittest.TestCase):
             "StopSignal": "SIGINT", "Volumes": {"/var/lib/postgresql/data": {}},
             "ExposedPorts": {"5432/tcp": {}},
         }
-        check_metadata(source, copy.deepcopy(source))
+        expected=copy.deepcopy(source);expected.update(User="999:999",Healthcheck=copy.deepcopy(PG_HEALTHCHECK))
+        check_metadata(source, expected)
         # Docker stores the default root directory as either "" or "/".
-        explicit_root = copy.deepcopy(source)
+        explicit_root = copy.deepcopy(expected)
         explicit_root["WorkingDir"] = "/"
         check_metadata(source, explicit_root)
         for key, value in (
             ("Entrypoint", ["sh"]), ("StopSignal", "SIGTERM"),
             ("WorkingDir", "/unexpected"),
+            ("User", "0:0"), ("User", ""),
+            ("Healthcheck", {"Test":["NONE"]}), ("Healthcheck", None),
             ("Volumes", {"/var/lib/postgresql": {}}),
             ("Env", ["PG_MAJOR=17", "PGDATA=/another/path", "LANG=en_US.utf8"]),
         ):
             with self.subTest(key=key):
-                target = copy.deepcopy(source)
+                target = copy.deepcopy(expected)
                 target[key] = value
                 with self.assertRaises(RuntimeError):
                     check_metadata(source, target)
 
     def test_accepts_only_documented_server_package_revision(self):
         source = {"Env": ["PG_MAJOR=17", "PG_VERSION=17.11-1.pgdg12+2"]}
-        target = {"Env": ["PG_MAJOR=17", "PG_VERSION=17.11-1.pgdg12+2+scoreit2"]}
+        target = {"Env": ["PG_MAJOR=17", "PG_VERSION=17.11-1.pgdg12+2+scoreit2"],"User":"999:999","Healthcheck":copy.deepcopy(PG_HEALTHCHECK)}
         check_metadata(source, target)
         with self.assertRaisesRegex(RuntimeError, "environment changed"):
-            check_metadata(source, source)
+            check_metadata(source, {**target,"Env":source["Env"]})
 
 
 if __name__ == "__main__":

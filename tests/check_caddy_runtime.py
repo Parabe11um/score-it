@@ -125,6 +125,7 @@ def check_archive(path, image, platform="linux/amd64"):
     dependencies = b""
     with Archive(path) as source:
         config, layers = layer_names(source, image, platform)
+        require(config["config"].get("User")=="10002:10002", "Caddy must start as UID/GID 10002")
         env = dict(v.split("=", 1) for v in config["config"].get("Env", []))
         require(env.get("XDG_CONFIG_HOME") == "/config"
                 and env.get("XDG_DATA_HOME") == "/data", "Certificate paths changed")
@@ -204,8 +205,9 @@ https://caddy-runtime.test {
     respond "CADDY_TLS_OK"
 }
 ''')
+        caddyfile.chmod(0o444)
         caddy = docker(
-            "create", "--pull=never", "--read-only", "--tmpfs", "/tmp",
+            "create", "--pull=never", "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--tmpfs", "/tmp:mode=1777",
             "--name", prefix + "-tls", "--network", network,
             "--network-alias", "caddy-runtime.test",
             "--mount", f"type=bind,source={caddyfile},target=/etc/caddy/Caddyfile,readonly",
@@ -225,6 +227,17 @@ https://caddy-runtime.test {
                 break
             require(time.monotonic() < deadline, "Test Caddy did not create a certificate")
             time.sleep(0.2)
+        policy_probe = "import pathlib; p=dict(line.split(':',1) for line in pathlib.Path('/proc/1/status').read_text().splitlines() if ':' in line); assert p['Uid'].split()==['10002']*4; assert int(p['CapEff'],16)==0; assert p['NoNewPrivs'].strip()=='1'"
+        docker('run','--rm','--pull=never','--network','none','--read-only','--cap-drop','ALL',
+               '--security-opt','no-new-privileges:true','--pid','container:'+caddy,
+               '--entrypoint','python',client_image,'-c',policy_probe)
+        print('CADDY_NONROOT_RUNTIME_OK uid=10002 capeff=0 no_new_privs=1',flush=True)
+        key_probe = "import pathlib,stat; keys=list(pathlib.Path('/data/caddy').rglob('*.key')); assert keys; assert all(p.stat().st_uid==10002 and stat.S_IMODE(p.stat().st_mode)==0o600 for p in keys)"
+        docker('run','--rm','--pull=never','--network','none','--read-only','--cap-drop','ALL',
+               '--security-opt','no-new-privileges:true','--user','10002:10002',
+               '--mount',f'type=volume,source={volumes[0]},target=/data,readonly',
+               '--entrypoint','python',client_image,'-c',key_probe)
+        print('CADDY_PRIVATE_KEYS_POLICY_OK uid=10002 mode=0600',flush=True)
         certificate = root.read_text()
         client_args = ["run", "--rm", "--pull=never", "--network", network,
                        "--entrypoint", "python", client_image, "-c"]
@@ -250,15 +263,17 @@ http://caddy-runtime-proxy {
     }
 }
 ''')
+        proxyfile.chmod(0o444)
         bundle = directory / "roots.crt"
         bundle.write_bytes(roots + b"\n" + certificate.encode())
+        bundle.chmod(0o444)
         for trusted in (False, True):
             mounts = ["--mount", f"type=bind,source={proxyfile},target=/etc/caddy/Caddyfile,readonly"]
             if trusted:
                 mounts.extend(["--mount", f"type=bind,source={bundle},target=/etc/ssl/certs/ca-certificates.crt,readonly"])
             proxy = docker(
-                "create", "--pull=never", "--read-only", "--tmpfs", "/tmp",
-                "--tmpfs", "/config", "--tmpfs", "/data",
+                "create", "--pull=never", "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--tmpfs", "/tmp:mode=1777",
+                "--tmpfs", "/config:uid=10002,gid=10002,mode=0700", "--tmpfs", "/data:uid=10002,gid=10002,mode=0700",
                 "--network", network, "--network-alias", "caddy-runtime-proxy",
                 *mounts, image,
             )
@@ -293,6 +308,7 @@ def main():
     require(re.search(r"^go\s+go1[.]26[.]10$", output, re.M), "Unexpected Go version")
     require(re.search(r"^dep\s+golang.org/x/net\s+v0[.]60[.]0\s", output, re.M),
             "Unexpected x/net version")
+    require(re.search(r"^dep\s+github.com/go-chi/chi/v5\s+v5[.]4[.]0\s",output,re.M), "Unexpected chi version")
     with tempfile.TemporaryDirectory(prefix="score-it-caddy-runtime-") as temp:
         directory = Path(temp)
         path = directory / "caddy.tar"

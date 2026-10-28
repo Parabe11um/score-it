@@ -50,10 +50,10 @@ def layer_bytes(files, link=True):
     return stream.getvalue()
 
 
-def saved_image(path, layers, oci=False, image=IMAGE):
+def saved_image(path, layers, oci=False, image=IMAGE, user="10002:10002"):
     config = json.dumps({
         "os": "linux", "architecture": "amd64",
-        "config": {"Env": ["XDG_CONFIG_HOME=/config", "XDG_DATA_HOME=/data"]},
+        "config": {"User":user, "Env": ["XDG_CONFIG_HOME=/config", "XDG_DATA_HOME=/data"]},
         "rootfs": {"type": "layers", "diff_ids": [
             "sha256:" + hashlib.sha256(layer).hexdigest() for layer in layers]},
     }).encode()
@@ -107,6 +107,14 @@ class CaddyPayloadTests(unittest.TestCase):
         for oci in (False, True):
             with self.subTest(oci=oci):
                 self.assertIn(b"BEGIN CERTIFICATE", self.verify([layer_bytes(payload())], oci))
+
+    def test_rejects_root_or_changed_startup_user(self):
+        for user in ("", "0", "0:0", "10001:10001"):
+            with self.subTest(user=user), tempfile.TemporaryDirectory() as temp:
+                path = Path(temp) / "caddy.tar"
+                saved_image(path, [layer_bytes(payload())], user=user)
+                with self.assertRaisesRegex(RuntimeError, "UID/GID 10002"):
+                    check_archive(path, IMAGE)
 
     def test_rejects_original_binary_under_a_new_binary(self):
         for oci in (False, True):

@@ -4,3 +4,17 @@ services:
   caddy:
     image: ${CADDY_IMAGE:?Set CADDY_IMAGE from release.env}
     pull_policy: never
+    user: "10002:10002"
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "5"

@@ -11,7 +11,7 @@ import tempfile
 from check_caddy_runtime import Archive, docker, layer_names, require
 
 
-VERSION = '5.36.0-7+deb12u4+scoreit1'
+VERSION = '5.36.0-7+deb12u4+scoreit2'
 CORE = {'perl', 'perl-base', 'perl-modules-5.36', 'libperl5.36'}
 MODULES = {'Archive::Tar': 'Archive/Tar.pm', 'Pod::Text': 'Pod/Text.pm',
            'Pod::Text::Color': 'Pod/Text/Color.pm',
@@ -41,7 +41,7 @@ def inventory(raw, profile):
             if fields.get('Status') == 'install ok installed':
                 require(name not in installed, 'Duplicate Perl package inventory')
                 installed[name] = fields.get('Version')
-    expected = dict.fromkeys(CORE, VERSION) if profile == 'postgres' else {'perl-base': '5.40.1-6+deb13u1'}
+    expected = dict.fromkeys(CORE, VERSION) if profile == 'postgres' else {'perl-base': '5.40.1-6+deb13u1+scoreit1'}
     require(installed == expected, 'Unexpected or stale Perl packages in saved layer')
     return installed
 

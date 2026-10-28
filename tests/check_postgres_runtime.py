@@ -23,6 +23,8 @@ import uuid
 from check_caddy_runtime import Archive, docker, layer_names, require
 from check_sqlite_payload import installed_packages
 from check_postgres_openssl import verify as verify_openssl
+from check_postgres_timezone import verify as verify_timezone
+from runtime_policy import PG_HEALTHCHECK,health_matches
 
 
 GOSU = "usr/local/bin/gosu"
@@ -90,13 +92,15 @@ def check_archive(path, image):
 
 def check_metadata(source, target):
     defaults = {
-        "Entrypoint": [], "Cmd": [], "User": "", "WorkingDir": "/",
+        "Entrypoint": [], "Cmd": [], "WorkingDir": "/",
         "StopSignal": "", "Volumes": {}, "ExposedPorts": {},
-        "Healthcheck": {}, "Shell": [], "OnBuild": [],
+        "Shell": [], "OnBuild": [],
     }
     for key, default in defaults.items():
         require((source.get(key) or default) == (target.get(key) or default),
                 "PostgreSQL image configuration changed: " + key)
+    require(target.get("User")=="999:999", "PostgreSQL must start as UID/GID 999")
+    require(health_matches(target.get("Healthcheck"),PG_HEALTHCHECK), "PostgreSQL healthcheck changed")
     environments = [dict(value.split("=", 1) for value in config.get("Env", []))
                     for config in (source, target)]
     expected_env = environments[0].copy()
@@ -130,8 +134,12 @@ def check_existing_volume(source, target):
     def create(image, suffix, data_volume=None, init_file=None):
         init_mount = (['--mount', 'type=bind,source=' + str(init_file)
                        + ',target=/docker-entrypoint-initdb.d/01-gzip.sql.gz,readonly'] if init_file else [])
+        isolation = (['--read-only','--cap-drop','ALL','--security-opt','no-new-privileges:true',
+                      '--tmpfs','/tmp:rw,nosuid,nodev,noexec,size=64m,mode=1777',
+                      '--tmpfs','/var/run/postgresql:rw,nosuid,nodev,noexec,size=8m,mode=0775,uid=999,gid=999',
+                      '--pids-limit','256'] if image == target else [])
         container = docker(
-            "create", "--pull=never", "--network", "none", "--name", prefix + suffix,
+            "create", "--pull=never", "--network", "none", *isolation, "--name", prefix + suffix,
             "--env", "POSTGRES_DB=" + database, "--env", "POSTGRES_PASSWORD=" + password,
             "--mount", f"type=volume,source={data_volume or volume},target=/var/lib/postgresql/data",
             *init_mount, image,
@@ -206,6 +214,10 @@ def check_existing_volume(source, target):
         print('POSTGRES_FEATURE_PREFLIGHT_REJECTIONS_OK', flush=True)
         sql(previous, "CREATE TABLE runtime_probe (id integer PRIMARY KEY, note text NOT NULL); "
                       "INSERT INTO runtime_probe VALUES (101, 'проверка данных');")
+        sql(previous, "CREATE TABLE timezone_probe (instant timestamptz NOT NULL); "
+                      "INSERT INTO timezone_probe VALUES ('2026-11-02 12:00:00+00'),('2030-01-15 12:00:00+00');")
+        timezone_query="SELECT extract(epoch FROM instant)::bigint FROM timezone_probe ORDER BY instant"
+        timezone_before=sql(previous,timezone_query)
         sql(previous, "CREATE COLLATION runtime_icu (provider=icu, locale='und'); "
                       "CREATE TABLE sort_probe (id integer PRIMARY KEY, value text NOT NULL); "
                       "INSERT INTO sort_probe SELECT n, v FROM unnest(ARRAY["
@@ -224,7 +236,7 @@ def check_existing_volume(source, target):
                       "WHERE collname='runtime_icu';")
         sort_before = sql(previous, sort_query)
         library_args = ("dpkg-query", "-W", "-f=${Package}=${Version}\\n",
-                        "libc6", "libc-l10n", "locales", "libicu72", "tzdata")
+                        "libc6", "libc-l10n", "locales", "libicu72")
         libraries_before = docker("exec", previous, *library_args)
         expected = "101:проверка данных"
         query = "SELECT id::text || ':' || note FROM runtime_probe ORDER BY id"
@@ -235,8 +247,13 @@ def check_existing_volume(source, target):
 
         current = create(target, "-current")
         ready(current)
+        status=docker('exec',current,'cat','/proc/1/status')
+        require(re.search(r'^Uid:\s+999\s+999\s+999\s+999$',status,re.M)
+                and re.search(r'^CapEff:\s+0+$',status,re.M)
+                and re.search(r'^NoNewPrivs:\s+1$',status,re.M),'PostgreSQL runtime privilege policy differs')
+        print('POSTGRES_NONROOT_RUNTIME_OK uid=999 capeff=0 no_new_privs=1',flush=True)
         require(docker("exec", current, *library_args) == libraries_before,
-                "Runtime libc/ICU/locales/tzdata versions changed")
+                "Runtime libc/ICU/locales versions changed")
         require(sql(current, sort_query) == sort_before, "Existing collations or sort order changed")
         require(sql(current, "SET enable_seqscan=off; " + sort_query).removeprefix("SET\n") == sort_before,
                 "Index scans changed the existing sort results")
@@ -258,6 +275,14 @@ def check_existing_volume(source, target):
         expected += "\n202:запись после замены"
         require(sql(current, query) == expected, "Replacement PostgreSQL cannot write")
         print("POSTGRES_EXISTING_VOLUME_OK", flush=True)
+        for zone,seconds in (('UTC',0),('Europe/Moscow',10800),('America/Winnipeg',-18000),('America/Yellowknife',-21600)):
+            for instant in ('2026-11-02 12:00:00+00','2030-01-15 12:00:00+00'):
+                offset=sql(current,"SELECT extract(epoch FROM ((timestamptz '"+instant+"' AT TIME ZONE '"+zone+
+                           "') - (timestamptz '"+instant+"' AT TIME ZONE 'UTC')))::int")
+                require(offset==str(seconds),'PostgreSQL updated timezone rule differs: '+zone)
+        require(sql(current,timezone_query)==timezone_before,'Stored timestamp instants changed')
+        print('POSTGRES_TIMEZONE_SQL_OK',flush=True)
+
         # Exercise the rebuilt libpq over TLS/TCP, including certificate trust.
         # These keys exist only in the uniquely named synthetic test volume.
         docker('exec', '--user', 'postgres', current, 'sh', '-ec',
@@ -399,6 +424,7 @@ def main():
         print("POSTGRES_ARCHIVE_PAYLOAD_OK", flush=True)
         print("POSTGRES_LDAP_DEPENDENCIES_ABSENT_OK", flush=True)
         verify_openssl(args.image, archive)
+        verify_timezone(args.image, archive)
     check_existing_volume(source["Id"], target["Id"])
     print("POSTGRES_RUNTIME_OK", flush=True)
 
