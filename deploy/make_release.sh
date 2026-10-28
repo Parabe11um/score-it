@@ -77,6 +77,10 @@ cp deploy/load_release.sh "$DEST/"
 cp deploy/verify_release.py "$DEST/"
 cp deploy/README.md "$DEST/README.md"
 cp deploy/SECURITY.md deploy/Caddyfile.score-it.example deploy/images.env deploy/sign_release.sh "$DEST/"
+# The committed example contains no secrets. Docker bind mounts keep the file's
+# mode even when the release directory is private (umask 077); UID 10002 needs
+# to read this public template for the offline Caddy configuration check.
+chmod 0644 "$DEST/Caddyfile.score-it.example"
 printf 'SCORE_IT_IMAGE=%s\nPOSTGRES_IMAGE=%s\nCADDY_IMAGE=%s\n' "$APP_IMAGE" "$PG_IMAGE" "$CADDY_IMAGE" > "$DEST/release.env"
 python3 deploy/verify_release.py manifest --archive "$DEST/images.tar" \
   --output "$DEST/images.tsv" --platform "$PLATFORM" \
