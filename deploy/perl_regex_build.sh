@@ -27,8 +27,17 @@ PY
         dpkg-source --before-build .
         if [ "$NAME" = regex-countdown ]; then cp regexec.c regexp.h ../regex-first/; fi
     done
+    python3 - "$POLICY" "$PROFILE" <<'PY'
+import hashlib,json,sys
+from pathlib import Path
+p=json.loads(Path(sys.argv[1]).read_text())[sys.argv[2]]
+assert {n:hashlib.sha256(Path(n).read_bytes()).hexdigest() for n in p['patched_source_sha256']}==p['patched_source_sha256']
+PY
     ;;
 test)
+    # dpkg-buildpackage un-applies quilt patches after a successful build.
+    # Restore the exact tested sources before inspecting their cache arithmetic.
+    dpkg-source --before-build .
     test -f perl-test-static-stamp
     test -f perl-test-shared-stamp
     UID_EXPECTED="$(id -u perlbuild)"
