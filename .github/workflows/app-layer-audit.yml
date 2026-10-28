@@ -13,8 +13,9 @@ jobs:
           persist-credentials: false
       - name: Build the application without waiting for the PostgreSQL compiler
         run: |
+          set -euo pipefail
           source deploy/images.env
-          docker build --platform linux/amd64 --build-arg "PYTHON_IMAGE=$PYTHON_SOURCE_IMAGE" --build-arg BUILD_TLS_COMPAT=1 -f Dockerfile.production -t score-it:layer-audit .
+          docker build --platform linux/amd64 --build-arg "PYTHON_IMAGE=$PYTHON_SOURCE_IMAGE" --build-arg BUILD_TLS_COMPAT=1 -f Dockerfile.production -t score-it:layer-audit . 2>&1 | tee "$RUNNER_TEMP/app-build.log"
           docker image save score-it:layer-audit -o "$RUNNER_TEMP/app.tar"
           docker image inspect --format '{{.Id}}' score-it:layer-audit > "$RUNNER_TEMP/app.config"
       - name: Verify the app base and retain an early vulnerability report
@@ -45,3 +46,10 @@ jobs:
             ${{ runner.temp }}/app-perl-regex-runtime.txt
             ${{ runner.temp }}/app.json
             ${{ runner.temp }}/app.config
+      - name: Retain complete native build diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: app-build-diagnostic
+          path: ${{ runner.temp }}/app-build.log
+          if-no-files-found: warn

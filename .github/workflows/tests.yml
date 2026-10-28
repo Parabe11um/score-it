@@ -149,7 +149,7 @@ jobs:
           (
             umask 077
             RELEASE_PULL=0 RELEASE_TLS_COMPAT=1 bash deploy/make_release.sh "$RUNNER_TEMP/releases"
-          )
+          ) 2>&1 | tee "$RUNNER_TEMP/release-build.log"
           RELEASE="$(git rev-parse HEAD)"
           cd "$RUNNER_TEMP/releases/score-it-$RELEASE"
           bash load_release.sh
@@ -246,4 +246,11 @@ jobs:
             ${{ runner.temp }}/import-resources.json
             ${{ runner.temp }}/postgres-runtime.txt
             ${{ runner.temp }}/caddy-runtime.txt
+          if-no-files-found: warn
+      - name: Retain complete native release build diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-build-diagnostic
+          path: ${{ runner.temp }}/release-build.log
           if-no-files-found: warn
