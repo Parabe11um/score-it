@@ -254,3 +254,15 @@ jobs:
           name: release-build-diagnostic
           path: ${{ runner.temp }}/release-build.log
           if-no-files-found: warn
+      - name: Retain immutable saved images when a later verification fails
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-image-diagnostic
+          path: |
+            ${{ runner.temp }}/releases/*/images.tar
+            ${{ runner.temp }}/releases/*/images.tsv
+            ${{ runner.temp }}/releases/*/VERSION
+            ${{ runner.temp }}/releases/*/release.env
+          compression-level: 1
+          if-no-files-found: warn

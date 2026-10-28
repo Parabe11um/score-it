@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path,PurePosixPath
+import posixpath
 import re
 import tarfile
 
@@ -16,7 +17,8 @@ OFFSETS={'Etc/UTC':'+0000','Europe/Moscow':'+0300','America/Winnipeg':'-0500','A
 
 
 def check_archive(path,image):
-    found={};version=None
+    payload={};links={};watched=set();version=None
+    version_headers={}
     with Archive(path) as source:
         _,layers=layer_names(source,image,'linux/amd64')
         for layer_name in layers:
@@ -35,10 +37,44 @@ def check_archive(path,image):
                             if fields.get('Package')=='tzdata' and fields.get('Status')=='install ok installed':rows.append(fields.get('Version'))
                         require(rows==[VERSION],'Old or ambiguous tzdata package')
                         version=rows[0]
+                        continue
+                    if not name.startswith('usr/share/zoneinfo/') or item.isdir():
+                        require(name not in FILES,'Timezone payload replaced by a directory')
+                        require(name not in payload and name not in links,'Timezone alias replaced by a directory')
+                        continue
+                    require(not PurePosixPath(name).name.startswith('.wh.'),'Deleted timezone data retained')
                     if name in FILES:
-                        require(item.isfile() and item.size<2*1024**2 and name not in found,'Invalid or overwritten timezone file')
-                        raw=layer.extractfile(item).read();found[name]=hashlib.sha256(raw).hexdigest()
-                        if name.endswith('tzdata.zi'):require(raw.startswith(b'# version 2026e\n'),'Timezone source version differs')
+                        require(name not in watched,'Overwritten timezone file retained: '+name)
+                        require(item.isfile() or item.islnk() or item.issym(),'Invalid timezone file type: '+name)
+                        watched.add(name)
+                    if item.isfile():
+                        require(item.size<2*1024**2 and name not in payload and name not in links,
+                                'Invalid or overwritten timezone data: '+name)
+                        raw=layer.extractfile(item).read();payload[name]=hashlib.sha256(raw).hexdigest()
+                        version_headers[name]=raw.startswith(b'# version 2026e\n')
+                    elif item.islnk():
+                        target=str(PurePosixPath(item.linkname))
+                        require(not PurePosixPath(target).is_absolute() and '..' not in PurePosixPath(target).parts
+                                and target.startswith('usr/share/zoneinfo/') and target!=name
+                                and name not in payload and name not in links,'Unsafe timezone hardlink: '+name)
+                        links[name]=target
+                    elif item.issym():
+                        require(name not in payload and name not in links,'Overwritten timezone alias: '+name)
+                        # Resolve archive metadata only, never a host filesystem link.
+                        target=posixpath.normpath(posixpath.join(str(PurePosixPath(name).parent),item.linkname))
+                        links[name]=target
+    found={}
+    require(watched==set(FILES),'Incomplete timezone payload')
+    for name in FILES:
+        target=name;seen=set()
+        while target in links:
+            require(target not in seen,'Timezone hardlink cycle')
+            seen.add(target);target=links[target]
+            require(target.startswith('usr/share/zoneinfo/') and '..' not in PurePosixPath(target).parts,
+                    'Timezone alias leaves its data directory')
+        require(target in payload,'Missing timezone hardlink target: '+name)
+        found[name]=payload[target]
+        if name.endswith('tzdata.zi'):require(version_headers[target],'Timezone source version differs')
     require(version==VERSION and found==FILES,'Timezone files differ from reviewed official Bookworm package')
     return found
 
