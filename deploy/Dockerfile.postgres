@@ -116,6 +116,9 @@ COPY --from=gzip-builder /out/gzip-*.txt /out/gzip-binary.sha256 /usr/share/scor
 # PostgreSQL package retains Debian's patches, paths and package inventory.
 FROM scratch
 COPY --from=runtime-files / /
+# COPY defaults to root ownership. Fresh volume population must inherit UID 999;
+# the nonroot entrypoint deliberately does not repair existing host volumes.
+RUN chown 999:999 /var/lib/postgresql /var/lib/postgresql/data /var/run/postgresql
 # FROM scratch does not inherit image configuration. Keep these values aligned
 # with POSTGRES_IMAGE; check_postgres_runtime.py compares the runtime contract.
 ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/lib/postgresql/17/bin \

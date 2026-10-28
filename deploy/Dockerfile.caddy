@@ -55,6 +55,10 @@ COPY --from=builder /usr/local/go/lib/time/zoneinfo.zip /runtime/usr/share/zonei
 
 FROM scratch
 COPY --from=runtime-files /runtime/ /
+# Keep executables/configuration root-owned, and explicitly restore only the
+# writable XDG subtrees after the final COPY resets ownership.
+COPY --from=runtime-files --chown=10002:10002 /runtime/config/ /config/
+COPY --from=runtime-files --chown=10002:10002 /runtime/data/ /data/
 ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     CADDY_VERSION=v2.11.7-scoreit.2 \
     XDG_CONFIG_HOME=/config \
