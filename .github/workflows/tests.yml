@@ -39,7 +39,9 @@ jobs:
       - name: Reject partial Caddy backports and unreviewed HIGH findings
         run: python -m unittest discover -s tests -p 'test_caddy_jose.py' -v
       - name: Reject obsolete gosu, deleted test keys and changed PostgreSQL configuration
-        run: python -m unittest discover -s tests -p 'test_postgres_payload.py' -v
+        run: |
+          python -m unittest discover -s tests -p 'test_postgres_payload.py' -v
+          python -m unittest discover -s tests -p 'test_postgres_security_stage.py' -v
       - name: Reject partial gzip fixes and stale saved binaries/package records
         run: python -m unittest discover -s tests -p 'test_gzip_payload.py' -v
       - name: Reject partial Perl fixes and stale saved modules/package records
@@ -103,9 +105,26 @@ jobs:
           set -euo pipefail
           source deploy/images.env
           docker pull --platform linux/amd64 "$POSTGRES_SOURCE_IMAGE"
-          docker run --rm --pull=never --platform linux/amd64 --memory=512m --pids-limit=128 \
-            --entrypoint sh "$POSTGRES_SOURCE_IMAGE" -s < deploy/update_postgres_security.sh \
-            2>&1 | tee "$RUNNER_TEMP/postgres-security-inputs.txt"
+          for TLS_COMPAT in 0 1; do
+            IMAGE="score-it-postgres-security:ci-$TLS_COMPAT"
+            docker build --progress=plain --platform linux/amd64 -f deploy/Dockerfile.postgres \
+              --target security-updated --build-arg "POSTGRES_IMAGE=$POSTGRES_SOURCE_IMAGE" \
+              --build-arg "BUILD_TLS_COMPAT=$TLS_COMPAT" -t "$IMAGE" . \
+              2>&1 | tee "$RUNNER_TEMP/postgres-security-build-$TLS_COMPAT.txt"
+            docker run --rm --pull=never --network=none --read-only --cap-drop=ALL \
+              --security-opt=no-new-privileges:true --memory=128m --pids-limit=32 \
+              --entrypoint sh "$IMAGE" -ec '
+              test "$(dpkg-query -W -f="\${Version}" tzdata)" = 2026e-0+deb12u1
+              test "$(dpkg-query -W -f="\${Version}" libssl3)" = 3.0.22-1~deb12u2
+              test "$(dpkg-query -W -f="\${Version}" openssl)" = 3.0.22-1~deb12u2
+              test "$(dpkg-query -W -f="\${db:Status-Status}" ca-certificates 2>/dev/null || true)" != installed
+              test ! -e /etc/ssl/certs/ca-certificates.crt
+              test ! -e /out
+              test -z "${OPENSSL_CONF+x}${GODEBUG+x}"
+              printf "POSTGRES_SECURITY_STAGE_RUNTIME_OK\n"
+              ' | tee "$RUNNER_TEMP/postgres-security-inputs-$TLS_COMPAT.txt"
+            grep -Fx POSTGRES_SECURITY_STAGE_RUNTIME_OK "$RUNNER_TEMP/postgres-security-inputs-$TLS_COMPAT.txt"
+          done
       - name: Build and test the proxy before the long database build
         run: |
           set -euo pipefail
@@ -150,7 +169,8 @@ jobs:
             ${{ runner.temp }}/caddy-routes.txt
             ${{ runner.temp }}/caddy.json
             ${{ runner.temp }}/caddy-jose.json
-            ${{ runner.temp }}/postgres-security-inputs.txt
+            ${{ runner.temp }}/postgres-security-inputs-*.txt
+            ${{ runner.temp }}/postgres-security-build-*.txt
           if-no-files-found: warn
 
   postgres:
