@@ -17,6 +17,7 @@ import tarfile
 import tempfile
 import time
 import uuid
+from caddy_jose_policy import verify_proof
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "deploy"))
 from verify_release import Archive, image_name  # noqa: E402
@@ -28,6 +29,7 @@ PAYLOAD = {
     "usr/share/licenses/caddy/LICENSE", "usr/share/licenses/go/LICENSE",
     "usr/share/zoneinfo/zoneinfo.zip",
     "usr/share/caddy/build-deps.txt",
+    "usr/share/caddy/jose-backport.json",
 }
 TLS_CLIENT = r'''
 import ssl, sys, time, urllib.error, urllib.request
@@ -116,15 +118,18 @@ def layer_names(source, image, platform):
     return json.loads(raw), candidates[0]
 
 
-def check_archive(path, image, platform="linux/amd64"):
+def check_archive(path, image, platform="linux/amd64", include_proof=False):
     """Inspect every layer, including files later overwritten or deleted."""
     files = {}
     links = []
     roots = b""
     binary = b""
     dependencies = b""
+    proof = None
     with Archive(path) as source:
+        config_id='sha256:'+hashlib.sha256(source.config(image,platform)).hexdigest()
         config, layers = layer_names(source, image, platform)
+        require(config["config"].get("User")=="10002:10002", "Caddy must start as UID/GID 10002")
         env = dict(v.split("=", 1) for v in config["config"].get("Env", []))
         require(env.get("XDG_CONFIG_HOME") == "/config"
                 and env.get("XDG_DATA_HOME") == "/data", "Certificate paths changed")
@@ -150,13 +155,16 @@ def check_archive(path, image, platform="linux/amd64"):
                         require(name not in files, "Overwritten file retained in layers: " + name)
                         files[name] = item.size
                         if name in ("usr/bin/caddy", "etc/ssl/certs/ca-certificates.crt",
-                                    "usr/share/caddy/build-deps.txt"):
+                                    "usr/share/caddy/build-deps.txt", "usr/share/caddy/jose-backport.json"):
                             with layer.extractfile(item) as content:
                                 raw = content.read()
                             if name == "usr/bin/caddy":
                                 binary = raw
                             elif name == "usr/share/caddy/build-deps.txt":
                                 dependencies = raw
+                            elif name == "usr/share/caddy/jose-backport.json":
+                                require(len(raw)<2*1024**2,'Oversized Caddy JOSE proof')
+                                proof=json.loads(raw)
                             else:
                                 roots = raw
     require(set(files) == PAYLOAD, "Required runtime data files are missing")
@@ -177,6 +185,9 @@ def check_archive(path, image, platform="linux/amd64"):
     require(size >= 4 and offset + size * count <= len(binary), "Invalid ELF program headers")
     require(all(struct.unpack_from("<I", binary, offset + i * size)[0] != 3
                 for i in range(count)), "Caddy requires a dynamic loader")
+    digest=hashlib.sha256(binary).hexdigest()
+    verify_proof(proof,digest)
+    if include_proof:return roots,proof,config_id,digest
     return roots
 
 
@@ -204,8 +215,9 @@ https://caddy-runtime.test {
     respond "CADDY_TLS_OK"
 }
 ''')
+        caddyfile.chmod(0o444)
         caddy = docker(
-            "create", "--pull=never", "--read-only", "--tmpfs", "/tmp",
+            "create", "--pull=never", "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--tmpfs", "/tmp:mode=1777",
             "--name", prefix + "-tls", "--network", network,
             "--network-alias", "caddy-runtime.test",
             "--mount", f"type=bind,source={caddyfile},target=/etc/caddy/Caddyfile,readonly",
@@ -225,6 +237,17 @@ https://caddy-runtime.test {
                 break
             require(time.monotonic() < deadline, "Test Caddy did not create a certificate")
             time.sleep(0.2)
+        policy_probe = "import pathlib; p=dict(line.split(':',1) for line in pathlib.Path('/proc/1/status').read_text().splitlines() if ':' in line); assert p['Uid'].split()==['10002']*4; assert int(p['CapEff'],16)==0; assert p['NoNewPrivs'].strip()=='1'"
+        docker('run','--rm','--pull=never','--network','none','--read-only','--cap-drop','ALL',
+               '--security-opt','no-new-privileges:true','--pid','container:'+caddy,
+               '--entrypoint','python',client_image,'-c',policy_probe)
+        print('CADDY_NONROOT_RUNTIME_OK uid=10002 capeff=0 no_new_privs=1',flush=True)
+        key_probe = "import pathlib,stat; keys=list(pathlib.Path('/data/caddy').rglob('*.key')); assert keys; assert all(p.stat().st_uid==10002 and stat.S_IMODE(p.stat().st_mode)==0o600 for p in keys)"
+        docker('run','--rm','--pull=never','--network','none','--read-only','--cap-drop','ALL',
+               '--security-opt','no-new-privileges:true','--user','10002:10002',
+               '--mount',f'type=volume,source={volumes[0]},target=/data,readonly',
+               '--entrypoint','python',client_image,'-c',key_probe)
+        print('CADDY_PRIVATE_KEYS_POLICY_OK uid=10002 mode=0600',flush=True)
         certificate = root.read_text()
         client_args = ["run", "--rm", "--pull=never", "--network", network,
                        "--entrypoint", "python", client_image, "-c"]
@@ -250,15 +273,17 @@ http://caddy-runtime-proxy {
     }
 }
 ''')
+        proxyfile.chmod(0o444)
         bundle = directory / "roots.crt"
         bundle.write_bytes(roots + b"\n" + certificate.encode())
+        bundle.chmod(0o444)
         for trusted in (False, True):
             mounts = ["--mount", f"type=bind,source={proxyfile},target=/etc/caddy/Caddyfile,readonly"]
             if trusted:
                 mounts.extend(["--mount", f"type=bind,source={bundle},target=/etc/ssl/certs/ca-certificates.crt,readonly"])
             proxy = docker(
-                "create", "--pull=never", "--read-only", "--tmpfs", "/tmp",
-                "--tmpfs", "/config", "--tmpfs", "/data",
+                "create", "--pull=never", "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--tmpfs", "/tmp:mode=1777",
+                "--tmpfs", "/config:uid=10002,gid=10002,mode=0700", "--tmpfs", "/data:uid=10002,gid=10002,mode=0700",
                 "--network", network, "--network-alias", "caddy-runtime-proxy",
                 *mounts, image,
             )
@@ -291,8 +316,10 @@ def main():
     output = docker("run", "--rm", "--pull=never", "--network", "none",
                     "--entrypoint", "caddy", info["Id"], "build-info")
     require(re.search(r"^go\s+go1[.]26[.]10$", output, re.M), "Unexpected Go version")
-    require(re.search(r"^dep\s+golang.org/x/net\s+v0[.]60[.]0\s", output, re.M),
+    require(re.search(r"^dep\s+golang.org/x/net\s+v0[.]62[.]0\s", output, re.M),
             "Unexpected x/net version")
+    require(re.search(r"^dep\s+github.com/go-chi/chi/v5\s+v5[.]4[.]0\s",output,re.M), "Unexpected chi version")
+    require(re.search(r"^dep\s+github.com/go-jose/go-jose/v4\s+v4[.]1[.]6\s",output,re.M), "Unexpected JOSE v4 version")
     with tempfile.TemporaryDirectory(prefix="score-it-caddy-runtime-") as temp:
         directory = Path(temp)
         path = directory / "caddy.tar"
@@ -302,6 +329,7 @@ def main():
                 "Caddy tag changed during export")
         print("CADDY_ARCHIVE_PAYLOAD_OK", flush=True)
         print("CADDY_OPENPGP_NOT_IMPORTED_OK", flush=True)
+        print("CADDY_JOSE_SOURCE_AND_NATIVE_PROOF_OK", flush=True)
         check_runtime(info["Id"], args.client_image, roots, directory)
     print("CADDY_RUNTIME_OK", flush=True)
 

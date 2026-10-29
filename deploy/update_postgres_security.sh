@@ -1,12 +1,14 @@
 #!/bin/sh
 # Build host only: Debian Bookworm DLA-4859-1, preserving the database ABI/base.
 # https://security-tracker.debian.org/tracker/DLA-4859-1
+# Bookworm tzdata DLA-4854-1 is a data update, preserving libc/ICU.
 set -eu
 export LC_ALL=C DEBIAN_FRONTEND=noninteractive
 . /etc/os-release
 test "$ID:$VERSION_CODENAME" = debian:bookworm
 SSL_VERSION='3.0.22-1~deb12u2'
-set -- "libssl3=$SSL_VERSION" "openssl=$SSL_VERSION"
+TZ_VERSION='2026e-0+deb12u1'
+set -- "libssl3=$SSL_VERSION" "openssl=$SSL_VERSION" "tzdata=$TZ_VERSION"
 for SPEC do
     test "$(dpkg-query -W -f='${db:Status-Status}' "${SPEC%%=*}")" = installed
 done
@@ -19,7 +21,7 @@ awk '
     $1 == "Remv" || $1 == "Purg" { exit 1 }
     $1 == "Inst" || $1 == "Conf" {
         sub(/:.*/, "", $2)
-        if ($2 != "libssl3" && $2 != "openssl") exit 1
+        if ($2 != "libssl3" && $2 != "openssl" && $2 != "tzdata") exit 1
     }
 ' "$PLAN"
 apt-get install -y --no-install-recommends --no-remove --only-upgrade "$@"

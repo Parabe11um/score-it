@@ -5,6 +5,7 @@ import tempfile
 import unittest
 
 from check_sqlite_payload import STATUS, check_archive, check_app_metadata
+from runtime_policy import APP_HEALTHCHECK
 from test_caddy_payload import layer_bytes, saved_image
 
 IMAGE = "score-it:sqlite-payload-test"
@@ -78,10 +79,10 @@ class SQLitePayloadTests(unittest.TestCase):
                                     "SCORE_IT_REQUIRE_POSTGRESQL=1", "DB_ENGINE=postgresql"],
             "User": "10001:10001", "WorkingDir": "/app",
             "Cmd": ["gunicorn", "--config", "deploy/gunicorn.conf.py", "config.wsgi:application"],
-            "ExposedPorts": {"8000/tcp": {}},
+            "ExposedPorts": {"8000/tcp": {}}, "Healthcheck":copy.deepcopy(APP_HEALTHCHECK),
         }
         check_app_metadata(source, target)
-        for key, value in (("User", "0:0"), ("WorkingDir", "/"), ("Entrypoint", ["sh"]),
+        for key, value in (("Healthcheck",None),("User", "0:0"), ("WorkingDir", "/"), ("Entrypoint", ["sh"]),
                            ("Env", target["Env"] + ["OPENSSL_CONF=/tmp/profile.cnf"])):
             with self.subTest(key=key):
                 changed = copy.deepcopy(target)

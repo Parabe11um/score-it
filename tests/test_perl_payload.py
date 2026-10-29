@@ -12,7 +12,7 @@ IMAGE = 'score-it:perl-test'
 
 
 def payload(profile='postgres'):
-    packages = dict.fromkeys(CORE, VERSION) if profile == 'postgres' else {'perl-base': '5.40.1-6+deb13u1'}
+    packages = dict.fromkeys(CORE, VERSION) if profile == 'postgres' else {'perl-base': '5.40.1-6+deb13u1+scoreit1'}
     files = {'var/lib/dpkg/status': ''.join('Package: ' + name + '\nStatus: install ok installed\nVersion: '
               + version + '\n\n' for name, version in packages.items()).encode()}
     if profile == 'app':

@@ -1,4 +1,4 @@
-# Caddy 2.11.7's upstream go.mod still uses x/net 0.59.0. Rebuild the binary;
+# Rebuild the pinned upstream release with reviewed Go security updates;
 # upgrading Alpine alone cannot fix dependencies embedded in a Go executable.
 ARG GO_IMAGE=golang:1.26.10-alpine3.24@sha256:9ce231b28998b32e116927c61aa5c406183061d4f3f2d61b292c88e7f6bdf7ca
 ARG CADDY_IMAGE=caddy:2.11.7-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f
@@ -6,9 +6,10 @@ FROM ${GO_IMAGE} AS builder
 ARG BUILD_TLS_COMPAT=0
 ENV GOTOOLCHAIN=local CGO_ENABLED=0
 RUN --mount=type=bind,source=deploy/build_tls.sh,target=/run/score-it-build-tls.sh,readonly \
-    sh /run/score-it-build-tls.sh "$BUILD_TLS_COMPAT" apk add --no-cache git
+    sh /run/score-it-build-tls.sh "$BUILD_TLS_COMPAT" apk add --no-cache git python3 patch
 WORKDIR /src
 RUN --mount=type=bind,source=deploy/build_tls.sh,target=/run/score-it-build-tls.sh,readonly \
+    --mount=type=bind,source=deploy,target=/run/score-it-caddy,readonly \
     sh /run/score-it-build-tls.sh "$BUILD_TLS_COMPAT" sh -ec '\
     git init \
     && git remote add origin https://github.com/caddyserver/caddy.git \
@@ -18,10 +19,12 @@ RUN --mount=type=bind,source=deploy/build_tls.sh,target=/run/score-it-build-tls.
     && cp cmd/caddy/main.go /build/main.go \
     && cd /build \
     && go mod init score-it-caddy-build \
-    && go get github.com/caddyserver/caddy/v2@v2.11.7 golang.org/x/net@v0.60.0 \
+    && go get github.com/caddyserver/caddy/v2@v2.11.7 golang.org/x/net@v0.62.0 github.com/go-chi/chi/v5@v5.4.0 github.com/go-jose/go-jose/v4@v4.1.6 \
     && go mod tidy \
     && go mod verify \
-    && go build -trimpath -ldflags "-s -w -X github.com/caddyserver/caddy/v2.CustomVersion=v2.11.7-scoreit.1" -o /out/caddy . \
+    && python3 /run/score-it-caddy/build_caddy_jose.py prepare /run/score-it-caddy \
+    && go build -mod=vendor -trimpath -ldflags "-s -w -X github.com/caddyserver/caddy/v2.CustomVersion=v2.11.7-scoreit.3" -o /out/caddy . \
+    && python3 /run/score-it-caddy/build_caddy_jose.py finish /run/score-it-caddy /out/caddy /out/caddy-jose-build.json \
     && go version -m /out/caddy \
     && go list -deps . > /out/caddy-build-deps.txt \
     && ! grep -E "^golang.org/x/crypto/openpgp(/|$)" /out/caddy-build-deps.txt \
@@ -37,33 +40,42 @@ RUN set -eu; \
     mkdir -p /runtime/usr/bin /runtime/etc/ssl/certs /runtime/etc/caddy \
         /runtime/usr/share/caddy /runtime/config/caddy /runtime/data/caddy \
         /runtime/srv /runtime/tmp; \
-    chmod 1777 /runtime/tmp /runtime/config/caddy /runtime/data/caddy; \
+    chmod 1777 /runtime/tmp; \
+    chown 10002:10002 /runtime/config/caddy /runtime/data/caddy; \
+    chmod 0700 /runtime/config/caddy /runtime/data/caddy; \
     cp /etc/ssl/certs/ca-certificates.crt /runtime/etc/ssl/certs/; \
     ln -s certs/ca-certificates.crt /runtime/etc/ssl/cert.pem; \
     cp /etc/mime.types /etc/passwd /etc/group /runtime/etc/; \
+    printf 'scoreitcaddy:x:10002:10002:Caddy:/nonexistent:/sbin/nologin\n' >>/runtime/etc/passwd; \
+    printf 'scoreitcaddy:x:10002:\n' >>/runtime/etc/group; \
     cp /etc/caddy/Caddyfile /runtime/etc/caddy/; \
     cp /usr/share/caddy/index.html /runtime/usr/share/caddy/
 COPY --from=builder /out/caddy /runtime/usr/bin/caddy
 COPY --from=builder /out/caddy-build-deps.txt /runtime/usr/share/caddy/build-deps.txt
+COPY --from=builder /out/caddy-jose-build.json /runtime/usr/share/caddy/jose-backport.json
 COPY --from=builder /src/LICENSE /runtime/usr/share/licenses/caddy/LICENSE
 COPY --from=builder /usr/local/go/LICENSE /runtime/usr/share/licenses/go/LICENSE
 COPY --from=builder /usr/local/go/lib/time/zoneinfo.zip /runtime/usr/share/zoneinfo/zoneinfo.zip
 
 FROM scratch
 COPY --from=runtime-files /runtime/ /
+# Keep executables/configuration root-owned, and explicitly restore only the
+# writable XDG subtrees after the final COPY resets ownership.
+COPY --from=runtime-files --chown=10002:10002 /runtime/config/ /config/
+COPY --from=runtime-files --chown=10002:10002 /runtime/data/ /data/
 ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-    CADDY_VERSION=v2.11.7-scoreit.1 \
+    CADDY_VERSION=v2.11.7-scoreit.3 \
     XDG_CONFIG_HOME=/config \
     XDG_DATA_HOME=/data \
     ZONEINFO=/usr/share/zoneinfo/zoneinfo.zip
 LABEL org.opencontainers.image.title="Caddy" \
-    org.opencontainers.image.version="v2.11.7-scoreit.1" \
+    org.opencontainers.image.version="v2.11.7-scoreit.3" \
     org.opencontainers.image.description="Caddy rebuilt with pinned Go dependencies for score-it" \
     org.opencontainers.image.url="https://caddyserver.com" \
     org.opencontainers.image.documentation="https://caddyserver.com/docs" \
     org.opencontainers.image.source="https://github.com/Parabe11um/score-it" \
     org.opencontainers.image.licenses="Apache-2.0"
 EXPOSE 80 443 443/udp 2019
-USER 0:0
+USER 10002:10002
 WORKDIR /srv
 CMD ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]

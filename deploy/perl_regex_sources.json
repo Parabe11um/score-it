@@ -1,0 +1,65 @@
+{
+  "app": {
+    "abi": "5.40.1",
+    "binary_paths": [
+      "usr/bin/perl",
+      "usr/bin/perl5.40.1"
+    ],
+    "counter_probe_sha256": "c9e69a030e018c3443ed0758e9b76d6013c32597c72380e4bd845f1e064293cc",
+    "distribution": "trixie",
+    "packages": {
+      "perl-base": "5.40.1-6+deb13u1+scoreit1"
+    },
+    "patch_sha256": {
+      "regex-countdown-5.40.patch": "640432c318146ed7c7c582a6c39adff191063c65d32baa6cf45f16a68cda6a18",
+      "regex-wide-cache-5.40.patch": "db52b1b2da7930f62e31f5eedf9365fb91b65073b0b2fa89bdc5476428263717"
+    },
+    "patched_source_sha256": {
+      "regexec.c": "dfadeaf0abab86d92fda9dd609bf5270819244a66ead08f520379b40eb97345e",
+      "regexp.h": "b8c84186472f010b39319255a4e88128f3ecfb2a06d541ce48811d17134d969b"
+    },
+    "runtime_probe_sha256": "519293c24118d8014d1b2c875b122bfc376043b1836702efbef99206114201b0",
+    "runtime_version": "5.40.1-6+deb13u1+scoreit1",
+    "source_files": {
+      "perl_5.40.1-6+deb13u1.debian.tar.xz": "5ee76db601d6f4638433ab9b0f5bd5cfb15b102a79d902ff282e762becb7e724",
+      "perl_5.40.1-6+deb13u1.dsc": "92d1cfb32167d77fada7284f1c291de72f93eb896f5cfd58247d020182b403a8",
+      "perl_5.40.1.orig-regen-configure.tar.xz": "4ea023d08101443f6ed9dc3bdd9bb5f5e08087678dc9e443d195df22da36209a",
+      "perl_5.40.1.orig.tar.xz": "dfa20c2eef2b4af133525610bbb65dd13777ecf998c9c5b1ccf0d308e732ee3f"
+    },
+    "source_version": "5.40.1-6+deb13u1"
+  },
+  "postgres": {
+    "abi": "5.36.0",
+    "binary_paths": [
+      "usr/bin/perl",
+      "usr/bin/perl5.36.0",
+      "usr/lib/x86_64-linux-gnu/libperl.so.5.36.0",
+      "usr/bin/perl5.36-x86_64-linux-gnu"
+    ],
+    "counter_probe_sha256": "c9e69a030e018c3443ed0758e9b76d6013c32597c72380e4bd845f1e064293cc",
+    "distribution": "bookworm",
+    "packages": {
+      "libperl5.36": "5.36.0-7+deb12u4+scoreit2",
+      "perl": "5.36.0-7+deb12u4+scoreit2",
+      "perl-base": "5.36.0-7+deb12u4+scoreit2",
+      "perl-modules-5.36": "5.36.0-7+deb12u4+scoreit2"
+    },
+    "patch_sha256": {
+      "regex-countdown-5.36.patch": "d62024cea19320a9995c388dfbd7bb439fa73b07a3c08a8e58b2b0fcd7e4b690",
+      "regex-wide-cache-5.36.patch": "f09de4d5f251e0d447a4b46215e4a7d94d12f05219ea0a9b8a722d713ab4cdd4"
+    },
+    "patched_source_sha256": {
+      "regexec.c": "1d6c4b0b03c71a8182149151269c99fb971cbbf36f8e127628081f86475e3dfe",
+      "regexp.h": "4208851913cbe325977e68a55c418d3cd5c525d699097a10487afd8fbe65627a"
+    },
+    "runtime_probe_sha256": "519293c24118d8014d1b2c875b122bfc376043b1836702efbef99206114201b0",
+    "runtime_version": "5.36.0-7+deb12u4+scoreit2",
+    "source_files": {
+      "perl_5.36.0-7+deb12u4.debian.tar.xz": "f49d224fa9a6a356e1140f95fb5c864864b5423c9aece94cc68b4d348a3694b6",
+      "perl_5.36.0-7+deb12u4.dsc": "6f71e571ae69894ad2115013bbc3207e77dc796581e30a62be0297e7d90ee7b9",
+      "perl_5.36.0.orig-regen-configure.tar.xz": "10ac353bc5a933403afe60ed1817e7a456f99bdbcaf80c1cdb0eb3a08ea56d4e",
+      "perl_5.36.0.orig.tar.xz": "0f386dccbee8e26286404b2cca144e1005be65477979beb9b1ba272d4819bcf0"
+    },
+    "source_version": "5.36.0-7+deb12u4"
+  }
+}

@@ -7,6 +7,17 @@ RUN --mount=type=bind,source=deploy/build_tls.sh,target=/run/score-it-build-tls.
     --mount=type=bind,source=deploy/runtime_tools_probe.sh,target=/run/score-it-noacl-probe.sh,readonly \
     sh /run/score-it-build-tls.sh "$BUILD_TLS_COMPAT" sh /run/score-it-build-noacl.sh
 
+FROM ${PYTHON_IMAGE} AS perl-builder
+ARG BUILD_TLS_COMPAT=0
+RUN --mount=type=bind,source=deploy/build_tls.sh,target=/run/score-it-build-tls.sh,readonly \
+    --mount=type=bind,source=deploy/build_perl_regex_app.sh,target=/run/score-it-build-perl.sh,readonly \
+    --mount=type=bind,source=deploy/patches/perl,target=/run/score-it-perl-patches,readonly \
+    --mount=type=bind,source=deploy/perl_regex_build.sh,target=/run/score-it-perl-regex-build.sh,readonly \
+    --mount=type=bind,source=deploy/perl_regex_cache_probe.py,target=/run/score-it-perl-regex-cache.py,readonly \
+    --mount=type=bind,source=deploy/perl_regex_runtime_probe.pl,target=/run/score-it-perl-regex-runtime.pl,readonly \
+    --mount=type=bind,source=deploy/perl_regex_sources.json,target=/run/score-it-perl-regex-sources.json,readonly \
+    sh /run/score-it-build-tls.sh "$BUILD_TLS_COMPAT" sh /run/score-it-build-perl.sh
+
 FROM ${PYTHON_IMAGE} AS gzip-builder
 ARG BUILD_TLS_COMPAT=0
 RUN --mount=type=bind,source=deploy/build_tls.sh,target=/run/score-it-build-tls.sh,readonly \
@@ -20,6 +31,9 @@ ARG BUILD_TLS_COMPAT=0
 RUN --mount=type=bind,source=deploy/build_tls.sh,target=/run/score-it-build-tls.sh,readonly \
     --mount=type=bind,source=deploy/update_app_security.sh,target=/run/score-it-update-app.sh,readonly \
     sh /run/score-it-build-tls.sh "$BUILD_TLS_COMPAT" sh /run/score-it-update-app.sh
+RUN --mount=type=bind,from=perl-builder,source=/out,target=/run/score-it-perl,readonly \
+    dpkg -i /run/score-it-perl/perl-base_5.40.1-6+deb13u1+scoreit1_amd64.deb
+COPY --from=perl-builder /out/perl-regex-build.json /usr/share/score-it/
 RUN --mount=type=bind,from=gzip-builder,source=/out,target=/run/score-it-gzip,readonly \
     dpkg -i /run/score-it-gzip/gzip_1.13-1+deb13u1+scoreit13.1_amd64.deb
 COPY --from=gzip-builder /out/gzip-*.txt /out/gzip-binary.sha256 /usr/share/score-it/
@@ -74,4 +88,6 @@ ENV PATH=/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:
 WORKDIR /app
 USER 10001:10001
 EXPOSE 8000
+HEALTHCHECK --interval=15s --timeout=7s --start-period=20s --retries=5 \
+    CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz/', timeout=5).read()"]
 CMD ["gunicorn", "--config", "deploy/gunicorn.conf.py", "config.wsgi:application"]

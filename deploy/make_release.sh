@@ -77,6 +77,10 @@ cp deploy/load_release.sh "$DEST/"
 cp deploy/verify_release.py "$DEST/"
 cp deploy/README.md "$DEST/README.md"
 cp deploy/SECURITY.md deploy/Caddyfile.score-it.example deploy/images.env deploy/sign_release.sh "$DEST/"
+# The committed example contains no secrets. Docker bind mounts keep the file's
+# mode even when the release directory is private (umask 077); UID 10002 needs
+# to read this public template for the offline Caddy configuration check.
+chmod 0644 "$DEST/Caddyfile.score-it.example"
 printf 'SCORE_IT_IMAGE=%s\nPOSTGRES_IMAGE=%s\nCADDY_IMAGE=%s\n' "$APP_IMAGE" "$PG_IMAGE" "$CADDY_IMAGE" > "$DEST/release.env"
 python3 deploy/verify_release.py manifest --archive "$DEST/images.tar" \
   --output "$DEST/images.tsv" --platform "$PLATFORM" \
@@ -115,6 +119,13 @@ done
 docker run --rm --pull=never --network none --read-only --entrypoint cat "$PG_IMAGE" \
   /usr/share/score-it/perl-security-source.txt /usr/share/score-it/perl-modules.sha256 \
   /usr/share/score-it/perl-security-tests.txt >"$DEST/security/postgres-perl-build.txt"
+for PROFILE in app postgres; do
+  case "$PROFILE" in app) IMAGE="$APP_IMAGE" ;; postgres) IMAGE="$PG_IMAGE" ;; esac
+  python3 tests/check_perl_regex.py --image "$IMAGE" --profile "$PROFILE" --archive "$DEST/images.tar" </dev/null | \
+    tee "$DEST/security/$PROFILE-perl-regex-runtime.txt"
+  docker run --rm --pull=never --network none --read-only --entrypoint cat "$IMAGE" \
+    /usr/share/score-it/perl-regex-build.json >"$DEST/security/$PROFILE-perl-regex-build.json"
+done
 python3 tests/check_postgres_runtime.py --image "$PG_IMAGE" --source-image "$PG_SOURCE" \
   --go-image "$GO_SOURCE_IMAGE" </dev/null | tee "$DEST/security/postgres-runtime.txt"
 docker run --rm --pull=never --network none --read-only --entrypoint cat "$PG_IMAGE" \
