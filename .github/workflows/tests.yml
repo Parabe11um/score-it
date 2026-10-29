@@ -98,6 +98,14 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
+      - name: Verify pinned Bookworm security packages before long builds
+        run: |
+          set -euo pipefail
+          source deploy/images.env
+          docker pull --platform linux/amd64 "$POSTGRES_SOURCE_IMAGE"
+          docker run --rm --pull=never --platform linux/amd64 --memory=512m --pids-limit=128 \
+            --entrypoint sh "$POSTGRES_SOURCE_IMAGE" -s < deploy/update_postgres_security.sh \
+            2>&1 | tee "$RUNNER_TEMP/postgres-security-inputs.txt"
       - name: Build and test the proxy before the long database build
         run: |
           set -euo pipefail
@@ -142,6 +150,7 @@ jobs:
             ${{ runner.temp }}/caddy-routes.txt
             ${{ runner.temp }}/caddy.json
             ${{ runner.temp }}/caddy-jose.json
+            ${{ runner.temp }}/postgres-security-inputs.txt
           if-no-files-found: warn
 
   postgres:
