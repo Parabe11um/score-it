@@ -5,6 +5,7 @@ import hashlib
 import os
 from pathlib import Path
 import subprocess
+import json
 import tempfile
 import unittest
 
@@ -92,11 +93,21 @@ class PostgresOpenSSLTests(unittest.TestCase):
 
 
 class PostgresOpenSSLUpdatePlanTests(unittest.TestCase):
-    def invoke(self, extra='', wrong_version=False):
+    def invoke(self, extra='', wrong_version=False, mode='', package='tzdata',
+               version='2026e-0+deb12u1', architecture='all', fetch=True):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory)
+            payload=root/'payload';(payload/'DEBIAN').mkdir(parents=True)
+            (payload/'DEBIAN/control').write_text(
+                f'Package: {package}\nVersion: {version}\nArchitecture: {architecture}\n'
+                'Maintainer: Fixture <fixture@example.test>\nDescription: Synthetic tzdata package\n')
+            fixture=root/'fixture.deb'
+            subprocess.run(['dpkg-deb','--build','--root-owner-group',str(payload),str(fixture)],
+                           check=True,capture_output=True)
+            digest=hashlib.sha256(fixture.read_bytes()).hexdigest()
             (root/'plan').write_text('Inst libssl3 [old] ('+VERSION+' Debian:12-security [amd64])\n'
-                'Inst openssl [old] ('+VERSION+' Debian:12-security [amd64])\n'+extra)
+                'Inst openssl [old] ('+VERSION+' Debian:12-security [amd64])\n'
+                'Inst tzdata [2026c-0+deb12u1] (2026e-0+deb12u1 local-deb [all])\n'+extra)
             (root/'apt-get').write_text('''#!/bin/sh
 case "$1" in
  update|check) ;;
@@ -112,13 +123,52 @@ case "$2" in
 esac
 ''')
             (root/'dpkg').write_text('#!/bin/sh\nexit 0\n')
-            for name in ('apt-get','dpkg-query','dpkg'): (root/name).chmod(0o755)
-            source=(Path(__file__).resolve().parents[1]/'deploy/update_postgres_security.sh').read_text()
+            (root/'chown').write_text('#!/bin/sh\nexit 0\n')
+            (root/'apt-helper').write_text('''#!/usr/bin/env python3
+import json,os,pathlib,sys
+a=sys.argv[1:];url,target,pin=a[-3:]
+r=pathlib.Path(os.environ['MOCK_ROOT'])
+with (r/'download-calls').open('a') as f:f.write(json.dumps({'url':url,'pin':pin})+'\\n')
+mode=os.environ.get('MOCK_DOWNLOAD_MODE','')
+if mode=='unavailable' or mode=='fallback' and 'security.debian.org' in url:raise SystemExit(100)
+raw=(r/'fixture.deb').read_bytes()
+pathlib.Path(target).write_bytes(raw if mode!='corrupt' else raw+b'changed')
+''')
+            for name in ('apt-get','dpkg-query','dpkg','chown','apt-helper'): (root/name).chmod(0o755)
+            project=Path(__file__).resolve().parents[1]
+            source=(project/'deploy/update_postgres_security.sh').read_text()
             source=source.replace('. /etc/os-release','ID=debian\nVERSION_CODENAME=bookworm')
             source=source.replace('/var/lib/apt/lists/',str(root/'lists')+'/').replace('/var/lib/dpkg/status-old',str(root/'status-old'))
-            result=subprocess.run(['sh','-s'],input=source,capture_output=True,text=True,timeout=10,
-                env={**os.environ,'PATH':str(root)+':'+os.environ['PATH'],'MOCK_ROOT':str(root),
-                     'MOCK_VERSION':'3.0.22-1~deb12u1' if wrong_version else VERSION})
+            # Exercise real sha256sum/dpkg-deb with a synthetic .deb. Production
+            # uses the official pin and absolute APT helper, never these stubs.
+            source=source.replace('ac306a4def5f43b8b7c36485803eaea952977c5d58b3a4ca75b3ee08e101244c',digest)
+            env={**os.environ,'PATH':str(root)+':'+os.environ['PATH'],'MOCK_ROOT':str(root),
+                 'MOCK_DOWNLOAD_MODE':mode,
+                 'MOCK_VERSION':'3.0.22-1~deb12u1' if wrong_version else VERSION}
+            package_path=fixture
+            if fetch:
+                fetch_source=(project/'deploy/fetch_postgres_tzdata.sh').read_text()
+                fetch_source=fetch_source.replace('/usr/lib/apt/apt-helper',str(root/'apt-helper'))
+                fetch_source=fetch_source.replace('ac306a4def5f43b8b7c36485803eaea952977c5d58b3a4ca75b3ee08e101244c',digest)
+                # Trust material is a separate input of the download stage.
+                ca=root/'ca.crt';ca.write_text('synthetic trust input\n')
+                fetch_source=fetch_source.replace('/etc/ssl/certs/ca-certificates.crt',str(ca))
+                destination=root/'downloaded'
+                result=subprocess.run(['sh','-s','--',str(destination)],input=fetch_source,
+                                      capture_output=True,text=True,timeout=10,env=env)
+                calls=[json.loads(line) for line in (root/'download-calls').read_text().splitlines()]
+                self.assertTrue(all(c['pin']=='SHA256:'+digest for c in calls))
+                self.assertEqual(len(calls),2 if mode in ('unavailable','fallback') else 1)
+                self.assertTrue(calls[0]['url'].startswith('https://security.debian.org/debian-security/'))
+                if len(calls)==2:
+                    self.assertTrue(calls[1]['url'].startswith('https://snapshot.debian.org/archive/debian-security/20261024T000000Z/'))
+                if result.returncode:
+                    return result,(root/'applied').exists()
+                package_path=destination/'tzdata_2026e-0+deb12u1_all.deb'
+                if mode=='missing_after_fetch':package_path.unlink()
+                elif mode=='changed_after_fetch':package_path.write_bytes(package_path.read_bytes()+b'changed')
+            result=subprocess.run(['sh','-s','--',str(package_path)],input=source,
+                                  capture_output=True,text=True,timeout=10,env=env)
             return result,(root/'applied').exists()
 
     def test_only_the_coordinated_openssl_packages_are_allowed(self):
@@ -139,6 +189,35 @@ esac
         result,_=self.invoke(wrong_version=True)
         self.assertNotEqual(result.returncode,0)
         self.assertNotIn('POSTGRES_OPENSSL_SECURITY_UPDATE_OK',result.stdout)
+
+    def test_pinned_package_does_not_depend_on_its_live_apt_index_entry(self):
+        result,applied=self.invoke(mode='fallback')
+        self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        self.assertTrue(applied)
+        self.assertIn('POSTGRES_TZDATA_PACKAGE_VERIFIED version=2026e-0+deb12u1',result.stdout)
+
+    def test_unavailable_or_corrupt_package_stops_before_apt_apply(self):
+        for mode in ('unavailable','corrupt'):
+            with self.subTest(mode=mode):
+                result,applied=self.invoke(mode=mode)
+                self.assertNotEqual(result.returncode,0)
+                self.assertFalse(applied)
+                self.assertNotIn('POSTGRES_OPENSSL_SECURITY_UPDATE_OK',result.stdout)
+
+    def test_wrong_package_version_or_architecture_stops_before_apply(self):
+        for fields in ({'package':'other-package'},{'version':'2026c-0+deb12u1'},{'architecture':'amd64'}):
+            for fetch in (False,True):
+                with self.subTest(fields=fields,fetch=fetch):
+                    result,applied=self.invoke(**fields,fetch=fetch)
+                    self.assertNotEqual(result.returncode,0)
+                    self.assertFalse(applied)
+
+    def test_missing_or_changed_staged_package_stops_before_transaction(self):
+        for mode in ('missing_after_fetch','changed_after_fetch'):
+            with self.subTest(mode=mode):
+                result,applied=self.invoke(mode=mode)
+                self.assertNotEqual(result.returncode,0)
+                self.assertFalse(applied)
 
 
 class PostgresPayloadTests(unittest.TestCase):

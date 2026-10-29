@@ -1,5 +1,24 @@
 ARG POSTGRES_IMAGE=postgres:17.11-bookworm@sha256:3645570cccdfa447589da9f57dd740faa29b30938e861289a5574b6ca6b03826
 ARG GO_IMAGE=golang:1.26.10-alpine3.24@sha256:9ce231b28998b32e116927c61aa5c406183061d4f3f2d61b292c88e7f6bdf7ca
+FROM ${POSTGRES_IMAGE} AS security-downloads
+ARG BUILD_TLS_COMPAT=0
+RUN --mount=type=bind,source=deploy/build_tls.sh,target=/run/score-it-build-tls.sh,readonly \
+    --mount=type=bind,source=deploy/fetch_postgres_tzdata.sh,target=/run/score-it-fetch-tzdata.sh,readonly \
+    sh /run/score-it-build-tls.sh "$BUILD_TLS_COMPAT" sh -ec '\
+    apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && sh /run/score-it-fetch-tzdata.sh /out'
+
+# This target is also built directly by the early CI gate. Only the pinned
+# public .deb crosses the stage boundary; its CA installation stays behind.
+FROM ${POSTGRES_IMAGE} AS security-updated
+ARG BUILD_TLS_COMPAT=0
+RUN --mount=type=bind,source=deploy/build_tls.sh,target=/run/score-it-build-tls.sh,readonly \
+    --mount=type=bind,source=deploy/update_postgres_security.sh,target=/run/score-it-update-postgres.sh,readonly \
+    --mount=type=bind,from=security-downloads,source=/out,target=/run/score-it-security,readonly \
+    sh /run/score-it-build-tls.sh "$BUILD_TLS_COMPAT" sh /run/score-it-update-postgres.sh \
+        /run/score-it-security/tzdata_2026e-0+deb12u1_all.deb
+
 FROM ${POSTGRES_IMAGE} AS tools-builder
 ARG BUILD_TLS_COMPAT=0
 RUN --mount=type=bind,source=deploy/build_tls.sh,target=/run/score-it-build-tls.sh,readonly \
@@ -70,11 +89,7 @@ RUN --mount=type=bind,source=deploy/build_tls.sh,target=/run/score-it-build-tls.
     --mount=type=bind,source=deploy/build_libpq_minimal.sh,target=/run/score-it-build-libpq.sh,readonly \
     sh /run/score-it-build-tls.sh "$BUILD_TLS_COMPAT" sh /run/score-it-build-libpq.sh
 
-FROM ${POSTGRES_IMAGE} AS runtime-files
-ARG BUILD_TLS_COMPAT=0
-RUN --mount=type=bind,source=deploy/build_tls.sh,target=/run/score-it-build-tls.sh,readonly \
-    --mount=type=bind,source=deploy/update_postgres_security.sh,target=/run/score-it-update-postgres.sh,readonly \
-    sh /run/score-it-build-tls.sh "$BUILD_TLS_COMPAT" sh /run/score-it-update-postgres.sh
+FROM security-updated AS runtime-files
 RUN --mount=type=bind,from=perl-builder,source=/out,target=/run/score-it-perl,readonly \
     dpkg -i /run/score-it-perl/perl-base_5.36.0-7+deb12u4+scoreit2_amd64.deb \
             /run/score-it-perl/perl-modules-5.36_5.36.0-7+deb12u4+scoreit2_all.deb \
