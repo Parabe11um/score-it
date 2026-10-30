@@ -7,10 +7,10 @@ DEST="$1"
 case "$DEST" in /*) ;; *) echo 'Expected an absolute output directory.' >&2; exit 2 ;; esac
 test ! -L "$DEST"
 test -s /etc/ssl/certs/ca-certificates.crt
-TZ_VERSION='2026e-0+deb12u1'
-TZ_SHA256='ac306a4def5f43b8b7c36485803eaea952977c5d58b3a4ca75b3ee08e101244c'
+TZ_VERSION='2026f-0+deb12u1'
+TZ_SHA256='3254eb870c8a949518214805aee5e4276af7699988ea8b9a3a583cd0f1eab31c'
 TZ_POOL='https://security.debian.org/debian-security/pool/updates/main/t/tzdata'
-TZ_SNAPSHOT='https://snapshot.debian.org/archive/debian-security/20261024T000000Z/pool/updates/main/t/tzdata'
+TZ_SNAPSHOT='https://snapshot.debian.org/archive/debian-security/20261030T000000Z/pool/updates/main/t/tzdata'
 WORK="$(mktemp -d)"
 trap 'rm -rf -- "$WORK"' EXIT HUP INT TERM
 chown _apt "$WORK"

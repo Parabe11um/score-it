@@ -6,14 +6,14 @@ import json
 from pathlib import Path,PurePosixPath
 import posixpath
 import re
+import shlex
 import tarfile
 
 from check_caddy_runtime import Archive,docker,layer_names,require
+from postgres_timezone_cases import TZDATA_RELEASE,VERSION,DATE_CASES,OFFSETS,offset_text
 
-VERSION='2026e-0+deb12u1'
 PINS=Path(__file__).resolve().parents[1]/'deploy/postgres_tzdata_files.sha256'
 FILES={line.split('  ',1)[1]:line.split('  ',1)[0] for line in PINS.read_text().splitlines()}
-OFFSETS={'Etc/UTC':'+0000','Europe/Moscow':'+0300','America/Winnipeg':'-0500','America/Yellowknife':'-0600'}
 
 
 def check_archive(path,image):
@@ -51,7 +51,7 @@ def check_archive(path,image):
                         require(item.size<2*1024**2 and name not in payload and name not in links,
                                 'Invalid or overwritten timezone data: '+name)
                         raw=layer.extractfile(item).read();payload[name]=hashlib.sha256(raw).hexdigest()
-                        version_headers[name]=raw.startswith(b'# version 2026e\n')
+                        version_headers[name]=raw.startswith(('# version '+TZDATA_RELEASE+'\n').encode())
                     elif item.islnk():
                         target=str(PurePosixPath(item.linkname))
                         require(not PurePosixPath(target).is_absolute() and '..' not in PurePosixPath(target).parts
@@ -84,11 +84,9 @@ def verify(image,archive):
     hashes=check_archive(archive,image)
     script='''set -eu
 test "$(id -u)" = 999
-test "$(dpkg-query -W -f='${Version}' tzdata)" = 2026e-0+deb12u1
-'''
-    for zone,offset in OFFSETS.items():
-        for date in ('2026-11-02 12:00:00 UTC','2030-01-15 12:00:00 UTC'):
-            script+='test "$(TZ='+zone+" date --date='"+date+"' +%z)\" = '"+offset+"'\n"
+test "$(dpkg-query -W -f='${Version}' tzdata)" = '''+shlex.quote(VERSION)+'\n'
+    for zone,instant,seconds in DATE_CASES:
+        script+='test "$(TZ='+shlex.quote(zone)+' date --date='+shlex.quote(instant)+" +%z)\" = '"+offset_text(seconds)+"'\n"
     script+='sha256sum '+' '.join('/'+p for p in sorted(FILES))+'\n'
     output=docker('run','--rm','--pull=never','--network','none','--read-only','--user','999:999',
                   '--cap-drop','ALL','--security-opt','no-new-privileges:true','--memory','128m','--pids-limit','32',
@@ -97,7 +95,9 @@ test "$(dpkg-query -W -f='${Version}' tzdata)" = 2026e-0+deb12u1
     require(len(pairs)==len(FILES) and {p:h for h,p in pairs}==hashes,'Saved/runtime timezone hashes differ')
     require(json.loads(docker('image','inspect',image))[0]['Id']==identity,'Timezone image changed')
     print(json.dumps({'check':'postgres_timezone','image':image,'runtime_image_id':identity,'uid':999,
-                      'package_version':VERSION,'file_sha256':hashes,'offsets':OFFSETS,'date_cases':8},sort_keys=True),flush=True)
+                      'package_version':VERSION,'file_sha256':hashes,
+                      'offsets':{zone:offset_text(seconds) for zone,seconds in OFFSETS.items()},
+                      'date_cases':len(DATE_CASES),'tested_cases':DATE_CASES},sort_keys=True),flush=True)
     print('POSTGRES_TIMEZONE_ARCHIVE_AND_RUNTIME_OK',flush=True)
 
 
