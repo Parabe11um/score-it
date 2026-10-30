@@ -4,7 +4,7 @@ import hashlib
 import json
 import unittest
 
-from caddy_jose_policy import assess,verify_proof,MODULE,TARGET
+from caddy_jose_policy import assess,assess_all,verify_proof,MODULE,TARGET,MEDIUM_TARGETS
 from test_caddy_payload import payload
 
 
@@ -34,14 +34,41 @@ class CaddyJOSETests(unittest.TestCase):
         with self.assertRaises(RuntimeError):self.check()
 
     def test_missing_partial_or_changed_source_controls_stop(self):
-        for change in (lambda p:p['native_tests'].__setitem__('negative_controls',1),
-                       lambda p:p['native_tests'].__setitem__('probe_cases',15),
+        for change in (lambda p:p['native_tests'].__setitem__('negative_controls',3),
+                       lambda p:p['native_tests'].__setitem__('probe_cases',64),
+                       lambda p:p['native_tests']['dos_probes']['v3'].__setitem__('cbc',14),
+                       lambda p:p['native_tests']['dos_probes']['vendor'].__setitem__('json',33),
+                       lambda p:p['native_tests']['dos_probes'].pop('v4'),
                        lambda p:p['native_tests']['suite_packages'].__setitem__('v3',[]),
                        lambda p:p['policy'].__setitem__('upstream_fix','wrong'),
                        lambda p:p.__setitem__('binary_sha256','b'*64)):
             proof=copy.deepcopy(self.proof);change(proof)
             with self.assertRaises(RuntimeError):verify_proof(proof,self.digest)
         with self.assertRaises(RuntimeError):verify_proof(None,self.digest)
+
+    def test_exact_medium_backports_are_separate_from_high_and_leave_raw_rows(self):
+        rows=self.report['Results'][0]['Vulnerabilities']
+        rows.extend({**self.row,'VulnerabilityID':cve,'Severity':'MEDIUM'} for cve in sorted(MEDIUM_TARGETS))
+        raw=json.dumps(self.report)
+        covered=assess_all(self.report,self.proof,self.identity,self.digest)
+        self.assertEqual(covered['HIGH'],self.check())
+        self.assertEqual([x['id'] for x in covered['MEDIUM']],sorted(MEDIUM_TARGETS))
+        self.assertEqual(json.dumps(self.report),raw)
+
+    def test_medium_wrong_package_version_or_severity_cannot_borrow_evidence(self):
+        for cve in sorted(MEDIUM_TARGETS):
+            for key,value in [('PkgName',MODULE.replace('/v3','/v4')),
+                              ('InstalledVersion','v3.0.4'),('Severity','HIGH'),('Severity','UNKNOWN')]:
+                row={**self.row,'VulnerabilityID':cve,'Severity':'MEDIUM',key:value}
+                with self.subTest(cve=cve,key=key,value=value),self.assertRaises(RuntimeError):
+                    assess_all({'Metadata':self.report['Metadata'],'Results':[{'Vulnerabilities':[row]}]},
+                               self.proof,self.identity,self.digest)
+
+    def test_unrelated_medium_finding_remains_raw_and_is_not_reviewed_as_fixed(self):
+        self.report['Results'][0]['Vulnerabilities'].append({**self.row,'VulnerabilityID':'CVE-other','Severity':'MEDIUM'})
+        covered=assess_all(self.report,self.proof,self.identity,self.digest)
+        self.assertEqual(covered['MEDIUM'],[])
+        self.assertEqual(len(self.report['Results'][0]['Vulnerabilities']),2)
 
     def test_other_scan_image_and_reintroduced_fixed_findings_stop(self):
         self.report['Metadata']['ImageID']='sha256:'+'b'*64

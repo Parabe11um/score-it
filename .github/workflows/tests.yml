@@ -36,7 +36,7 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_build_tls.py' -v
       - name: Reject obsolete executables in saved Caddy layers
         run: python -m unittest discover -s tests -p 'test_caddy_payload.py' -v
-      - name: Reject partial Caddy backports and unreviewed HIGH findings
+      - name: Reject partial Caddy RSA/CBC/JSON backports and unreviewed HIGH findings
         run: python -m unittest discover -s tests -p 'test_caddy_jose.py' -v
       - name: Reject obsolete gosu, deleted test keys and changed PostgreSQL configuration
         run: |

@@ -1,0 +1,59 @@
+From 35883f7999e87cbd1b1f4cda07fdad8cd71c3dd6
+Subject: cipher/cbc_hmac: don't panic on empty ciphertext
+
+diff --git a/cipher/cbc_hmac.go b/cipher/cbc_hmac.go
+--- a/cipher/cbc_hmac.go
++++ b/cipher/cbc_hmac.go
+@@ -176,7 +176,9 @@ func padBuffer(buffer []byte, blockSize int) []byte {
+ 
+ // Remove padding
+ func unpadBuffer(buffer []byte, blockSize int) ([]byte, error) {
+-	if len(buffer)%blockSize != 0 {
++	// A padded buffer can't be empty because an empty input is padded with
++	// `blockSize` bytes, resulting in a non-empty ciphertext.
++	if len(buffer) == 0 || len(buffer)%blockSize != 0 {
+ 		return nil, errors.New("go-jose/go-jose: invalid padding")
+ 	}
+ 
+diff --git a/cipher/cbc_hmac_test.go b/cipher/cbc_hmac_test.go
+--- a/cipher/cbc_hmac_test.go
++++ b/cipher/cbc_hmac_test.go
+@@ -76,6 +76,23 @@ func TestInvalidInputs(t *testing.T) {
+ 	}
+ }
+ 
++// TestOpenEmptyCiphertextContent tests that decryption of an empty ciphertext errors but
++// does not panic. Empty ciphertext in CBC-HMAC is invalid. If the plaintext was empty,
++// the ciphertext will be padded out to a single block.
++func TestOpenEmptyCiphertextContent(t *testing.T) {
++	key := make([]byte, 32)
++	aead, _ := NewCBCHMAC(key, aes.NewCipher)
++	ctx := aead.(*cbcAEAD)
++	nonce := make([]byte, 16)
++	aad := []byte("aad")
++
++	// Compute a valid auth tag so that we don't hit an early exit on that.
++	tag := ctx.computeAuthTag(aad, nonce, nil /*empty ciphertext*/)
++	if _, err := aead.Open(nil, nonce, tag /* tag || empty ciphertext */, aad); err == nil {
++		t.Error("expected error for empty ciphertext content, got nil")
++	}
++}
++
+ func TestVectorsAESCBC128(t *testing.T) {
+ 	// Source: http://tools.ietf.org/html/draft-ietf-jose-json-web-encryption-29#appendix-A.2
+ 	plaintext := []byte{
+@@ -258,6 +275,13 @@ func TestPadding(t *testing.T) {
+ 	}
+ }
+ 
++func TestUnpadEmpty(t *testing.T) {
++	_, err := unpadBuffer(nil, 16)
++	if err == nil || !strings.Contains(err.Error(), "padding") {
++		t.Errorf("expected padding-related error unpadding empty buffer, got %v", err)
++	}
++}
++
+ func TestInvalidKey(t *testing.T) {
+ 	key := make([]byte, 30)
+ 	_, err := NewCBCHMAC(key, aes.NewCipher)
+

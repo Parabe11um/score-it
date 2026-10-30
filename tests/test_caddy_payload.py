@@ -35,7 +35,8 @@ def payload(interpreter=False):
     values['usr/share/caddy/jose-backport.json']=json.dumps({
         'check':'caddy_jose_backport','policy':POLICY,
         'binary_sha256':hashlib.sha256(values['usr/bin/caddy']).hexdigest(),
-        'native_tests':{'go':'go1.26.10','probe_cases':16,'negative_controls':2,
+        'native_tests':{'go':'go1.26.10','probe_cases':65,'negative_controls':4,
+                        'dos_probes':{p:{'cbc':15,'json':34} for p in ('v3','v4','vendor')},
                         'suite_packages':POLICY['suite_packages'],'xnet_html':True}}).encode()
     return values
 
