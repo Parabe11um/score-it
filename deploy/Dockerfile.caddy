@@ -23,7 +23,7 @@ RUN --mount=type=bind,source=deploy/build_tls.sh,target=/run/score-it-build-tls.
     && go mod tidy \
     && go mod verify \
     && python3 /run/score-it-caddy/build_caddy_jose.py prepare /run/score-it-caddy \
-    && go build -mod=vendor -trimpath -ldflags "-s -w -X github.com/caddyserver/caddy/v2.CustomVersion=v2.11.7-scoreit.3" -o /out/caddy . \
+    && go build -mod=vendor -trimpath -ldflags "-s -w -X github.com/caddyserver/caddy/v2.CustomVersion=v2.11.7-scoreit.4" -o /out/caddy . \
     && python3 /run/score-it-caddy/build_caddy_jose.py finish /run/score-it-caddy /out/caddy /out/caddy-jose-build.json \
     && go version -m /out/caddy \
     && go list -deps . > /out/caddy-build-deps.txt \
@@ -64,12 +64,12 @@ COPY --from=runtime-files /runtime/ /
 COPY --from=runtime-files --chown=10002:10002 /runtime/config/ /config/
 COPY --from=runtime-files --chown=10002:10002 /runtime/data/ /data/
 ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-    CADDY_VERSION=v2.11.7-scoreit.3 \
+    CADDY_VERSION=v2.11.7-scoreit.4 \
     XDG_CONFIG_HOME=/config \
     XDG_DATA_HOME=/data \
     ZONEINFO=/usr/share/zoneinfo/zoneinfo.zip
 LABEL org.opencontainers.image.title="Caddy" \
-    org.opencontainers.image.version="v2.11.7-scoreit.3" \
+    org.opencontainers.image.version="v2.11.7-scoreit.4" \
     org.opencontainers.image.description="Caddy rebuilt with pinned Go dependencies for score-it" \
     org.opencontainers.image.url="https://caddyserver.com" \
     org.opencontainers.image.documentation="https://caddyserver.com/docs" \

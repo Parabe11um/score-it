@@ -83,10 +83,15 @@ for name in ('app', 'postgres', 'caddy'):
                         for v in high_go]
             if expected != review['raw_high_backports']:
                 raise SystemExit('Unreviewed Caddy HIGH/CRITICAL findings')
+            medium = [{'id': v['VulnerabilityID'], 'package': v['PkgName'], 'installed_version': v['InstalledVersion']}
+                      for v in vulnerabilities if v['VulnerabilityID'] in ('CVE-2026-116585','CVE-2026-116586')]
+            if medium != review['raw_medium_backports']:
+                raise SystemExit('Caddy CBC/JSON backport evidence differs')
             # check_caddy_jose.py permits ONLY the pinned v3.0.5 backport after
             # source/native controls and ELF/config/scan hashes all match.
             high_go = []
             summary.append('caddy: reviewed_backport_high_records=' + str(len(expected)) + '; raw JSON/SBOM unchanged')
+            summary.append('caddy: reviewed_backport_medium_records=' + str(len(medium)) + '; raw JSON/SBOM unchanged')
         if high_go:
             blocked.append(name + ': unresolved Go module HIGH/CRITICAL findings')
     if name == 'postgres':

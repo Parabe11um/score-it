@@ -22,20 +22,28 @@
   "original_sha256": {
     "jwk.go": "79f510a4b97fa2e34ec37932cab57e64dfdc9fa6c314654d1ccc2dd93898a532",
     "shared.go": "3802ca5b8f811f72d33eb662cbbdf53d3b7aa4bcbb6b6c6ddd7695a54e3a3d40",
-    "jws.go": "6cc24876cea42cf11503f87ac68456d9169d5e6fec757efaf9e4fd46bc74fb0b"
+    "jws.go": "6cc24876cea42cf11503f87ac68456d9169d5e6fec757efaf9e4fd46bc74fb0b",
+    "cipher/cbc_hmac.go": "5bdd0358dee976cb1350eae8b29e130019a98924b8d1a2527cbc30200b9aee6a",
+    "json/scanner.go": "0a3842b88d6007dee4259f87a64607ea348e651c0ba66f0f28e273fd424f2866"
   },
   "patched_sha256": {
     "jwk.go": "f6b82b8995a3acd0343539370f8abc3d93cab8c255fed2b1da985f15a32a1471",
     "shared.go": "e17e4bb9ec6e73b954e51f080679c49c1fe17e61362fe1d3028c8a31255cd079",
-    "jws.go": "97fb3fda2ccbfd8f5f57a7437202d3cb8a4f61d4da129430c044ad7a157d29a6"
+    "jws.go": "97fb3fda2ccbfd8f5f57a7437202d3cb8a4f61d4da129430c044ad7a157d29a6",
+    "cipher/cbc_hmac.go": "9ffcf872bd9b94f81d2f5c3f2bbb6f39b6dc1a6085fabfc10335f7a88bd0874d",
+    "json/scanner.go": "9bb2d25488976aa88c0284b895394d5b1d52b38500d619d17fd50d36078f6eed"
   },
   "patch_sha256": {
     "rsa-bounds.patch": "da8fe84d9468f169e780bd722e38d5ff06506815774944e8d7610ced37e20017",
-    "public-headers.patch": "2a0f77f14b20ce2f7d6389af780ce2dd7a903b9b6ae3b4f2ad2615282d4ba989"
+    "public-headers.patch": "2a0f77f14b20ce2f7d6389af780ce2dd7a903b9b6ae3b4f2ad2615282d4ba989",
+    "cbc-empty.patch": "006891454a487ed69534e4bb646dd65da8b48aab02c0cdf0f7818f4e08036503",
+    "json-depth.patch": "a42106115d5761cfc54eccff7fdef8a95f2f881982f8c841a18c48841108e614"
   },
   "test_sha256": {
     "jose_jwk_probe.go": "86c7fe5576aba6506e6eec8af9d2b99ffff398150f44a5a6d8e089ef62bf3391",
-    "patches/go-jose/security_test.go": "440ac3cf1d9b5ca2cd727c66b16a7d245fbc2fdf9a18d3c26f033737c1f7e165"
+    "patches/go-jose/security_test.go": "440ac3cf1d9b5ca2cd727c66b16a7d245fbc2fdf9a18d3c26f033737c1f7e165",
+    "jose_dos_probe.go": "7fef522416702e431e635b8eee28010ff998b696c60289a5bf376f28128dd650",
+    "patches/go-jose/json_depth_test.go": "fe304ba2bf5e4d4090d7ea07f69a32de858a528f4db3900cc1081d82534c8c6c"
   },
   "suite_packages": {
     "v3": [
@@ -51,6 +59,33 @@
       "github.com/go-jose/go-jose/v4/cryptosigner",
       "github.com/go-jose/go-jose/v4/json",
       "github.com/go-jose/go-jose/v4/jwt"
+    ]
+  },
+  "additional_fixes": {
+    "CVE-2026-116585": {
+      "upstream_fix": "35883f7999e87cbd1b1f4cda07fdad8cd71c3dd6",
+      "patch": "cbc-empty.patch",
+      "severity": "MEDIUM"
+    },
+    "CVE-2026-116586": {
+      "upstream_fix": "a31af25836222f4c45d366d6e8f9b1049dd9935a",
+      "patch": "json-depth.patch",
+      "severity": "MEDIUM"
+    }
+  },
+  "upstream_test_sha256": {
+    "cipher/cbc_hmac_test.go": "86a795ba34eafb4e240d34c7455f33ba4d398051b03735e706b15e98578e96ab"
+  },
+  "patched_test_sha256": {
+    "cipher/cbc_hmac_test.go": "b4b748b7c96a0b2f93aaf138ec43457bebf515f725b88593913859a9aff842b7"
+  },
+  "required_regression_tests": {
+    "github.com/go-jose/go-jose/v3/cipher": [
+      "TestOpenEmptyCiphertextContent",
+      "TestUnpadEmpty"
+    ],
+    "github.com/go-jose/go-jose/v3/json": [
+      "TestScoreitDepthBoundaries"
     ]
   }
 }
