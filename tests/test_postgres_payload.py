@@ -94,7 +94,7 @@ class PostgresOpenSSLTests(unittest.TestCase):
 
 class PostgresOpenSSLUpdatePlanTests(unittest.TestCase):
     def invoke(self, extra='', wrong_version=False, mode='', package='tzdata',
-               version='2026e-0+deb12u1', architecture='all', fetch=True):
+               version='2026f-0+deb12u1', architecture='all', fetch=True):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory)
             payload=root/'payload';(payload/'DEBIAN').mkdir(parents=True)
@@ -107,7 +107,7 @@ class PostgresOpenSSLUpdatePlanTests(unittest.TestCase):
             digest=hashlib.sha256(fixture.read_bytes()).hexdigest()
             (root/'plan').write_text('Inst libssl3 [old] ('+VERSION+' Debian:12-security [amd64])\n'
                 'Inst openssl [old] ('+VERSION+' Debian:12-security [amd64])\n'
-                'Inst tzdata [2026c-0+deb12u1] (2026e-0+deb12u1 local-deb [all])\n'+extra)
+                'Inst tzdata [2026c-0+deb12u1] (2026f-0+deb12u1 local-deb [all])\n'+extra)
             (root/'apt-get').write_text('''#!/bin/sh
 case "$1" in
  update|check) ;;
@@ -119,7 +119,7 @@ esac
             (root/'dpkg-query').write_text('''#!/bin/sh
 case "$2" in
  *Status*) echo installed ;;
- *) case "$3" in tzdata) echo 2026e-0+deb12u1 ;; *) echo "${MOCK_VERSION}" ;; esac ;;
+ *) case "$3" in tzdata) echo 2026f-0+deb12u1 ;; *) echo "${MOCK_VERSION}" ;; esac ;;
 esac
 ''')
             (root/'dpkg').write_text('#!/bin/sh\nexit 0\n')
@@ -141,7 +141,7 @@ pathlib.Path(target).write_bytes(raw if mode!='corrupt' else raw+b'changed')
             source=source.replace('/var/lib/apt/lists/',str(root/'lists')+'/').replace('/var/lib/dpkg/status-old',str(root/'status-old'))
             # Exercise real sha256sum/dpkg-deb with a synthetic .deb. Production
             # uses the official pin and absolute APT helper, never these stubs.
-            source=source.replace('ac306a4def5f43b8b7c36485803eaea952977c5d58b3a4ca75b3ee08e101244c',digest)
+            source=source.replace('3254eb870c8a949518214805aee5e4276af7699988ea8b9a3a583cd0f1eab31c',digest)
             env={**os.environ,'PATH':str(root)+':'+os.environ['PATH'],'MOCK_ROOT':str(root),
                  'MOCK_DOWNLOAD_MODE':mode,
                  'MOCK_VERSION':'3.0.22-1~deb12u1' if wrong_version else VERSION}
@@ -149,7 +149,7 @@ pathlib.Path(target).write_bytes(raw if mode!='corrupt' else raw+b'changed')
             if fetch:
                 fetch_source=(project/'deploy/fetch_postgres_tzdata.sh').read_text()
                 fetch_source=fetch_source.replace('/usr/lib/apt/apt-helper',str(root/'apt-helper'))
-                fetch_source=fetch_source.replace('ac306a4def5f43b8b7c36485803eaea952977c5d58b3a4ca75b3ee08e101244c',digest)
+                fetch_source=fetch_source.replace('3254eb870c8a949518214805aee5e4276af7699988ea8b9a3a583cd0f1eab31c',digest)
                 # Trust material is a separate input of the download stage.
                 ca=root/'ca.crt';ca.write_text('synthetic trust input\n')
                 fetch_source=fetch_source.replace('/etc/ssl/certs/ca-certificates.crt',str(ca))
@@ -161,10 +161,10 @@ pathlib.Path(target).write_bytes(raw if mode!='corrupt' else raw+b'changed')
                 self.assertEqual(len(calls),2 if mode in ('unavailable','fallback') else 1)
                 self.assertTrue(calls[0]['url'].startswith('https://security.debian.org/debian-security/'))
                 if len(calls)==2:
-                    self.assertTrue(calls[1]['url'].startswith('https://snapshot.debian.org/archive/debian-security/20261024T000000Z/'))
+                    self.assertTrue(calls[1]['url'].startswith('https://snapshot.debian.org/archive/debian-security/20261030T000000Z/'))
                 if result.returncode:
                     return result,(root/'applied').exists()
-                package_path=destination/'tzdata_2026e-0+deb12u1_all.deb'
+                package_path=destination/'tzdata_2026f-0+deb12u1_all.deb'
                 if mode=='missing_after_fetch':package_path.unlink()
                 elif mode=='changed_after_fetch':package_path.write_bytes(package_path.read_bytes()+b'changed')
             result=subprocess.run(['sh','-s','--',str(package_path)],input=source,
@@ -194,7 +194,7 @@ pathlib.Path(target).write_bytes(raw if mode!='corrupt' else raw+b'changed')
         result,applied=self.invoke(mode='fallback')
         self.assertEqual(result.returncode,0,result.stdout+result.stderr)
         self.assertTrue(applied)
-        self.assertIn('POSTGRES_TZDATA_PACKAGE_VERIFIED version=2026e-0+deb12u1',result.stdout)
+        self.assertIn('POSTGRES_TZDATA_PACKAGE_VERIFIED version=2026f-0+deb12u1',result.stdout)
 
     def test_unavailable_or_corrupt_package_stops_before_apt_apply(self):
         for mode in ('unavailable','corrupt'):

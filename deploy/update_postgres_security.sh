@@ -1,14 +1,14 @@
 #!/bin/sh
 # Build host only: Debian Bookworm DLA-4859-1, preserving the database ABI/base.
 # https://security-tracker.debian.org/tracker/DLA-4859-1
-# Bookworm tzdata DLA-4854-1 is a data update, preserving libc/ICU.
+# Bookworm tzdata DLA-4867-1 is a data update, preserving libc/ICU.
 set -eu
 export LC_ALL=C DEBIAN_FRONTEND=noninteractive
 . /etc/os-release
 test "$ID:$VERSION_CODENAME" = debian:bookworm
 SSL_VERSION='3.0.22-1~deb12u2'
-TZ_VERSION='2026e-0+deb12u1'
-TZ_SHA256='ac306a4def5f43b8b7c36485803eaea952977c5d58b3a4ca75b3ee08e101244c'
+TZ_VERSION='2026f-0+deb12u1'
+TZ_SHA256='3254eb870c8a949518214805aee5e4276af7699988ea8b9a3a583cd0f1eab31c'
 test "$#" -eq 1
 TZ_PACKAGE="$1"
 case "$TZ_PACKAGE" in /*) ;; *) echo 'Expected an absolute package path.' >&2; exit 2 ;; esac

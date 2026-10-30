@@ -29,7 +29,7 @@ if package=='ca-certificates':
 else:
     if fmt!='-f=${Version}':raise SystemExit(92)
     print('old' if os.environ.get('GUARD_MODE')==package else
-          '2026e-0+deb12u1' if package=='tzdata' else '3.0.22-1~deb12u2')
+          '2026f-0+deb12u1' if package=='tzdata' else '3.0.22-1~deb12u2')
 ''')
             query.chmod(0o755)
             ca=root/'ca.crt';out=root/'out'

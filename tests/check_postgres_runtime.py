@@ -24,6 +24,7 @@ from check_caddy_runtime import Archive, docker, layer_names, require
 from check_sqlite_payload import installed_packages
 from check_postgres_openssl import verify as verify_openssl
 from check_postgres_timezone import verify as verify_timezone
+from postgres_timezone_cases import DATE_CASES
 from runtime_policy import PG_HEALTHCHECK,health_matches
 
 
@@ -241,6 +242,11 @@ def check_existing_volume(source, target):
         expected = "101:проверка данных"
         query = "SELECT id::text || ':' || note FROM runtime_probe ORDER BY id"
         require(sql(previous, query) == expected, "Test data was not written")
+        old_cuba=sql(previous,"SELECT extract(epoch FROM ((timestamptz '2026-11-02T12:00:00Z' "
+                     "AT TIME ZONE 'America/Havana') - (timestamptz '2026-11-02T12:00:00Z' "
+                     "AT TIME ZONE 'UTC')))::int")
+        require(old_cuba=='-18000','Previous pinned server did not demonstrate the stale Cuba rule')
+        print('POSTGRES_TIMEZONE_OLD_CUBA_CONTROL_OK',flush=True)
         docker("stop", "--time", "20", previous)
         require(json.loads(docker("inspect", previous))[0]["State"]["ExitCode"] == 0,
                 "Previous PostgreSQL did not stop cleanly")
@@ -275,12 +281,12 @@ def check_existing_volume(source, target):
         expected += "\n202:запись после замены"
         require(sql(current, query) == expected, "Replacement PostgreSQL cannot write")
         print("POSTGRES_EXISTING_VOLUME_OK", flush=True)
-        for zone,seconds in (('UTC',0),('Europe/Moscow',10800),('America/Winnipeg',-18000),('America/Yellowknife',-21600)):
-            for instant in ('2026-11-02 12:00:00+00','2030-01-15 12:00:00+00'):
-                offset=sql(current,"SELECT extract(epoch FROM ((timestamptz '"+instant+"' AT TIME ZONE '"+zone+
-                           "') - (timestamptz '"+instant+"' AT TIME ZONE 'UTC')))::int")
-                require(offset==str(seconds),'PostgreSQL updated timezone rule differs: '+zone)
+        for zone,instant,seconds in DATE_CASES:
+            offset=sql(current,"SELECT extract(epoch FROM ((timestamptz '"+instant+"' AT TIME ZONE '"+zone+
+                       "') - (timestamptz '"+instant+"' AT TIME ZONE 'UTC')))::int")
+            require(offset==str(seconds),'PostgreSQL updated timezone rule differs: '+zone+' '+instant)
         require(sql(current,timezone_query)==timezone_before,'Stored timestamp instants changed')
+        print('POSTGRES_TIMEZONE_SQL_CASES_OK count='+str(len(DATE_CASES)),flush=True)
         print('POSTGRES_TIMEZONE_SQL_OK',flush=True)
 
         # Exercise the rebuilt libpq over TLS/TCP, including certificate trust.
