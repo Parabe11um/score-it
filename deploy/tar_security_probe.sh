@@ -226,9 +226,10 @@ if [ "$selection" = all ] || [ "$selection" = CVE-2026-18508 ]; then
     { test ! -e "$probe_dir/hardlink/work/top/alias" && test ! -L "$probe_dir/hardlink/work/top/alias"; } \
         || fail escaped_hardlink_created
     test "$(cat "$probe_dir/hardlink/outside/sentinel")" = SAFE || fail sentinel_changed
+    # Exact archived mode bits require -p: nonroot tar otherwise applies umask.
     for top in positive "$probe_dir/hardlink/absolute"; do
         (cd "$probe_dir/hardlink/work" && "$tar_command" --one-top-level="$top" \
-            -xf "$probe_dir/fixtures/hardlink-valid.tar") >"$probe_dir/positive-output" \
+            -xpf "$probe_dir/fixtures/hardlink-valid.tar") >"$probe_dir/positive-output" \
             2>"$probe_dir/positive-errors" || fail valid_hardlink_rejected
         case "$top" in /*) restored=$top ;; *) restored="$probe_dir/hardlink/work/$top" ;; esac
         test "$(cat "$restored/normal")" = normal-data || fail valid_content_changed

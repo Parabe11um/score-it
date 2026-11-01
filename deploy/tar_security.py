@@ -177,6 +177,10 @@ def record(args):
             and not re.search(r'\b[1-9][0-9]* tests? (?:were|was) (?:failed|unexpected)', summary),
             'Complete tar native suite did not pass')
     result = run(['sh', str(args.probe), str(args.uid), str(args.binary)], capture=True, timeout=30)
+    if result.returncode != 0 or result.stderr:
+        print('TAR_SECURITY_PACKAGED_PROBE_DIAGNOSTIC ' + json.dumps({
+            'exit': result.returncode, 'stdout': result.stdout[-4096:],
+            'stderr': result.stderr[-4096:]}), flush=True)
     require(result.returncode == 0 and not result.stderr, 'Patched packaged tar failed bounded probes')
     value = {'schema': 1, 'state': 'TAR_SECURITY_NATIVE_VERIFIED', 'profile': args.profile,
              'package_version': profile['package_version'], 'uid': args.uid,
