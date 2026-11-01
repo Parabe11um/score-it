@@ -1,5 +1,5 @@
 #!/bin/sh
-# Build the same Debian tool versions without unused extended-ACL support.
+# Build Debian tools without unused ACL support, with the pinned tar backports.
 # Runs only in disposable builders; the server loads the finished images.
 set -eu
 export LC_ALL=C DEBIAN_FRONTEND=noninteractive
@@ -15,7 +15,7 @@ apt-get update
 apt-get install -y --no-install-recommends build-essential ca-certificates curl dpkg-dev \
     debhelper gettext texinfo groff libattr1-dev libacl1-dev libselinux1-dev \
     gperf bison libgmp3-dev libssl-dev libsystemd-dev autoconf automake autopoint \
-    dh-exec python3 xz-utils fakeroot
+    dh-exec python3 xz-utils fakeroot quilt
 useradd --system --user-group --no-create-home toolscheck
 mkdir -p /src/noacl /out
 printf 'distribution=%s\nconfigure=--disable-acl\n' "$VERSION_CODENAME" >/out/acl-tools-source.txt
@@ -32,6 +32,9 @@ for PACKAGE in coreutils sed tar; do
         trixie:tar) VERSION=1.35+dfsg-3.1 ;;
     esac
     REVISION="$VERSION+~scoreitnoacl1"
+    if [ "$PACKAGE" = tar ]; then
+        REVISION="$VERSION+~scoreitnoacl2"
+    fi
     mkdir "/src/noacl/$PACKAGE"
     cd "/src/noacl/$PACKAGE"
     PREFIX="$VERSION_CODENAME/$PACKAGE/"
@@ -49,6 +52,18 @@ for PACKAGE in coreutils sed tar; do
     dpkg-source --no-check -x "${PACKAGE}_${VERSION}.dsc" source
     cd source
     test "$(dpkg-parsechangelog -S Version)" = "$VERSION"
+    if [ "$PACKAGE" = tar ]; then
+        chown -R toolscheck:toolscheck /src/noacl/tar
+        runuser -u toolscheck -- python3 /run/score-it-tar-security.py control \
+            --source "$PWD" --profile "$VERSION_CODENAME" \
+            --patch-dir /run/score-it-tar-patches --probe /run/score-it-tar-probe.sh \
+            --uid "$(id -u toolscheck)" --build /src/noacl/tar/control \
+            --output /src/noacl/tar/tar-security-control.json
+        python3 /run/score-it-tar-security.py apply \
+            --source "$PWD" --profile "$VERSION_CODENAME" \
+            --patch-dir /run/score-it-tar-patches \
+            --output /src/noacl/tar/tar-security-applied.json
+    fi
     python3 - "$VERSION" "$REVISION" <<'PY'
 from pathlib import Path
 import sys
@@ -75,6 +90,18 @@ PY
     # No nocheck option is used. Focused installed-tool probes run below too.
     runuser -u toolscheck -- env "DEB_BUILD_OPTIONS=parallel=$(nproc)" \
         dpkg-buildpackage --build=binary --no-sign --no-pre-clean
+    if [ "$PACKAGE" = tar ]; then
+        TAR_BINARY="$(find "$PWD/debian/tar" -type f -name tar -path '*/bin/tar')"
+        test -n "$TAR_BINARY"
+        runuser -u toolscheck -- python3 /run/score-it-tar-security.py record \
+            --source "$PWD" --profile "$VERSION_CODENAME" \
+            --patch-dir /run/score-it-tar-patches --probe /run/score-it-tar-probe.sh \
+            --uid "$(id -u toolscheck)" --binary "$TAR_BINARY" \
+            --control /src/noacl/tar/tar-security-control.json \
+            --applied /src/noacl/tar/tar-security-applied.json \
+            --output /src/noacl/tar/tar-security-build.json
+        cp /src/noacl/tar/tar-security-build.json /out/
+    fi
     python3 - "$PACKAGE" "$REVISION" "$VERSION_CODENAME" <<'PY'
 from pathlib import Path
 import hashlib

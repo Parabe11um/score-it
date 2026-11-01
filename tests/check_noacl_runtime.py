@@ -5,7 +5,11 @@ import hashlib
 import json
 from pathlib import Path, PurePosixPath
 import re
+import sys
 import tarfile
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'deploy'))
+from tar_security import CVES, check_evidence
 
 from check_caddy_runtime import Archive, docker, layer_names, require
 from check_runtime_tools import check_runtime_binary, check_runtime_member, check_runtime_packages
@@ -14,11 +18,13 @@ PREFIX = 'usr/share/score-it/'
 FILES = {'cp','install','mv','sed','tar'}
 VERSIONS = {
     'app': ('trixie', {'coreutils':'9.7-3+~scoreitnoacl1', 'sed':'4.9-2+deb13u1+~scoreitnoacl1',
-                      'tar':'1.35+dfsg-3.1+~scoreitnoacl1'}),
+                      'tar':'1.35+dfsg-3.1+~scoreitnoacl2'}),
     'postgres': ('bookworm', {'coreutils':'9.1-1+~scoreitnoacl1', 'sed':'4.9-1+deb12u1+~scoreitnoacl1',
-                           'tar':'1.34+dfsg-1.2+deb12u1+~scoreitnoacl1'}),
+                           'tar':'1.34+dfsg-1.2+deb12u1+~scoreitnoacl2'}),
 }
 PROBE = (Path(__file__).resolve().parents[1] / 'deploy/runtime_tools_probe.sh').read_text()
+TAR_PROBE = (Path(__file__).resolve().parents[1] / 'deploy/tar_security_probe.sh').read_text()
+TAR_MANIFEST = (Path(__file__).resolve().parents[1] / 'deploy/patches/tar/sources.json').read_bytes()
 
 
 def package_inventory(raw, profile):
@@ -40,7 +46,7 @@ def package_inventory(raw, profile):
 def check_archive(path, image, profile):
     distro, packages = VERSIONS[profile]
     found, hashes, inventories, elf_count = {}, {}, 0, 0
-    evidence_files = {'acl-tools-source.txt','acl-tools-tests.txt','acl-tools-binaries.sha256'}
+    evidence_files = {'acl-tools-source.txt','acl-tools-tests.txt','acl-tools-binaries.sha256','tar-security-build.json'}
     with Archive(path) as source:
         _, layers = layer_names(source, image, 'linux/amd64')
         for layer_name in layers:
@@ -99,13 +105,19 @@ def check_archive(path, image, profile):
                 'Missing native no-ACL package evidence')
     require(re.search(r'^NOACL_POSIX_TOOLS_OK uid=[1-9][0-9]*$', tests, re.M),
             'Missing native packaged-tool roundtrip')
-    return {'distribution':distro, 'packages':packages, 'binary_sha256':hashes, 'elf_files':elf_count}
+    tar_security = check_evidence(json.loads(found['tar-security-build.json']), TAR_MANIFEST,
+                                  distro, hashes['tar'], hashlib.sha256(TAR_PROBE.encode()).hexdigest())
+    return {'distribution':distro, 'packages':packages, 'binary_sha256':hashes,
+            'elf_files':elf_count, 'tar_security':tar_security}
 
 
 def parse_runtime(output, profile, evidence):
     uid = '10001' if profile == 'app' else '999'
     rows = output.splitlines()
     require(rows and rows[0] == 'NOACL_POSIX_TOOLS_OK uid='+uid, 'No-ACL probe user/roundtrip differs')
+    for cve in CVES:
+        require(rows.count('TAR_SECURITY_CASE_OK cve='+cve) == 1, 'Missing/duplicate runtime tar security case')
+    require(rows.count('TAR_SECURITY_PROBE_OK uid='+uid) == 1, 'Runtime tar probe user differs')
     versions = [row.split('\t') for row in rows if '\t' in row]
     require(len(versions) == 3 and all(len(row) == 2 for row in versions)
             and dict(versions) == VERSIONS[profile][1], 'Runtime no-ACL package versions differ')
@@ -119,7 +131,7 @@ def verify(image, archive, profile):
     identity = json.loads(docker('image','inspect',image))[0]['Id']
     evidence = check_archive(archive,image,profile)
     uid = '10001' if profile == 'app' else '999'
-    runtime = PROBE + r'''
+    runtime = PROBE + '\n(\n' + TAR_PROBE + '\n)\n' + r'''
 for package in coreutils sed tar; do
     printf '%s\t%s\n' "$package" "$(dpkg-query -W -f='${Version}' "$package")"
 done
