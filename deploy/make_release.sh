@@ -100,6 +100,8 @@ for PROFILE in app postgres; do
   docker run --rm --pull=never --network none --read-only --entrypoint cat "$IMAGE" \
     /usr/share/score-it/acl-tools-source.txt /usr/share/score-it/acl-tools-tests.txt \
     /usr/share/score-it/acl-tools-binaries.sha256 >"$DEST/security/$PROFILE-acl-build.txt"
+  docker run --rm --pull=never --network none --read-only --entrypoint cat "$IMAGE" \
+    /usr/share/score-it/tar-security-build.json >"$DEST/security/$PROFILE-tar-build.json"
 done
 python3 tests/check_gzip_runtime.py --image "$APP_IMAGE" --profile app </dev/null | \
   tee "$DEST/security/app-gzip-runtime.txt"

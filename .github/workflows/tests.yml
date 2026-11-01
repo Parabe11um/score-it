@@ -58,6 +58,8 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_runtime_tools.py' -v
       - name: Reject ACL-dependent tools, stale package records and mismatched native payload
         run: python -m unittest discover -s tests -p 'test_noacl_payload.py' -v
+      - name: Reject incomplete tar backports and missing native negative controls
+        run: python -m unittest discover -s tests -p 'test_tar_security.py' -v
       - name: Reject stale app OpenSSL, CA roots and a changed runtime contract
         run: python -m unittest discover -s tests -p 'test_app_base.py' -v
       - name: Verify external audit tool delivery without changing the app image
@@ -70,6 +72,56 @@ jobs:
         run: |
           python -m pip install pip-audit==2.10.1
           python -m pip_audit -r requirements.production.txt --disable-pip --no-deps
+
+  tar-security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [app, postgres]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Verify native tar packages before the longer database build
+        run: |
+          set -euo pipefail
+          source deploy/images.env
+          case '${{ matrix.profile }}' in
+            app) FILE=Dockerfile.production; ARG="PYTHON_IMAGE=$PYTHON_SOURCE_IMAGE" ;;
+            postgres) FILE=deploy/Dockerfile.postgres; ARG="POSTGRES_IMAGE=$POSTGRES_SOURCE_IMAGE" ;;
+          esac
+          docker build --platform linux/amd64 --target tools-builder \
+            --build-arg "$ARG" --build-arg BUILD_TLS_COMPAT=1 \
+            -f "$FILE" -t score-it-tools:security-ci . 2>&1 | tee "$RUNNER_TEMP/tar-build.log"
+          docker run --rm --pull=never --network none --entrypoint cat score-it-tools:security-ci \
+            /out/tar-security-build.json > "$RUNNER_TEMP/tar-build.json"
+          docker run --rm --pull=never --network none --entrypoint sha256sum score-it-tools:security-ci \
+            /usr/bin/tar > "$RUNNER_TEMP/tar-binary.sha256"
+          python3 - <<'PY'
+          import hashlib, json, os, sys
+          from pathlib import Path
+          sys.path.insert(0, 'deploy')
+          from tar_security import check_evidence
+          root = Path(os.environ['RUNNER_TEMP'])
+          distro = {'app':'trixie', 'postgres':'bookworm'}['${{ matrix.profile }}']
+          check_evidence(json.loads((root/'tar-build.json').read_text()),
+                         Path('deploy/patches/tar/sources.json').read_bytes(), distro,
+                         (root/'tar-binary.sha256').read_text().split()[0],
+                         hashlib.sha256(Path('deploy/tar_security_probe.sh').read_bytes()).hexdigest())
+          print('TAR_EARLY_NATIVE_SECURITY_OK profile=' + distro)
+          PY
+      - name: Retain native tar evidence and diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: tar-native-${{ matrix.profile }}
+          path: |
+            ${{ runner.temp }}/tar-build.json
+            ${{ runner.temp }}/tar-binary.sha256
+            ${{ runner.temp }}/tar-build.log
+          if-no-files-found: warn
 
   history-secrets:
     runs-on: ubuntu-latest
@@ -174,7 +226,7 @@ jobs:
           if-no-files-found: warn
 
   postgres:
-    needs: caddy-security
+    needs: [caddy-security, tar-security]
     runs-on: ubuntu-latest
     timeout-minutes: 150
     services:

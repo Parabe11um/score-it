@@ -5,6 +5,9 @@ RUN --mount=type=bind,source=deploy/build_tls.sh,target=/run/score-it-build-tls.
     --mount=type=bind,source=deploy/build_runtime_noacl.sh,target=/run/score-it-build-noacl.sh,readonly \
     --mount=type=bind,source=deploy/acl_tools_sources.sha256,target=/run/score-it-acl-sources.sha256,readonly \
     --mount=type=bind,source=deploy/runtime_tools_probe.sh,target=/run/score-it-noacl-probe.sh,readonly \
+    --mount=type=bind,source=deploy/tar_security.py,target=/run/score-it-tar-security.py,readonly \
+    --mount=type=bind,source=deploy/tar_security_probe.sh,target=/run/score-it-tar-probe.sh,readonly \
+    --mount=type=bind,source=deploy/patches/tar,target=/run/score-it-tar-patches,readonly \
     sh /run/score-it-build-tls.sh "$BUILD_TLS_COMPAT" sh /run/score-it-build-noacl.sh
 
 FROM ${PYTHON_IMAGE} AS perl-builder
@@ -40,8 +43,9 @@ COPY --from=gzip-builder /out/gzip-*.txt /out/gzip-binary.sha256 /usr/share/scor
 RUN --mount=type=bind,from=tools-builder,source=/out,target=/run/score-it-tools,readonly \
     dpkg -i /run/score-it-tools/coreutils_9.7-3+~scoreitnoacl1_amd64.deb \
             /run/score-it-tools/sed_4.9-2+deb13u1+~scoreitnoacl1_amd64.deb \
-            /run/score-it-tools/tar_1.35+dfsg-3.1+~scoreitnoacl1_amd64.deb
+            /run/score-it-tools/tar_1.35+dfsg-3.1+~scoreitnoacl2_amd64.deb
 COPY --from=tools-builder /out/acl-tools-*.txt /out/acl-tools-binaries.sha256 /usr/share/score-it/
+COPY --from=tools-builder /out/tar-security-build.json /usr/share/score-it/
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1

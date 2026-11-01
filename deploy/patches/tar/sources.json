@@ -1,0 +1,272 @@
+{
+  "schema": 1,
+  "cves": [
+    "CVE-2026-5704",
+    "CVE-2026-18508",
+    "CVE-2026-18477"
+  ],
+  "dependency": "CVE-2025-45582 extraction-directory confinement and vendor prerequisites",
+  "profiles": {
+    "trixie": {
+      "source_version": "1.35+dfsg-3.1",
+      "package_version": "1.35+dfsg-3.1+~scoreitnoacl2",
+      "vendor_commit": "d00c4815b2e9ecb0858bb5aa1dbe11b2827e913f",
+      "patch": "trixie-archive-security.patch",
+      "patch_sha256": "d6438cc8c1e522007126571cf2c9cf0b02075e1c4e38025d977ac9dc8fdcfea5",
+      "vendor_patches": [
+        {
+          "file": "tar-1.35-fix-spurious-diagnostic-during-extraction-of-.-with-keep-newer-files.patch",
+          "sha256": "736f519ee2d364233d9927d59e8ff3459f9b756b4f19620bddecd63b180d1d30",
+          "url": "https://git.almalinux.org/rpms/tar/raw/commit/d00c4815b2e9ecb0858bb5aa1dbe11b2827e913f/tar-1.35-fix-spurious-diagnostic-during-extraction-of-.-with-keep-newer-files.patch"
+        },
+        {
+          "file": "tar-1.35-no-overwrite-dir-no-overwrite-even-temporarily.patch",
+          "sha256": "c5da27c6a6efa94c5cc2e218ace62847662b1618c95a4002914ec18857129873",
+          "url": "https://git.almalinux.org/rpms/tar/raw/commit/d00c4815b2e9ecb0858bb5aa1dbe11b2827e913f/tar-1.35-no-overwrite-dir-no-overwrite-even-temporarily.patch"
+        },
+        {
+          "file": "tar-1.35-CVE-2025-45582.patch",
+          "sha256": "79b49f03171ebba08c2f631d53fdea234e39a440825cd28f175b4e91d1588215",
+          "url": "https://git.almalinux.org/rpms/tar/raw/commit/d00c4815b2e9ecb0858bb5aa1dbe11b2827e913f/tar-1.35-CVE-2025-45582.patch"
+        },
+        {
+          "file": "tar-1.35-tar-one-top-level-DIR-must-be-relative.patch",
+          "sha256": "53f7a308c1944bf6b4cdfa48fe86d6fdaa56384cc1aefe2b831eb6411f9568a4",
+          "url": "https://git.almalinux.org/rpms/tar/raw/commit/d00c4815b2e9ecb0858bb5aa1dbe11b2827e913f/tar-1.35-tar-one-top-level-DIR-must-be-relative.patch"
+        },
+        {
+          "file": "tar-1.35-Avoid-acl_-prefix-for-functions.patch",
+          "sha256": "adee47410a40fb2403858e52973b3024b6067129ef51bad7b991a9722a4dd4c5",
+          "url": "https://git.almalinux.org/rpms/tar/raw/commit/d00c4815b2e9ecb0858bb5aa1dbe11b2827e913f/tar-1.35-Avoid-acl_-prefix-for-functions.patch"
+        },
+        {
+          "file": "tar-1.35-CVE-2026-5704.patch",
+          "sha256": "702db041689b8bfc45133ca3432ebab93101302f8823a79ce616d6c122c39a66",
+          "url": "https://git.almalinux.org/rpms/tar/raw/commit/d00c4815b2e9ecb0858bb5aa1dbe11b2827e913f/tar-1.35-CVE-2026-5704.patch"
+        },
+        {
+          "file": "tar-1.35-fix-absolute-one-top-level.patch",
+          "sha256": "951416e789e3bdae381df377b76597002b532f9a85f6c2221e283deaa0c42229",
+          "url": "https://git.almalinux.org/rpms/tar/raw/commit/d00c4815b2e9ecb0858bb5aa1dbe11b2827e913f/tar-1.35-fix-absolute-one-top-level.patch"
+        },
+        {
+          "file": "tar-1.35-CVE-2026-18477.patch",
+          "sha256": "aea389d8ca495bc0474c00a339f137c00e159ffc28caed65b02823be4f5046af",
+          "url": "https://git.almalinux.org/rpms/tar/raw/commit/d00c4815b2e9ecb0858bb5aa1dbe11b2827e913f/tar-1.35-CVE-2026-18477.patch"
+        }
+      ],
+      "before": {
+        "aclocal.m4": "62b59fccaa7f9554928b43fb488c17e26b7d7a7f57062b915e5443a598f2bd61",
+        "configure": "c01446d5f9e51df7754dbd9ea8a4b14f93ed876d27a319fe429633db3d7de7e5",
+        "gnu/Makefile.am": "0da7cc64304acf252ad2da92af62e6cceca2157e55f56f847171cb53c936a431",
+        "gnu/fcntl.in.h": "ad4b134ffcb483352c52007d0640d789711bb6ebd8cbb6bd1ab45d3278fcca23",
+        "gnu/openat2.c": null,
+        "lib/Makefile.am": "4bed9bf65e2eb453cdc0dade993b9e630f71f2015240d9074742f1f60db11aef",
+        "lib/mkdtempat.c": null,
+        "lib/mkdtempat.h": null,
+        "m4/fcntl_h.m4": "a45bd43a4f998f8cdff5fae3a8c16acedcfb71fd5bece20f7376a79cfabf36cd",
+        "m4/gnulib-comp.m4": "1ec13f6a30c3e7134df597cc3fd311655e0c9ed7dd3127578b50143669c34925",
+        "m4/openat2.m4": null,
+        "src/common.h": "c4c822f9f7ca835cb12fdb54d8be9d127705654f4ad03d503410a9acb01fbab9",
+        "src/compare.c": "e65a377c0903c6583f105da573949331610043edc20082e0aad48700536ffd93",
+        "src/create.c": "91afce46084dae58904be39b173c9e63821c66b76e73a79529e6249ccc31767e",
+        "src/exclist.c": "34e10df6b84ea8d914ab5282b9bc5cc87cc85d17df7c4ae57be22133f19c29e9",
+        "src/extract.c": "8311ba8f48e12668c40d7ebd45cb571e12381bce8a88aafed5988ef7e1ea9e6f",
+        "src/incremen.c": "fede03220e6f566a15fa83731abd731d4403a870dd8275e9638e6b62852069ff",
+        "src/list.c": "1504085e079ffe77c20df87f877e76d098fdfeb2c3c9df9ccdf5a59ce7226ed3",
+        "src/misc.c": "e364fb62f84501f50d574d985277018fec793a8177890ff98118b19b5302f236",
+        "src/names.c": "b1b4ebf14cdc82f27aa7265ca59ae5c7df2d54fe311a350484b175921396fb96",
+        "src/tar.c": "8750f19ff65d7fda308eb712c3d0ef25f3cd60696bf3a305645463d977ba82c7",
+        "src/unlink.c": "fb9097bbb6271572193540542157de36fa19f1d5fccbb79d94b698ce202d2659",
+        "src/update.c": "d0d9b40d4a31aeca20e26f5244f59a7cc0dfd0d1e0ef36fd785c536d00a32e5c",
+        "src/xattrs.c": "8598a61c46ece2530cde835d3bf8ae99f5a7999207da593ccbbccdb767d521d6",
+        "tests/Makefile.am": "076d52cd54f5d946cd54756b68362eb429d2d61befd2ef5c69ed24e3b5cdb02d",
+        "tests/extrac23.at": "dd907cbc20c3b550eb80bcfa75e994ef717a477f4885c60c4375d97b6307ff9c",
+        "tests/extrac27.at": null,
+        "tests/extrac30.at": null,
+        "tests/extrac31.at": null,
+        "tests/extrac32.at": null,
+        "tests/extrac34.at": null,
+        "tests/rename08.at": null,
+        "tests/rename09.at": null,
+        "tests/skipdir.at": null,
+        "tests/testsuite.at": "9d21de7d9f2c5872939735ed2c08d186aa2ddee28926a32dd8d4d33ed07f9ad7"
+      },
+      "after": {
+        "aclocal.m4": "d716607f7aac7ff0f7970581ae0773d6227e36041c3506d5c6aa77daa8b1ee25",
+        "configure": "7ec6618db858789fcdf81774de5d0ac3fd7ef9d5c6f505d9fee04bd10d543582",
+        "gnu/Makefile.am": "4c7ccd997974f31fb270974b62a4d7bb761e2510e60cb720624bc706f39c3f89",
+        "gnu/fcntl.in.h": "1f38308cda7523d6b49e47ed1c70fd468c4a3d7616ed6744114dd7637279a0f9",
+        "gnu/openat2.c": "d7252615999e438c8ff4358f9c6d4304e609ef72b5eb0f7144c164c9a494e413",
+        "lib/Makefile.am": "0e652fa024b047f6281aac30602d710e55951e643de3fef34c6af5ce650b75ff",
+        "lib/mkdtempat.c": "d55595c1c5d64f1f4820efd46bdc0813927833b27581ee8ece98af1703d17973",
+        "lib/mkdtempat.h": "e660013c2fc5d483f637d33fdfb60c7c10c52fd6407623daf56a00d5deacf4e3",
+        "m4/fcntl_h.m4": "b37007d82a7481d42fa8fd431682548ca183efd5b407579cb3f4d3c6aaa08868",
+        "m4/gnulib-comp.m4": "ec5a94118d82d1f0cfb8ca68230506467b0200d15784e4de4eb5d4357c1957f8",
+        "m4/openat2.m4": "b0f38d748300e2d512cf4f3c43ac60c33d7ef5151f7422964f322bd5dc1709b0",
+        "src/common.h": "530b7ffa8f33f57fe969634ba9237e420207c03f1471f280e35874dfae80283b",
+        "src/compare.c": "5954ef5e3e74fb5fd7759ae2538c4dda511c40c63ab7c013b3409001734aab66",
+        "src/create.c": "0caa158d44b33b18ac2064f65cebfb4db4052c80c3e0bead92af0b096e346fd2",
+        "src/exclist.c": "a4357012a61134b954a117eee98d9294387d94983f27b3dcea14d2a243ebdd11",
+        "src/extract.c": "5577d235b1148807225459b320c6ecfaeabe4964732a3268cad53396968350e7",
+        "src/incremen.c": "03984c0d771b5b145a2e1515ef063ef2666f5a19050ed9af8e76954d8670b324",
+        "src/list.c": "b9eaa29fd16f071dddc79d4182342184aee55c504a66352f81dab1481f829758",
+        "src/misc.c": "c1e2658c6f665fc214341413711e7218e7c05ffd5c8cc44ced11a2f27ed4c709",
+        "src/names.c": "c8ab2da6f9ac52002316318be0e799307d2468bba796b2bd3061302b5b17a515",
+        "src/tar.c": "afb8862fab1e47ad7eaff30cad5e58932d74bbb870500eb0c94cd4bbbfc00f10",
+        "src/unlink.c": "e21da331add81d9a3a2b66c93150884c522a75062cad6740c0d1e6cce034014c",
+        "src/update.c": "db9a113e30e5ae16f13ac22bc564e28d2709fa3ccd1408bc62653e98d408b20c",
+        "src/xattrs.c": "63a5d49e0ec87938064480602d3eb78d4566e741eb97aef9dec3564af9c31ece",
+        "tests/Makefile.am": "292b775aa7311aaedad9ac7e5b76298cf71e579847a23f2c69a5323afc46c34a",
+        "tests/extrac23.at": "238d1ff339a900240dc16edeb40bcc22248b875a0a774c770572f4a410893a18",
+        "tests/extrac27.at": "e658cdda7370d0dfa520f502847a60138e5452b6eba18daeb39bd71631bd007a",
+        "tests/extrac30.at": "647c3d50f67c89324f876c20c4cb63e06864408263cb3be148385d655e2851f3",
+        "tests/extrac31.at": "67087488c1ac732ea9cefb8108dbfcc70d6883161939ba90af37fd74c040f9b8",
+        "tests/extrac32.at": "328c764aa2422e71ae7062f4ee8d9a458ecda9724c337356e46c7da348ecb86e",
+        "tests/extrac34.at": "3cf9060b93eef7940193f6cdb3821e0a6d6e06b930d344a1fec234ef6f514716",
+        "tests/rename08.at": "da3b6e0ed0ea29d1e58017df21393de2b443908b510725afe20ffbaaef0980b3",
+        "tests/rename09.at": "a3924a039f6f158a1b7075bcc78dea25eede1e03483ef9af0601926abdba28e0",
+        "tests/skipdir.at": "8ddfaf9788df95249c192c9b22f807a19b5a6dc29a6ac6133939807ba1ad9a22",
+        "tests/testsuite.at": "f249463300501229ecfcaaa2ea0cc80f7d5e4c8aaf0b17b76790f9ff74ffafe4"
+      },
+      "added_tests": [
+        "extrac27.at",
+        "extrac30.at",
+        "extrac31.at",
+        "extrac32.at",
+        "extrac34.at",
+        "rename08.at",
+        "rename09.at",
+        "skipdir.at"
+      ]
+    },
+    "bookworm": {
+      "source_version": "1.34+dfsg-1.2+deb12u1",
+      "package_version": "1.34+dfsg-1.2+deb12u1+~scoreitnoacl2",
+      "vendor_commit": "f932969b23b8929177b96a46a9f56bdadca279bb",
+      "patch": "bookworm-archive-security.patch",
+      "patch_sha256": "5dcfbc7200fae7ba5dc330763c85e6fdebbdab1794e8239db9241e1aa0275eb5",
+      "vendor_patches": [
+        {
+          "file": "tar-1.34-no-overwrite-dir-no-overwrite-even-temporarily.patch",
+          "sha256": "337d02f23fe29526f7002f4150ce004607eeefccd1a4c351d1c0585634435313",
+          "url": "https://git.almalinux.org/rpms/tar/raw/commit/f932969b23b8929177b96a46a9f56bdadca279bb/SOURCES/tar-1.34-no-overwrite-dir-no-overwrite-even-temporarily.patch"
+        },
+        {
+          "file": "tar-1.34-CVE-2025-45582.patch",
+          "sha256": "65ef7344f66906786553e2860c512c83e2722f33acd007e246df262471fddcf6",
+          "url": "https://git.almalinux.org/rpms/tar/raw/commit/f932969b23b8929177b96a46a9f56bdadca279bb/SOURCES/tar-1.34-CVE-2025-45582.patch"
+        },
+        {
+          "file": "tar-1.34-tar-one-top-level-DIR-must-be-relative.patch",
+          "sha256": "dc3d5c794ac14de874ea2af49106c5f38e0f0e650ff849bb76caca43213d27f2",
+          "url": "https://git.almalinux.org/rpms/tar/raw/commit/f932969b23b8929177b96a46a9f56bdadca279bb/SOURCES/tar-1.34-tar-one-top-level-DIR-must-be-relative.patch"
+        },
+        {
+          "file": "tar-1.34-Avoid-acl_-prefix-for-functions.patch",
+          "sha256": "43fb05f785837522640578265c5c4fab62e3378fb8ee4c2775009ffaa06434dd",
+          "url": "https://git.almalinux.org/rpms/tar/raw/commit/f932969b23b8929177b96a46a9f56bdadca279bb/SOURCES/tar-1.34-Avoid-acl_-prefix-for-functions.patch"
+        },
+        {
+          "file": "tar-1.34-CVE-2026-5704.patch",
+          "sha256": "332c3bf5dfee8e2c42a4eb2c54102498adbb290fcfd1edcb038aa3ae715f28fe",
+          "url": "https://git.almalinux.org/rpms/tar/raw/commit/f932969b23b8929177b96a46a9f56bdadca279bb/SOURCES/tar-1.34-CVE-2026-5704.patch"
+        },
+        {
+          "file": "tar-1.34-fix-absolute-one-top-level.patch",
+          "sha256": "c5457c3545d1edf10f237e003d469ceb13d6119795ae30835cff22636a736012",
+          "url": "https://git.almalinux.org/rpms/tar/raw/commit/f932969b23b8929177b96a46a9f56bdadca279bb/SOURCES/tar-1.34-fix-absolute-one-top-level.patch"
+        },
+        {
+          "file": "tar-1.34-CVE-2026-18477.patch",
+          "sha256": "fd675505bd5ea748264cc5bcb2cac8905e76a6d2bc02193d556af36405e065a9",
+          "url": "https://git.almalinux.org/rpms/tar/raw/commit/f932969b23b8929177b96a46a9f56bdadca279bb/SOURCES/tar-1.34-CVE-2026-18477.patch"
+        }
+      ],
+      "before": {
+        "aclocal.m4": "ff7b746d76183a202c0fdca4120d8be30d844bb9b307beaf31c3f15a64c70b64",
+        "gnu/Makefile.am": "8df8b3d9cb1e31b9c96537e3cf8d8340ba28045dd2c4c747e3836b654f3b8db8",
+        "gnu/fcntl.in.h": "250efb57b57c16edc98b15aa455933c3d6ac9860fca859ae926c08daa68d1b45",
+        "gnu/openat2.c": null,
+        "gnu/xalloc.h": "bab5986e453413c21426f354f2de07e9d2c50cbdc48897a3b6bee93a39950ee5",
+        "gnu/xmalloc.c": "4ef4a9308e07469be182c4ef538b5e44244e7708b9c1c264b834e9fa5f7c64b5",
+        "lib/Makefile.am": "c55a8fdbd6303bb21bd24275e7083872016200346ecece4d16115f3efc3d378f",
+        "lib/mkdtempat.c": null,
+        "lib/mkdtempat.h": null,
+        "m4/fcntl_h.m4": "6c5121296bae5084f90c3211f98f33c4d6f7e53b032c9a59b643c2523dd42ca2",
+        "m4/gnulib-comp.m4": "5350fa86d5a87450da378eafa45938b8ca228f3bb77f19f89ae42afb2b233f6b",
+        "m4/openat2.m4": null,
+        "src/common.h": "869d67b29355b62b471e39b9f1996af94a5802646e60727d8a6c6106c2b7abe8",
+        "src/compare.c": "174e0ce614be5b5727422e547e256f4cbfdee7a0b905beda254aeb021bdf311d",
+        "src/create.c": "063d0cb9ebae4fab448b7a3fffa03e5db388639fa919d6ce2738e196685f2ab5",
+        "src/exclist.c": "12ebf61d07353bdc62438df7a3ff197f65080dbec3c81d5c5242bd936cff7218",
+        "src/extract.c": "d11ebaa2e2b042b05b61ce17ec0df4fb3215d7f4f29ec8194e7be444e0d98e90",
+        "src/incremen.c": "a6c0f01d28f12f858178c3341d55064c3d4703252fb4837577e064a88ba3bca9",
+        "src/list.c": "419e06743e130c51a7a1b2746b5a54284408aae35cd0de05c83c376d8b44dd7c",
+        "src/misc.c": "507dbddf5a89c11c72db5472f749ed06849ba79d70ba2480807320eef2fc830c",
+        "src/names.c": "bef50f71152562c3c07ca7fc07a03379ab30820832dcfb45c1be1bedd1079c05",
+        "src/tar.c": "06f3e22c17a4e73907d44c98155162600265e634c19ae54d7233bcf0742ead68",
+        "src/unlink.c": "d3529b7e592b2568fbe1e41a1fb4a5701760ce6928cf67dc440c58b5a8b502b3",
+        "src/update.c": "b0acc8afdf1a1393daf9aac5d90e1ecd19d68772fbc89121d9e87272dbd59bda",
+        "src/xattrs.c": "3e844dcc87ca089854294314d5fb95dcf7c191f9c7c6f114e1e483da68d97045",
+        "tests/Makefile.am": "118753b0159e518bb8d895abe0d7cef5a4494b7d67d8ec17a4cad80028ba9ee3",
+        "tests/extrac23.at": "d5803555031460d2bc6dbd7160825230994a12add5bead6243878ebbefd07d7c",
+        "tests/extrac30.at": null,
+        "tests/extrac31.at": null,
+        "tests/extrac32.at": null,
+        "tests/extrac34.at": null,
+        "tests/rename08.at": null,
+        "tests/rename09.at": null,
+        "tests/skipdir.at": null,
+        "tests/testsuite.at": "53183db5dd8b0f40a26a2c47fe44ca82be4eb7c2660dd3a4c0a0563a99b4c957"
+      },
+      "after": {
+        "aclocal.m4": "76cd2e99e8db748304dbd2f41181ba56a3f71a2e6169e24e1bf683c76d0ff225",
+        "gnu/Makefile.am": "c0fbd4fdaee7a6ee1a1f7f56e8b62fddbb75c15eb9f6e89e05c2559d2fe65392",
+        "gnu/fcntl.in.h": "04161d8b8556acb6f9ab75fdd2c4c87b885f2bece54405659818e92e90bb0299",
+        "gnu/openat2.c": "a22efc793632f2c4d4f2aeb39b7413b599bc9dc14ecdcd9c685b9bb9b6670e19",
+        "gnu/xalloc.h": "84c74f74cca157bc5746d9da1850279bf11b052a9dd7a39467077350a4bd8318",
+        "gnu/xmalloc.c": "f4949f444d09fbec0b785917b84722b7cf6e8ef91648d77eeed7e835c6f8bf66",
+        "lib/Makefile.am": "a6f5e60d96de8c621ac4a99aede74a18ecd7f15701daa97c69b812d451804078",
+        "lib/mkdtempat.c": "d55595c1c5d64f1f4820efd46bdc0813927833b27581ee8ece98af1703d17973",
+        "lib/mkdtempat.h": "e660013c2fc5d483f637d33fdfb60c7c10c52fd6407623daf56a00d5deacf4e3",
+        "m4/fcntl_h.m4": "3b9df60f9d8679e4a9985e318fd539a7ed1861b3130db94274173d40ffad0cce",
+        "m4/gnulib-comp.m4": "b28bef068fc86934e18e8f001ae9ec281a87f1eaca55b145efb02ee298325e76",
+        "m4/openat2.m4": "b0f38d748300e2d512cf4f3c43ac60c33d7ef5151f7422964f322bd5dc1709b0",
+        "src/common.h": "b500cdcb91baf2d7b7fcfcbf60d5ed92bd5d8230a116458fe8946c304908dfb5",
+        "src/compare.c": "709aa1c666d365fa7622b0b52ef9d72ab1569a880178b517a7aaeae196b1ba68",
+        "src/create.c": "04992818b765e4eb56156d3c606abc136363c3563c52d3324676c9eeb7b1056f",
+        "src/exclist.c": "e428f239d16855bb36d646bb19e9e3765fd81b62a26270e171b5387fd2fb65ce",
+        "src/extract.c": "98f31688aac8552b7b76bbd7683eb674f78293754678c5cb11b1bebd6c180c31",
+        "src/incremen.c": "3fe89f084fd20d4e4b6e140e487fe270115f10971ed0f6118ff757c16d56b072",
+        "src/list.c": "61c92e276f2ec845bc30b9656a30c839a6a56d70e6396f1cbf4c6e7b5adab373",
+        "src/misc.c": "d86dad6f1e66e32d7368ffac28c1f7d91867887e02f10498e2815e5bf8d5c54d",
+        "src/names.c": "6e305dfe02294e6800204f3f7d0ac8f973f45f520eb9de8223208b8151b3fad7",
+        "src/tar.c": "45b25f2cc4ec1b9e0d463ee52b30bf15bd856c7918986b8624d9abe232173dea",
+        "src/unlink.c": "c99bc212515eb2fde7ae347efbf7d509ba2d21a8e51c6cd2e7eb0b12e3316626",
+        "src/update.c": "256476b60d90e98452da831fb4df2e04295d0dd9324e5d1be3d484efebfe5a19",
+        "src/xattrs.c": "c8011251710235021f042680ffbd175314d2391ef0ad75ce715f1112a29f69db",
+        "tests/Makefile.am": "fb98453a25df68898d25064ec934e00d00c3bb0706f9127acba554eaa436cf0f",
+        "tests/extrac23.at": "269b85f28a4cb5bd49e968b20f412af94a801e0022b3512456d652bb82ee23b9",
+        "tests/extrac30.at": "647c3d50f67c89324f876c20c4cb63e06864408263cb3be148385d655e2851f3",
+        "tests/extrac31.at": "67087488c1ac732ea9cefb8108dbfcc70d6883161939ba90af37fd74c040f9b8",
+        "tests/extrac32.at": "328c764aa2422e71ae7062f4ee8d9a458ecda9724c337356e46c7da348ecb86e",
+        "tests/extrac34.at": "3cf9060b93eef7940193f6cdb3821e0a6d6e06b930d344a1fec234ef6f514716",
+        "tests/rename08.at": "da3b6e0ed0ea29d1e58017df21393de2b443908b510725afe20ffbaaef0980b3",
+        "tests/rename09.at": "a3924a039f6f158a1b7075bcc78dea25eede1e03483ef9af0601926abdba28e0",
+        "tests/skipdir.at": "8ddfaf9788df95249c192c9b22f807a19b5a6dc29a6ac6133939807ba1ad9a22",
+        "tests/testsuite.at": "83881650be5e2de019becf0bd17fa81fcb73a925ec59d98eb69928ad76176ede"
+      },
+      "added_tests": [
+        "extrac30.at",
+        "extrac31.at",
+        "extrac32.at",
+        "extrac34.at",
+        "rename08.at",
+        "rename09.at",
+        "skipdir.at"
+      ]
+    }
+  },
+  "adaptation": "Vendor C/gnulib/generated-configuration hunks retained. Debian-specific create.c statistics/exclusion context retained while updating fdbase/chdir arguments; tests registered once. NEWS/THANKS/doc updates are replaced by the project provenance README."
+}

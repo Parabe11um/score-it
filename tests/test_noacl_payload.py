@@ -1,15 +1,37 @@
 """Reject old ACL callers, missing native proof and saved/runtime substitution."""
 import hashlib
+import json
 from pathlib import Path
 import subprocess
 import tempfile
 import unittest
 
-from check_noacl_runtime import FILES, PREFIX, VERSIONS, check_archive, parse_runtime
+from check_noacl_runtime import CVES, FILES, PREFIX, TAR_MANIFEST, TAR_PROBE, VERSIONS, check_archive, parse_runtime
+from tar_security import CONTROL_REASONS
 from test_caddy_payload import layer_bytes, saved_image
 from test_runtime_tools import elf_bytes
 
 IMAGE = 'score-it:noacl-test'
+
+
+def tar_evidence(profile, binary_sha256):
+    distro, _ = VERSIONS[profile]
+    source = json.loads(TAR_MANIFEST)['profiles'][distro]
+    uid = 998
+    probe_sha = hashlib.sha256(TAR_PROBE.encode()).hexdigest()
+    manifest_sha = hashlib.sha256(TAR_MANIFEST).hexdigest()
+    return {'schema':1, 'state':'TAR_SECURITY_NATIVE_VERIFIED', 'profile':distro,
+            'package_version':source['package_version'], 'uid':uid,
+            'manifest_sha256':manifest_sha, 'patch_sha256':source['patch_sha256'],
+            'probe_sha256':probe_sha, 'source_after':source['after'],
+            'stable_source_verified':sorted(n for n in source['after'] if n.endswith(('.c','.h','.at'))),
+            'binary_sha256':binary_sha256,
+            'negative_controls':{'schema':1,'profile':distro,'source_version':source['source_version'],
+                'manifest_sha256':manifest_sha,'probe_sha256':probe_sha,'uid':uid,'binary_sha256':'f'*64,
+                'cases':{cve:{'exit':42,'reason':CONTROL_REASONS[cve]} for cve in CVES}},
+            'probe_output':''.join('TAR_SECURITY_CASE_OK cve='+cve+'\n' for cve in CVES)
+                +'TAR_SECURITY_PROBE_OK uid='+str(uid)+'\n',
+            'native_suite':{'passed':True,'successful':250,'sha256':'e'*64}}
 
 
 def fixture(profile='app'):
@@ -34,6 +56,7 @@ def fixture(profile='app'):
     files[PREFIX+'acl-tools-source.txt'] = ('\n'.join(source)+'\n').encode()
     files[PREFIX+'acl-tools-tests.txt'] = ('\n'.join(tests)+'\n').encode()
     files[PREFIX+'acl-tools-binaries.sha256'] = ''.join(d+'  /usr/bin/'+n+'\n' for n,d in sorted(hashes.items())).encode()
+    files[PREFIX+'tar-security-build.json'] = json.dumps(tar_evidence(profile,hashes['tar'])).encode()
     return files, {'binary_sha256':hashes}
 
 
@@ -96,6 +119,23 @@ class NoACLArchiveTests(unittest.TestCase):
                 row for row in files[PREFIX+'acl-tools-tests.txt'].splitlines() if not row.startswith(prefix.encode()))+b'\n'
             with self.subTest(prefix=prefix), self.assertRaises(RuntimeError):self.verify(files)
 
+    def test_rejects_missing_foreign_or_changed_tar_proof(self):
+        for change in ('missing','foreign-binary','foreign-profile','missing-control'):
+            files,_=fixture();name=PREFIX+'tar-security-build.json'
+            proof=json.loads(files[name])
+            if change=='missing':del files[name]
+            else:
+                if change=='foreign-binary':proof['binary_sha256']='0'*64
+                elif change=='foreign-profile':proof=tar_evidence('postgres',proof['binary_sha256'])
+                else:del proof['negative_controls']['cases'][CVES[0]]
+                files[name]=json.dumps(proof).encode()
+            with self.subTest(change=change),self.assertRaises(RuntimeError):self.verify(files)
+
+    def test_rejects_tar_proof_retained_in_an_earlier_saved_layer(self):
+        files,_=fixture()
+        with self.assertRaisesRegex(RuntimeError,'overwritten'):
+            self.verify(files,earlier={PREFIX+'tar-security-build.json':files[PREFIX+'tar-security-build.json']})
+
     def test_rejects_wrong_source_hash_or_distribution(self):
         for before,after in ((b'distribution=trixie',b'distribution=bookworm'),
                              (b'configure=--disable-acl',b'configure=--enable-acl'),
@@ -119,7 +159,7 @@ class NoACLRuntimeTests(unittest.TestCase):
                      '1.34+dfsg-1.2+deb12u1':'1.34+dfsg-1.2+deb12u2'}
         for distro,packages in VERSIONS.values():
             for custom in packages.values():
-                original=custom.removesuffix('+~scoreitnoacl1')
+                original=custom.split('+~scoreitnoacl',1)[0]
                 with self.subTest(custom=custom):
                     self.assertEqual(subprocess.run(['dpkg','--compare-versions',custom,'gt',original]).returncode,0)
                     self.assertEqual(subprocess.run(['dpkg','--compare-versions',custom,'lt',following[original]]).returncode,0)
@@ -127,6 +167,8 @@ class NoACLRuntimeTests(unittest.TestCase):
     def output(self,profile):
         _,evidence=fixture(profile);uid=10001 if profile=='app' else 999
         text=f'NOACL_POSIX_TOOLS_OK uid={uid}\n'
+        text+=''.join('TAR_SECURITY_CASE_OK cve='+cve+'\n' for cve in CVES)
+        text+='TAR_SECURITY_PROBE_OK uid='+str(uid)+'\n'
         text+=''.join(p+'\t'+v+'\n' for p,v in VERSIONS[profile][1].items())
         text+=''.join(h+'  /usr/bin/'+n+'\n' for n,h in evidence['binary_sha256'].items())
         return text,evidence
@@ -147,6 +189,13 @@ class NoACLRuntimeTests(unittest.TestCase):
         output,evidence=self.output('postgres')
         for bad in ('\n'.join(output.splitlines()[1:]),output+output.splitlines()[-1]+'\n'):
             with self.assertRaises(RuntimeError):parse_runtime(bad,'postgres',evidence)
+
+    def test_rejects_missing_duplicate_or_wrong_user_tar_runtime_cases(self):
+        output,evidence=self.output('app')
+        for bad in (output.replace('TAR_SECURITY_CASE_OK cve='+CVES[0]+'\n',''),
+                    output+'TAR_SECURITY_CASE_OK cve='+CVES[0]+'\n',
+                    output.replace('TAR_SECURITY_PROBE_OK uid=10001','TAR_SECURITY_PROBE_OK uid=0')):
+            with self.assertRaises(RuntimeError):parse_runtime(bad,'app',evidence)
 
 
 if __name__=='__main__':unittest.main()
