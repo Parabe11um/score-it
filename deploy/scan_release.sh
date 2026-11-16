@@ -38,6 +38,8 @@ while IFS=$'\t' read -r IMAGE CONFIG PLATFORM; do
     --format spdx-json --output "/reports/$NAME.spdx.json" "/reports/$NAME.json"
 done < "$ROOT/images.tsv"
 SOURCE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+python3 "$SOURCE_ROOT/tests/check_release_critical.py" --archive "$ROOT/images.tar" \
+  --manifest "$ROOT/images.tsv" --report-dir "$ROOT/security" --output "$ROOT/security/critical.json"
 python3 "$SOURCE_ROOT/tests/check_caddy_jose.py" --archive "$TEMP/caddy.tar" \
   --image "$CADDY_SCAN_IMAGE" --report "$ROOT/security/caddy.json" --output "$ROOT/security/caddy-jose.json"
 python3 - "$ROOT/security" <<'PY'

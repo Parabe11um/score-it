@@ -34,6 +34,8 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_release_source_permissions.py' -v
       - name: Verify temporary TLS profile cleanup and certificate validation
         run: python -m unittest discover -s tests -p 'test_build_tls.py' -v
+      - name: Block unresolved CRITICAL image findings
+        run: python -m unittest discover -s tests -p 'test_release_critical.py' -v
       - name: Reject obsolete executables in saved Caddy layers
         run: python -m unittest discover -s tests -p 'test_caddy_payload.py' -v
       - name: Reject partial Caddy RSA/CBC/JSON backports and unreviewed HIGH findings
