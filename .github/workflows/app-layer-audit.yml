@@ -16,21 +16,26 @@ jobs:
           set -euo pipefail
           source deploy/images.env
           docker build --platform linux/amd64 --build-arg "PYTHON_IMAGE=$PYTHON_SOURCE_IMAGE" --build-arg BUILD_TLS_COMPAT=1 \
-            --metadata-file "$RUNNER_TEMP/app-build.json" -f Dockerfile.production -t score-it:layer-audit . 2>&1 | tee "$RUNNER_TEMP/app-build.log"
-          # Docker's image ID can be the manifest index digest in containerd.
-          # Bind the archive scan to the config digest emitted by this build.
+            -f Dockerfile.production -t score-it:layer-audit . 2>&1 | tee "$RUNNER_TEMP/app-build.log"
+          docker image save score-it:layer-audit -o "$RUNNER_TEMP/app.tar"
+      - name: Verify the saved archive matches the built image
+        run: |
           python3 - <<'PY'
-          import json, os, re
+          import hashlib
+          import os
           from pathlib import Path
 
+          from deploy.verify_release import Archive, verify_loaded_image
+
           root = Path(os.environ["RUNNER_TEMP"])
-          metadata = json.loads((root / "app-build.json").read_text())
-          digest = metadata.get("containerimage.config.digest")
-          if not isinstance(digest, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
-              raise SystemExit("Docker build did not report an image config digest")
+          tag = "score-it:layer-audit"
+          platform = "linux/amd64"
+          with Archive(root / "app.tar") as archive:
+              digest = "sha256:" + hashlib.sha256(archive.config(tag, platform)).hexdigest()
+              verify_loaded_image(archive, tag, digest, platform)
           (root / "app.config").write_text(digest + "\n", encoding="ascii")
+          print(f"IMAGE_VERIFIED {tag} {platform} {digest}")
           PY
-          docker image save score-it:layer-audit -o "$RUNNER_TEMP/app.tar"
       - name: Verify the app base and retain an early vulnerability report
         run: |
           source deploy/images.env
