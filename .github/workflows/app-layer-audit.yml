@@ -15,9 +15,27 @@ jobs:
         run: |
           set -euo pipefail
           source deploy/images.env
-          docker build --platform linux/amd64 --build-arg "PYTHON_IMAGE=$PYTHON_SOURCE_IMAGE" --build-arg BUILD_TLS_COMPAT=1 -f Dockerfile.production -t score-it:layer-audit . 2>&1 | tee "$RUNNER_TEMP/app-build.log"
+          docker build --platform linux/amd64 --build-arg "PYTHON_IMAGE=$PYTHON_SOURCE_IMAGE" --build-arg BUILD_TLS_COMPAT=1 \
+            -f Dockerfile.production -t score-it:layer-audit . 2>&1 | tee "$RUNNER_TEMP/app-build.log"
           docker image save score-it:layer-audit -o "$RUNNER_TEMP/app.tar"
-          docker image inspect --format '{{.Id}}' score-it:layer-audit > "$RUNNER_TEMP/app.config"
+      - name: Verify the saved archive matches the built image
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import os
+          from pathlib import Path
+
+          from deploy.verify_release import Archive, verify_loaded_image
+
+          root = Path(os.environ["RUNNER_TEMP"])
+          tag = "score-it:layer-audit"
+          platform = "linux/amd64"
+          with Archive(root / "app.tar") as archive:
+              digest = "sha256:" + hashlib.sha256(archive.config(tag, platform)).hexdigest()
+              verify_loaded_image(archive, tag, digest, platform)
+          (root / "app.config").write_text(digest + "\n", encoding="ascii")
+          print(f"IMAGE_VERIFIED {tag} {platform} {digest}")
+          PY
       - name: Verify the app base and retain an early vulnerability report
         run: |
           source deploy/images.env

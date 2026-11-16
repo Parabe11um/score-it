@@ -1,0 +1,15 @@
+:root,
+html[data-theme="light"],
+html[data-theme="dark"] {
+    --accent: #33e771;
+    --primary: #076d35;
+    --secondary: #084b29;
+    --header-bg: #212a34;
+    --header-color: #ffffff;
+    --breadcrumbs-bg: var(--secondary);
+    --breadcrumbs-fg: #f5f5f8;
+    --breadcrumbs-link-fg: #ffffff;
+    --default-button-bg: var(--primary);
+    --default-button-hover-bg: var(--secondary);
+    --button-hover-bg: var(--primary);
+}
