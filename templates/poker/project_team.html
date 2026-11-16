@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Команда — {{ project.name }} — score it{% endblock %}
+{% block title %}Команда — {{ project.name }} — {{ brand_name }}{% endblock %}
 {% block content %}
 <nav class="breadcrumbs"><a href="{% url 'poker:dashboard' %}">Проекты</a><span>›</span><a href="{{ project.get_absolute_url }}">{{ project.name }}</a><span>›</span><span>Команда</span></nav>
 <div class="page-heading page-heading--compact"><div><span class="eyebrow">{{ project.name }}</span><h1>Команда проекта</h1><p>Сотрудники и их обычная доступность для новых спринтов.</p></div></div>

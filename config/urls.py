@@ -2,8 +2,12 @@ from django.contrib import admin
 from django.contrib.auth import views as auth_views
 from django.urls import include, path
 
+from .branding import APP_NAME
 from .health import health
 
+
+admin.site.site_header = APP_NAME
+admin.site.site_title = APP_NAME
 
 urlpatterns = [
     path("healthz/", health, name="health"),

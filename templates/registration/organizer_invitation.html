@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 
-{% block title %}Приглашение организатора — score it{% endblock %}
+{% block title %}Приглашение организатора — {{ brand_name }}{% endblock %}
 
 {% block content %}
 <div class="auth-layout invitation-layout">
     <section class="auth-intro">
-        <span class="eyebrow">ПРИГЛАШЕНИЕ В SCORE IT</span>
+        <span class="eyebrow">ПРИГЛАШЕНИЕ В ПРИЛОЖЕНИЕ «{{ brand_name }}»</span>
         <h1>Создайте пространство для своей команды</h1>
         <p>После регистрации вы сможете создавать собственные проекты, загружать задачи, проводить оценку и планировать спринты.</p>
         <div class="organizer-capabilities" aria-label="Возможности организатора">

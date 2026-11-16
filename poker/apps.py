@@ -1,10 +1,12 @@
 from django.apps import AppConfig
 
+from config.branding import APP_NAME
+
 
 class PokerConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
     name = "poker"
-    verbose_name = "Planning Poker"
+    verbose_name = APP_NAME
 
     def ready(self):
         from django.contrib.auth.signals import user_logged_in, user_login_failed

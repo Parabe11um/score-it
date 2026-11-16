@@ -5,7 +5,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light">
-    <title>{% block title %}score it{% endblock %}</title>
+    <title>{% block title %}{{ brand_name }}{% endblock %}</title>
+    <link rel="icon" href="{% static 'img/mera.svg' %}" type="image/svg+xml">
     <link rel="stylesheet" href="{% static 'css/app.css' %}">
     {% block extra_head %}{% endblock %}
 </head>
@@ -13,8 +14,8 @@
     <header class="topbar">
         <div class="container topbar__inner">
             <a class="brand" href="{% url 'poker:dashboard' %}">
-                <span class="brand__mark">s</span>
-                <span>score it</span>
+                <img class="brand__mark" src="{% static 'img/mera.svg' %}" width="34" height="34" alt="">
+                <span>{{ brand_name }}</span>
             </a>
             {% if request.user.is_authenticated %}
                 <div class="topbar__actions">

@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% load static %}
 
-{% block title %}{{ sprint.name }} — score it{% endblock %}
+{% block title %}{{ sprint.name }} — {{ brand_name }}{% endblock %}
 
 {% block content %}
 <nav class="breadcrumbs"><a href="{{ sprint.project.get_absolute_url }}">{{ sprint.project.name }}</a><span>›</span><span>{{ sprint.name }}</span></nav>

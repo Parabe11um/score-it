@@ -851,7 +851,7 @@ def _import_warnings(request, parsed, saved):
     if len(issues) > 10:
         messages.warning(request, f"Показаны первые 10 из {len(issues)} замечаний.")
     if not parsed.has_sprints_column:
-        messages.info(request, "Колонки «Спринты» нет: назначения в score-it сохранены.")
+        messages.info(request, "Колонки «Спринты» нет: назначения в приложении сохранены.")
     if not parsed.has_quota_column:
         messages.info(request, "Колонки «Тип квоты» нет: ранее загруженные квоты сохранены.")
 
