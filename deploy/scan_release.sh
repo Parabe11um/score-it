@@ -70,6 +70,10 @@ for name in ('app', 'postgres', 'caddy'):
                if p.get('Name') in ('acl', 'libacl1', 'libacl1-dev')]
         if acl:
             blocked.append(name + ': unused ACL package returned to runtime')
+    if name in ('app', 'postgres') and any(v['VulnerabilityID'] == 'CVE-2026-109518' for v in vulnerabilities):
+        blocked.append(name + ': APT security update is still missing')
+    if name == 'app' and any(v['VulnerabilityID'] == 'CVE-2026-85091' for v in vulnerabilities):
+        blocked.append(name + ': Debian Trixie zlib security update is still missing')
     # Explicit release gate for all of the public proxy's embedded Go modules.
     if name in ('caddy', 'postgres'):
         high_go = [v for result in report.get('Results', []) if result.get('Type') == 'gobinary'
