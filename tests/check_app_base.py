@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Record the exact app base and reject a missing OpenSSL/CA security update."""
+"""Record the exact app base and reject missing pinned Debian security updates."""
 import argparse
 import inspect
 import json
@@ -8,6 +8,9 @@ import subprocess
 from check_caddy_runtime import docker, require
 
 MINIMUM = {
+    "apt": "3.0.4",
+    "libapt-pkg7.0": "3.0.4",
+    "zlib1g": "1:1.3.dfsg+really1.3.1-1+deb13u1",
     "ca-certificates": "20250419+deb13u1",
     "libssl3t64": "3.5.7-1~deb13u3",
     "openssl": "3.5.7-1~deb13u3",

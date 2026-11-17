@@ -18,7 +18,8 @@ class AppBaseTests(unittest.TestCase):
         check_inventory(self.report)
 
     def test_rejects_old_or_absent_security_packages(self):
-        for package, old in (('ca-certificates', '20250419'),
+        for package, old in (('apt', '3.0.3'), ('libapt-pkg7.0', '3.0.3'),
+                             ('zlib1g', '1:1.3.dfsg+really1.3.1-1+b1'), ('ca-certificates', '20250419'),
                              ('openssl', '3.5.7-1~deb13u2'),
                              ('libssl3t64', '3.5.6-1'), ('liblzma5', '5.8.1-1+deb13u1')):
             for version in (old, None):

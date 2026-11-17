@@ -1,6 +1,12 @@
 ARG POSTGRES_IMAGE=postgres:17.11-bookworm@sha256:3645570cccdfa447589da9f57dd740faa29b30938e861289a5574b6ca6b03826
 ARG GO_IMAGE=golang:1.26.10-alpine3.24@sha256:9ce231b28998b32e116927c61aa5c406183061d4f3f2d61b292c88e7f6bdf7ca
-FROM ${POSTGRES_IMAGE} AS security-downloads
+FROM ${POSTGRES_IMAGE} AS apt-updated
+ARG BUILD_TLS_COMPAT=0
+RUN --mount=type=bind,source=deploy/build_tls.sh,target=/run/score-it-build-tls.sh,readonly \
+    --mount=type=bind,source=deploy/update_apt_security.sh,target=/run/score-it-update-apt.sh,readonly \
+    sh /run/score-it-build-tls.sh "$BUILD_TLS_COMPAT" sh /run/score-it-update-apt.sh
+
+FROM apt-updated AS security-downloads
 ARG BUILD_TLS_COMPAT=0
 RUN --mount=type=bind,source=deploy/build_tls.sh,target=/run/score-it-build-tls.sh,readonly \
     --mount=type=bind,source=deploy/fetch_postgres_tzdata.sh,target=/run/score-it-fetch-tzdata.sh,readonly \
@@ -11,7 +17,7 @@ RUN --mount=type=bind,source=deploy/build_tls.sh,target=/run/score-it-build-tls.
 
 # This target is also built directly by the early CI gate. Only the pinned
 # public .deb crosses the stage boundary; its CA installation stays behind.
-FROM ${POSTGRES_IMAGE} AS security-updated
+FROM apt-updated AS security-updated
 ARG BUILD_TLS_COMPAT=0
 RUN --mount=type=bind,source=deploy/build_tls.sh,target=/run/score-it-build-tls.sh,readonly \
     --mount=type=bind,source=deploy/update_postgres_security.sh,target=/run/score-it-update-postgres.sh,readonly \
@@ -19,7 +25,7 @@ RUN --mount=type=bind,source=deploy/build_tls.sh,target=/run/score-it-build-tls.
     sh /run/score-it-build-tls.sh "$BUILD_TLS_COMPAT" sh /run/score-it-update-postgres.sh \
         /run/score-it-security/tzdata_2026f-0+deb12u1_all.deb
 
-FROM ${POSTGRES_IMAGE} AS tools-builder
+FROM apt-updated AS tools-builder
 ARG BUILD_TLS_COMPAT=0
 RUN --mount=type=bind,source=deploy/build_tls.sh,target=/run/score-it-build-tls.sh,readonly \
     --mount=type=bind,source=deploy/build_runtime_noacl.sh,target=/run/score-it-build-noacl.sh,readonly \
@@ -30,7 +36,7 @@ RUN --mount=type=bind,source=deploy/build_tls.sh,target=/run/score-it-build-tls.
     --mount=type=bind,source=deploy/patches/tar,target=/run/score-it-tar-patches,readonly \
     sh /run/score-it-build-tls.sh "$BUILD_TLS_COMPAT" sh /run/score-it-build-noacl.sh
 
-FROM ${POSTGRES_IMAGE} AS perl-builder
+FROM apt-updated AS perl-builder
 ARG BUILD_TLS_COMPAT=0
 RUN --mount=type=bind,source=deploy/build_tls.sh,target=/run/score-it-build-tls.sh,readonly \
     --mount=type=bind,source=deploy/build_perl_security.sh,target=/run/score-it-build-perl.sh,readonly \
@@ -42,7 +48,7 @@ RUN --mount=type=bind,source=deploy/build_tls.sh,target=/run/score-it-build-tls.
     --mount=type=bind,source=deploy/perl_regex_sources.json,target=/run/score-it-perl-regex-sources.json,readonly \
     sh /run/score-it-build-tls.sh "$BUILD_TLS_COMPAT" sh /run/score-it-build-perl.sh
 
-FROM ${POSTGRES_IMAGE} AS gzip-builder
+FROM apt-updated AS gzip-builder
 ARG BUILD_TLS_COMPAT=0
 RUN --mount=type=bind,source=deploy/build_tls.sh,target=/run/score-it-build-tls.sh,readonly \
     --mount=type=bind,source=deploy/build_gzip_security.sh,target=/run/score-it-build-gzip.sh,readonly \
@@ -67,7 +73,7 @@ RUN --mount=type=bind,source=deploy/build_tls.sh,target=/run/score-it-build-tls.
     && go build -trimpath -ldflags "-d -w" -o /out/gosu . \
     && go version -m /out/gosu'
 
-FROM ${POSTGRES_IMAGE} AS postgres-build-deps
+FROM apt-updated AS postgres-build-deps
 ARG BUILD_TLS_COMPAT=0
 RUN --mount=type=bind,source=deploy/build_tls.sh,target=/run/score-it-build-tls.sh,readonly \
     sh /run/score-it-build-tls.sh "$BUILD_TLS_COMPAT" sh -ec '\
