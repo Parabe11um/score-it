@@ -8,7 +8,10 @@ import tarfile
 import tempfile
 import unittest
 
-from check_release_critical import BOOKWORM_ZLIB, MINIZIP_CVE, ROLES, review, sha256
+from check_release_critical import (
+    BOOKWORM_ZLIB, MINIZIP_CVE, PATCHED_BOOKWORM_ZLIB, ROLES,
+    ZLIB_BACKPORT, ZLIB_RECEIPT, review, sha256,
+)
 from test_caddy_payload import layer_bytes
 
 
@@ -35,7 +38,8 @@ class CriticalGateTests(unittest.TestCase):
         self.manifest = self.root / "images.tsv"
 
     def save(self, postgres_findings=(ZLIB_FINDING,), app_findings=(), caddy_findings=(),
-             additional_layers=(), corrupt_layer=False):
+             additional_layers=(), corrupt_layer=False, postgres_files=None):
+        pg_files = BOOKWORM_FILES if postgres_files is None else postgres_files
         rows, manifest = [], []
         with tarfile.open(self.archive, "w") as archive:
             def add(name, data):
@@ -46,7 +50,7 @@ class CriticalGateTests(unittest.TestCase):
             for prefix, role in ROLES.items():
                 is_postgres = role == "postgres"
                 tag = prefix + ":unit-test"
-                layers = [layer_bytes(BOOKWORM_FILES if is_postgres else {}, link=False)]
+                layers = [layer_bytes(pg_files if is_postgres else {}, link=False)]
                 if is_postgres:
                     layers.extend(layer_bytes(files, link=False) for files in additional_layers)
                 config = json.dumps({"os": "linux", "architecture": "amd64",
@@ -75,8 +79,32 @@ class CriticalGateTests(unittest.TestCase):
             add("manifest.json", json.dumps(manifest).encode())
         self.manifest.write_text("".join(rows))
 
-    def review(self):
-        return review(self.archive, self.manifest, self.root)
+    def review(self, require_zlib_backport=False):
+        return review(self.archive, self.manifest, self.root, require_zlib_backport)
+
+    def test_backport_proof_requires_matching_library_in_archive(self):
+        path = "usr/lib/x86_64-linux-gnu/libz.so.1.2.13"
+        expected = dict(ZLIB_BACKPORT, lib_sha256=sha256(BOOKWORM_FILES[path]).removeprefix("sha256:"))
+        files = dict(BOOKWORM_FILES)
+        files["var/lib/dpkg/status"] = files["var/lib/dpkg/status"].replace(
+            BOOKWORM_ZLIB.encode(), PATCHED_BOOKWORM_ZLIB.encode())
+        finding = dict(ZLIB_FINDING, InstalledVersion=PATCHED_BOOKWORM_ZLIB)
+        for fields, accepted in ((expected, True),
+                                 (dict(expected, lib_sha256="0" * 64), False),
+                                 (dict(expected, stock="wbT:0,wb0:0"), False)):
+            with self.subTest(accepted=accepted, receipt=fields):
+                files[str(ZLIB_RECEIPT)] = "".join(f"{key}={value}\n" for key, value in fields.items()).encode()
+                self.save(postgres_files=files, postgres_findings=(finding,))
+                review = self.review(require_zlib_backport=True)
+                pg = next(image for image in review["images"] if image["role"] == "postgres")
+                self.assertEqual(review["unresolved_critical_records"], int(not accepted))
+                self.assertEqual("minizip_evidence_error" in pg, not accepted)
+
+    def test_old_library_is_not_accepted_even_without_a_scanner_finding(self):
+        self.save(postgres_findings=())
+        pg = next(image for image in self.review(require_zlib_backport=True)["images"]
+                  if image["role"] == "postgres")
+        self.assertIn("backport is missing", pg["minizip_evidence_error"])
 
     def test_bookworm_decision_keeps_raw_report_and_binds_evidence(self):
         self.save()

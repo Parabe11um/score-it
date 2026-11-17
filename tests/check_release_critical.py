@@ -18,6 +18,20 @@ from verify_release import VerificationError, manifest_rows
 
 MINIZIP_CVE = "CVE-2023-45853"
 BOOKWORM_ZLIB = "1:1.2.13.dfsg-1"
+PATCHED_BOOKWORM_ZLIB = BOOKWORM_ZLIB + "+scoreit1"
+ZLIB_RECEIPT = PurePosixPath("usr/share/score-it/zlib-bookworm-backport.txt")
+ZLIB_BACKPORT = {
+    "source": BOOKWORM_ZLIB,
+    "version": PATCHED_BOOKWORM_ZLIB,
+    "cve": "CVE-2026-85091",
+    "upstream": "df84af25dc1942490e1d1c899a07619152a46148",
+    "patch_sha256": "9313965453827a594b1479187562bcf991390abde209da3f000a4fc689822ff0",
+    "probe_sha256": "1405fc428b66db6adb85d66367c0115aa06be50d32b74d53cbcfd4636859c755",
+    "stock": "wbT:42,wb0:42",
+    "patched": "wbT:0,wb0:0",
+    "exports": "identical",
+    "upstream_tests": "passed",
+}
 DEBIAN_TRACKER = "https://security-tracker.debian.org/tracker/" + MINIZIP_CVE
 CHUNK = 1024 * 1024
 MARKERS = (b"minizip", b"zipopennewfileinzip", b"unzopen2_64", b"mz_zip_writer_open")
@@ -59,6 +73,17 @@ def inspect_layer(layer, evidence):
                 "MiniZip-related file or link in saved layer: " + str(path))
         if path in ZLIB_PATHS:
             require(member.isfile(), "Expected the Debian libz shared library to be a regular file")
+        if path == ZLIB_RECEIPT:
+            require(member.isfile() and member.size <= 4096 and "zlib_backport" not in evidence,
+                    "Invalid Bookworm zlib evidence file")
+            with layer.extractfile(member) as stream:
+                entries = [line.partition("=") for line in stream.read().decode("ascii").splitlines()]
+                require(all(key and sep and value for key, sep, value in entries),
+                        "Malformed Bookworm zlib evidence file")
+                receipt = {key: value for key, _, value in entries}
+                require(len(receipt) == len(entries), "Duplicate field in Bookworm zlib evidence")
+                evidence["zlib_backport"] = receipt
+            continue
         if not member.isfile():
             continue
 
@@ -80,10 +105,12 @@ def inspect_layer(layer, evidence):
                         package = fields.get(b"Package", b"")
                         require(b"minizip" not in package.lower(), "MiniZip in the saved package inventory")
                         if package == b"zlib1g" and fields.get(b"Status") == b"install ok installed":
-                            require(fields.get(b"Version") == BOOKWORM_ZLIB.encode()
+                            version = fields.get(b"Version", b"").decode("ascii")
+                            require(version in {BOOKWORM_ZLIB, PATCHED_BOOKWORM_ZLIB}
+                                    and version == evidence.get("zlib1g", version)
                                     and fields.get(b"Architecture") == b"amd64",
                                     "Saved zlib1g package version or architecture differs")
-                            evidence["zlib1g"] = BOOKWORM_ZLIB
+                            evidence["zlib1g"] = version
                 continue
 
             magic = stream.read(4)
@@ -101,7 +128,11 @@ def inspect_layer(layer, evidence):
                 if digest is not None:
                     digest.update(block)
             if digest is not None:
-                evidence.setdefault("libz_files", {})[str(path)] = "sha256:" + digest.hexdigest()
+                saved_libraries = evidence.setdefault("libz_files", {})
+                identity = "sha256:" + digest.hexdigest()
+                require(path.as_posix() not in saved_libraries or saved_libraries[path.as_posix()] == identity,
+                        "Different libz binaries in layers")
+                saved_libraries[path.as_posix()] = identity
 
 
 def prove_bookworm_zlib(source, image, platform, config_id):
@@ -125,6 +156,13 @@ def prove_bookworm_zlib(source, image, platform, config_id):
                 check_layer(raw, diff_id, evidence)
     require({"distribution", "zlib1g", "libz_files"} <= evidence.keys(),
             "Incomplete Bookworm zlib evidence")
+    if evidence["zlib1g"] == PATCHED_BOOKWORM_ZLIB:
+        witness = evidence.get("zlib_backport") or {}
+        require(witness.keys() == (ZLIB_BACKPORT.keys() | {"lib_sha256"})
+                and all(witness[key] == value for key, value in ZLIB_BACKPORT.items()),
+                "Bookworm zlib backport tests or inputs are not verified")
+        require(set(evidence["libz_files"].values()) == {"sha256:" + witness["lib_sha256"]},
+                "Bookworm zlib proof does not match the saved library")
     return evidence
 
 
@@ -161,7 +199,8 @@ def read_critical(report, role, platform, config_id):
                 and (result.get("Class"), result.get("Type")) == ("os-pkgs", "debian")
                 and os_info.get("Family") == "debian" and os_info.get("Name", "").split(".")[0] == "12"
                 and item["VulnerabilityID"] == MINIZIP_CVE and item["PkgName"] == "zlib1g"
-                and item["InstalledVersion"] == BOOKWORM_ZLIB and not item.get("FixedVersion")
+                and item["InstalledVersion"] in {BOOKWORM_ZLIB, PATCHED_BOOKWORM_ZLIB}
+                and not item.get("FixedVersion")
             )
             critical.append({
                 "id": item["VulnerabilityID"], "package": item["PkgName"],
@@ -172,7 +211,7 @@ def read_critical(report, role, platform, config_id):
     return critical
 
 
-def review(archive, manifest, report_dir):
+def review(archive, manifest, report_dir, require_zlib_backport=False):
     images = []
     with Archive(archive) as source:
         for tag, config_id, platform in manifest_rows(manifest):
@@ -183,14 +222,21 @@ def review(archive, manifest, report_dir):
             critical = read_critical(json.loads(raw), role, platform, config_id)
             image = {"role": role, "image": tag, "config_id": config_id, "platform": platform,
                      "trivy_report_sha256": sha256(raw), "findings": critical}
-            if any(item["decision"] == "pending_proof" for item in critical):
+            pending = [item for item in critical if item["decision"] == "pending_proof"]
+            need_backport = require_zlib_backport and role == "postgres"
+            if pending or need_backport:
                 try:
-                    image["minizip_evidence"] = prove_bookworm_zlib(source, tag, platform, config_id)
-                except (VerificationError, RuntimeError, OSError, EOFError, tarfile.TarError) as error:
+                    evidence = prove_bookworm_zlib(source, tag, platform, config_id)
+                    require(all(item["installed_version"] == evidence["zlib1g"] for item in pending),
+                            "Trivy zlib1g version does not match the archive")
+                    if need_backport:
+                        require(evidence["zlib1g"] == PATCHED_BOOKWORM_ZLIB,
+                                "Bookworm zlib backport is missing")
+                    image["minizip_evidence"] = evidence
+                except (VerificationError, RuntimeError, OSError, EOFError, tarfile.TarError, UnicodeError) as error:
                     image["minizip_evidence_error"] = str(error)
-                for item in critical:
-                    if item["decision"] == "pending_proof":
-                        item["decision"] = "not_affected" if "minizip_evidence" in image else "unresolved"
+                for item in pending:
+                    item["decision"] = "not_affected" if "minizip_evidence" in image else "unresolved"
             images.append(image)
     return {"images": images, "unresolved_critical_records": sum(
         finding["decision"] == "unresolved" for image in images for finding in image["findings"]
@@ -201,9 +247,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for option in ("archive", "manifest", "report-dir", "output"):
         parser.add_argument("--" + option, type=Path, required=True)
+    parser.add_argument("--require-zlib-backport", action="store_true")
     args = parser.parse_args()
 
-    report = review(args.archive, args.manifest, args.report_dir)
+    report = review(args.archive, args.manifest, args.report_dir, args.require_zlib_backport)
     args.output.write_text(json.dumps(report, indent=2) + "\n")
     for image in report["images"]:
         findings = image["findings"]
@@ -214,7 +261,11 @@ def main():
             print(f"  {item['id']} {item['package']} {item['installed_version']} "
                   f"fixed={item['fixed_version'] or 'not reported'}")
         if "minizip_evidence_error" in image:
-            print("  MiniZip evidence failed: " + image["minizip_evidence_error"])
+            print("  Bookworm zlib evidence failed: " + image["minizip_evidence_error"])
+            if args.require_zlib_backport and image["role"] == "postgres":
+                raise SystemExit("RELEASE_BLOCKED: Bookworm zlib backport proof failed.")
+        if "zlib_backport" in image.get("minizip_evidence", {}):
+            print("POSTGRES_ZLIB_BACKPORT_BOUND_TO_SAVED_IMAGE CVE-2026-85091")
     if report["unresolved_critical_records"]:
         raise SystemExit("RELEASE_BLOCKED: unresolved CRITICAL findings; see critical.json.")
     print("CRITICAL_GATE_OK")

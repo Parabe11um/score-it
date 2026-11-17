@@ -328,7 +328,7 @@ def check_existing_volume(source, target):
                '--user', 'postgres', current,
                'sh', '-ec',
                'export PGSSLROOTCERT="$PGDATA/server.crt"; '
-               'pg_dump -h 127.0.0.1 -U postgres -Fc -d "$1" -f /tmp/score-it-probe.dump; '
+               'pg_dump -h 127.0.0.1 -U postgres -Fc --compress=gzip:6 -d "$1" -f /tmp/score-it-probe.dump; '
                'createdb -h 127.0.0.1 -U postgres "$2"; '
                'pg_restore -h 127.0.0.1 -U postgres --exit-on-error -d "$2" /tmp/score-it-probe.dump; '
                'rm /tmp/score-it-probe.dump', 'probe', database, restored_database)

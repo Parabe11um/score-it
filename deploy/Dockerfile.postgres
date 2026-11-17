@@ -56,6 +56,14 @@ RUN --mount=type=bind,source=deploy/build_tls.sh,target=/run/score-it-build-tls.
     --mount=type=bind,source=deploy/gzip_lzh_state_probe.c,target=/run/score-it-gzip-probe.c,readonly \
     sh /run/score-it-build-tls.sh "$BUILD_TLS_COMPAT" sh /run/score-it-build-gzip.sh
 
+FROM apt-updated AS zlib-bookworm-builder
+ARG BUILD_TLS_COMPAT=0
+RUN --mount=type=bind,source=deploy/build_tls.sh,target=/run/score-it-build-tls.sh,readonly \
+    --mount=type=bind,source=deploy/build_zlib_bookworm_security.sh,target=/run/score-it-build-zlib.sh,readonly \
+    --mount=type=bind,source=deploy/patches/zlib/85091-bookworm.patch,target=/run/score-it-zlib.patch,readonly \
+    --mount=type=bind,source=deploy/zlib_gzwrite_error_probe.c,target=/run/score-it-zlib-probe.c,readonly \
+    sh /run/score-it-build-tls.sh "$BUILD_TLS_COMPAT" sh /run/score-it-build-zlib.sh
+
 FROM ${GO_IMAGE} AS gosu-builder
 ARG BUILD_TLS_COMPAT=0
 ENV GOTOOLCHAIN=local CGO_ENABLED=0
@@ -99,6 +107,10 @@ RUN --mount=type=bind,source=deploy/build_tls.sh,target=/run/score-it-build-tls.
     sh /run/score-it-build-tls.sh "$BUILD_TLS_COMPAT" sh /run/score-it-build-libpq.sh
 
 FROM security-updated AS runtime-files
+RUN --mount=type=bind,from=zlib-bookworm-builder,source=/out,target=/run/score-it-zlib,readonly \
+    dpkg -i /run/score-it-zlib/zlib1g_bookworm_amd64.deb \
+    && test "$(dpkg-query -W -f='${Version}' zlib1g)" = '1:1.2.13.dfsg-1+scoreit1'
+COPY --from=zlib-bookworm-builder /out/zlib-bookworm-backport.txt /usr/share/score-it/
 RUN --mount=type=bind,from=perl-builder,source=/out,target=/run/score-it-perl,readonly \
     dpkg -i /run/score-it-perl/perl-base_5.36.0-7+deb12u4+scoreit2_amd64.deb \
             /run/score-it-perl/perl-modules-5.36_5.36.0-7+deb12u4+scoreit2_all.deb \
