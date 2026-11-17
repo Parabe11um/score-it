@@ -28,8 +28,9 @@ if package=='ca-certificates':
     print('installed' if os.environ.get('GUARD_MODE')=='ca-package' else 'not-installed')
 else:
     if fmt!='-f=${Version}':raise SystemExit(92)
-    print('old' if os.environ.get('GUARD_MODE')==package else
-          '2026f-0+deb12u1' if package=='tzdata' else '3.0.22-1~deb12u2')
+    versions={'apt':'2.6.2','libapt-pkg6.0':'2.6.2','tzdata':'2026f-0+deb12u1',
+              'libssl3':'3.0.22-1~deb12u2','openssl':'3.0.22-1~deb12u2'}
+    print('old' if os.environ.get('GUARD_MODE')==package else versions[package])
 ''')
             query.chmod(0o755)
             ca=root/'ca.crt';out=root/'out'
@@ -48,7 +49,7 @@ else:
         self.assertEqual(result.stdout,'POSTGRES_SECURITY_STAGE_RUNTIME_OK\n')
 
     def test_wrong_packages_copied_roots_or_tls_settings_cannot_report_success(self):
-        for mode in ('tzdata','libssl3','openssl','ca-package','ca-file','out','tls-env'):
+        for mode in ('apt','libapt-pkg6.0','tzdata','libssl3','openssl','ca-package','ca-file','out','tls-env'):
             with self.subTest(mode=mode):
                 result=self.invoke_guard(mode)
                 self.assertNotEqual(result.returncode,0,result.stdout+result.stderr)
