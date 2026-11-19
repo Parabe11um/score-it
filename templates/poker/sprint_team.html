@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+{% extends "poker/workspace.html" %}
 {% block title %}Команда и ёмкость — {{ sprint.name }} — {{ brand_name }}{% endblock %}
 {% block content %}
 <nav class="breadcrumbs"><a href="{{ sprint.project.get_absolute_url }}">{{ sprint.project.name }}</a><span>›</span><a href="{{ sprint.get_absolute_url }}">{{ sprint.name }}</a><span>›</span><span>Команда и ёмкость</span></nav>

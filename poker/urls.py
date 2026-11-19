@@ -1,6 +1,6 @@
 from django.urls import path
 
-from . import team_views, views
+from . import team_views, views, workspace_views
 
 
 app_name = "poker"
@@ -12,6 +12,10 @@ urlpatterns = [
         name="organizer_invitation_accept",
     ),
     path("", views.dashboard, name="dashboard"),
+    path("account/", workspace_views.user_settings, name="user_settings"),
+    path("sessions/", workspace_views.voting_list, name="voting_list"),
+    path("sprints/", workspace_views.sprint_list, name="sprint_list"),
+    path("teams/", workspace_views.team_list, name="team_list"),
     path("projects/new/", views.project_create, name="project_create"),
     path("projects/<int:pk>/", views.project_detail, name="project_detail"),
     path("projects/<int:pk>/team/", team_views.project_team, name="project_team"),

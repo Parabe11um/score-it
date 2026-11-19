@@ -1,0 +1,46 @@
+{% extends "poker/workspace.html" %}
+
+{% block title %}{{ heading }} — {{ brand_name }}{% endblock %}
+
+{% block content %}
+<div class="page-heading">
+    <div>
+        <h1>{{ heading }}</h1>
+        <p>{{ description }}</p>
+    </div>
+    <a class="button button--secondary" href="{% url 'poker:dashboard' %}">К проектам</a>
+</div>
+
+<nav class="workspace-filters" aria-label="Архив">
+    <a class="filter-chip{% if not archived %} filter-chip--active{% endif %}" href="{% url list_route %}"{% if not archived %} aria-current="page"{% endif %}>Вне архива</a>
+    <a class="filter-chip{% if archived %} filter-chip--active{% endif %}" href="{% url list_route %}?archive=1"{% if archived %} aria-current="page"{% endif %}>Архив</a>
+</nav>
+
+<div class="card workspace-index">
+    {% if page.object_list %}
+        <ul class="workspace-list">
+            {% for item in page %}
+                <li>
+                    <a class="workspace-list__link" href="{{ item.get_absolute_url }}">
+                        <span class="workspace-list__body">
+                            <strong>{{ item.name }}</strong>
+                            <small>{{ item.project.name }}
+                                {% if show_dates %}
+                                    {% if item.start_date and item.end_date %} · {{ item.start_date|date:"d.m.Y" }} — {{ item.end_date|date:"d.m.Y" }}
+                                    {% elif item.start_date %} · с {{ item.start_date|date:"d.m.Y" }}
+                                    {% elif item.end_date %} · до {{ item.end_date|date:"d.m.Y" }}{% endif %}
+                                {% else %} · {{ item.created_at|date:"d.m.Y" }}{% endif %}
+                            </small>
+                        </span>
+                        <span class="pill">{{ item.get_status_display }}</span>
+                        <span class="workspace-list__arrow" aria-hidden="true">›</span>
+                    </a>
+                </li>
+            {% endfor %}
+        </ul>
+        {% include "poker/workspace_pagination.html" %}
+    {% else %}
+        <p class="workspace-index__empty">{% if archived %}Архив пока пуст.{% else %}{{ empty_message }}{% endif %}</p>
+    {% endif %}
+</div>
+{% endblock %}

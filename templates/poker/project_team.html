@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+{% extends "poker/workspace.html" %}
 {% block title %}Команда — {{ project.name }} — {{ brand_name }}{% endblock %}
 {% block content %}
 <nav class="breadcrumbs"><a href="{% url 'poker:dashboard' %}">Проекты</a><span>›</span><a href="{{ project.get_absolute_url }}">{{ project.name }}</a><span>›</span><span>Команда</span></nav>
