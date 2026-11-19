@@ -5,6 +5,7 @@ from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[1]
 POLICY=json.loads((ROOT/'deploy/caddy_jose_sources.json').read_text())
+GO_VERSION='go1.26.11'
 TARGET='CVE-2026-116587'
 MEDIUM_TARGETS={'CVE-2026-116585','CVE-2026-116586'}
 MODULE='github.com/go-jose/go-jose/v3'
@@ -17,7 +18,7 @@ def verify_proof(proof,binary_hash):
     require(proof.get('check')=='caddy_jose_backport' and proof.get('policy')==POLICY,'Caddy JOSE source policy differs')
     require(proof.get('binary_sha256')==binary_hash,'Caddy JOSE proof belongs to another binary')
     native=proof.get('native_tests',{})
-    require(native.get('go')=='go1.26.11' and native.get('probe_cases')==65
+    require(native.get('go')==GO_VERSION and native.get('probe_cases')==65
             and native.get('negative_controls')==4 and native.get('xnet_html') is True,'Incomplete JOSE native controls')
     require(native.get('dos_probes')=={p:{'cbc':15,'json':34} for p in ('v3','v4','vendor')},
             'Incomplete JOSE CBC/JSON native or vendor regressions')

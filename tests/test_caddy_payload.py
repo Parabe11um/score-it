@@ -9,7 +9,7 @@ import tarfile
 import tempfile
 import unittest
 
-from check_caddy_runtime import PAYLOAD, check_archive
+from check_caddy_runtime import PAYLOAD, check_archive, check_build_info
 from caddy_jose_policy import POLICY
 
 
@@ -93,6 +93,17 @@ def saved_image(path, layers, oci=False, image=IMAGE, user="10002:10002"):
 
 
 class CaddyPayloadTests(unittest.TestCase):
+    def test_runtime_build_info_accepts_fixed_go_and_rejects_the_old_toolchain(self):
+        output = (
+            "go\tgo1.26.11\n"
+            "dep\tgolang.org/x/net\tv0.62.0\th1:sum\n"
+            "dep\tgithub.com/go-chi/chi/v5\tv5.4.0\th1:sum\n"
+            "dep\tgithub.com/go-jose/go-jose/v4\tv4.1.6\th1:sum"
+        )
+        check_build_info(output)
+        with self.assertRaisesRegex(RuntimeError, "Unexpected Go version"):
+            check_build_info(output.replace("go1.26.11", "go1.26.10"))
+
     def test_rejects_openpgp_imports_and_unbound_evidence(self):
         for dependency in ('golang.org/x/crypto/openpgp', 'golang.org/x/crypto/openpgp/packet'):
             data = payload()
