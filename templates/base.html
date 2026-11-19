@@ -32,16 +32,19 @@
         </div>
     </header>
 
-    <main class="container page-shell">
-        {% if messages %}
-            <div class="messages" aria-live="polite">
-                {% for message in messages %}
-                    <div class="message message--{{ message.tags|default:'info' }}">{{ message }}</div>
-                {% endfor %}
-            </div>
-        {% endif %}
-        {% block content %}{% endblock %}
-    </main>
+    <div class="{% block shell_class %}container page-shell{% endblock %}">
+        {% block navigation %}{% endblock %}
+        <main id="main-content">
+            {% if messages %}
+                <div class="messages" aria-live="polite">
+                    {% for message in messages %}
+                        <div class="message message--{{ message.tags|default:'info' }}">{{ message }}</div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+            {% block content %}{% endblock %}
+        </main>
+    </div>
 
     {% block scripts %}{% endblock %}
 </body>

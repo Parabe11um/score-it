@@ -9,6 +9,7 @@ import sys
 
 ASSETS=Path(sys.argv[2]);WORK=Path.cwd()
 POLICY=json.loads((ASSETS/'caddy_jose_sources.json').read_text())
+GO_VERSION='go1.26.11'
 sha=lambda p:hashlib.sha256(p.read_bytes()).hexdigest()
 
 def call(args,cwd=WORK,timeout=600):
@@ -84,7 +85,7 @@ def dos_probe(root,label,negative=False,vendor=False):
 
 if sys.argv[1]=='prepare':
     assert (WORK/'go.mod').read_text().startswith('module score-it-caddy-build\n')
-    assert call(['go','version']).startswith('go version go1.26.10 ')
+    assert call(['go','version']).startswith(f'go version {GO_VERSION} ')
     for name,digest in POLICY['test_sha256'].items():
         assert sha(ASSETS/name)==digest
     originals={}
@@ -144,7 +145,7 @@ if sys.argv[1]=='prepare':
     assert {n:sha(vendor/n) for n in POLICY['patched_sha256']}==POLICY['patched_sha256']
     dos['vendor']=dos_probe(WORK,'vendor',vendor=True)
     evidence={'check':'caddy_jose_backport','policy':POLICY,'native_tests':{
-        'go':'go1.26.10','probe_cases':65,'negative_controls':4,'suite_packages':suites,
+        'go':GO_VERSION,'probe_cases':65,'negative_controls':4,'suite_packages':suites,
         'dos_probes':dos,'xnet_html':True}}
     (WORK/'jose-evidence.json').write_text(json.dumps(evidence,sort_keys=True)+'\n')
     print('CADDY_JOSE_VENDOR_SOURCE_AND_NATIVE_TESTS_OK',flush=True)
@@ -152,6 +153,8 @@ elif sys.argv[1]=='finish':
     proof=json.loads((WORK/'jose-evidence.json').read_text())
     vendor=WORK/'vendor'/POLICY['modules']['v3']['path']
     assert {n:sha(vendor/n) for n in POLICY['patched_sha256']}==POLICY['patched_sha256']
-    proof['binary_sha256']=sha(Path(sys.argv[3]))
+    binary=Path(sys.argv[3])
+    assert call(['go','version',str(binary)]).strip()==f'{binary}: {GO_VERSION}'
+    proof['binary_sha256']=sha(binary)
     Path(sys.argv[4]).write_text(json.dumps(proof,sort_keys=True)+'\n')
 else:raise SystemExit('Use prepare or finish')

@@ -17,7 +17,7 @@ from test_runtime_tools import elf_bytes
 
 
 IMAGE = "score-it-postgres:payload-test"
-BUILD_INFO = """/probe/gosu: go1.26.10
+BUILD_INFO = """/probe/gosu: go1.26.11
     path github.com/tianon/gosu
     dep github.com/moby/sys/user v0.4.1 h1:example
     dep golang.org/x/sys v0.48.0 h1:example
@@ -281,7 +281,7 @@ class PostgresPayloadTests(unittest.TestCase):
 
     def test_rejects_obsolete_go_or_module_versions(self):
         check_build_info(BUILD_INFO)
-        for before, after in (("go1.26.10", "go1.24.6"), ("v0.4.1", "v0.1.0"),
+        for before, after in (("go1.26.11", "go1.26.10"), ("v0.4.1", "v0.1.0"),
                               ("v0.48.0", "v0.1.0")):
             with self.subTest(before=before):
                 with self.assertRaisesRegex(RuntimeError, "Unexpected gosu"):

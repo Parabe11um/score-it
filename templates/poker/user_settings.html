@@ -1,0 +1,29 @@
+{% extends "poker/workspace.html" %}
+
+{% block title %}Пользователь — {{ brand_name }}{% endblock %}
+
+{% block content %}
+<div class="page-heading">
+    <div>
+        <h1>Пользователь</h1>
+        <p>Ваша учётная запись и настройки подключения EVA.</p>
+    </div>
+</div>
+<section class="card section-card">
+    <h2>Учётная запись</h2>
+    <dl class="account-facts">
+        <div><dt>Логин</dt><dd>{{ request.user.get_username }}</dd></div>
+        <div><dt>Роль</dt><dd>{% if request.user.is_superuser %}Администратор{% else %}Организатор{% endif %}</dd></div>
+    </dl>
+</section>
+<section class="card section-card">
+    <div class="section-heading">
+        <div>
+            <h2>Подключение EVA</h2>
+            <p>Здесь можно будет подключить EVA с помощью личного API-ключа.</p>
+        </div>
+        <span class="pill">Запланировано</span>
+    </div>
+    <p class="help-text">Пока задачи из EVA можно загрузить из файла на странице проекта.</p>
+</section>
+{% endblock %}

@@ -17,7 +17,7 @@ import tarfile
 import tempfile
 import time
 import uuid
-from caddy_jose_policy import verify_proof
+from caddy_jose_policy import GO_VERSION, verify_proof
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "deploy"))
 from verify_release import Archive, image_name  # noqa: E402
@@ -306,6 +306,15 @@ http://caddy-runtime-proxy {
                            capture_output=True, timeout=30)
 
 
+def check_build_info(output):
+    require(re.search(rf"^go[ \t]+{re.escape(GO_VERSION)}$", output, re.M),
+            f"Unexpected Go version (expected {GO_VERSION})")
+    require(re.search(r"^dep\s+golang.org/x/net\s+v0[.]62[.]0\s", output, re.M),
+            "Unexpected x/net version")
+    require(re.search(r"^dep\s+github.com/go-chi/chi/v5\s+v5[.]4[.]0\s",output,re.M), "Unexpected chi version")
+    require(re.search(r"^dep\s+github.com/go-jose/go-jose/v4\s+v4[.]1[.]6\s",output,re.M), "Unexpected JOSE v4 version")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--image", required=True)
@@ -315,11 +324,7 @@ def main():
     docker("image", "inspect", args.client_image)
     output = docker("run", "--rm", "--pull=never", "--network", "none",
                     "--entrypoint", "caddy", info["Id"], "build-info")
-    require(re.search(r"^go\s+go1[.]26[.]10$", output, re.M), "Unexpected Go version")
-    require(re.search(r"^dep\s+golang.org/x/net\s+v0[.]62[.]0\s", output, re.M),
-            "Unexpected x/net version")
-    require(re.search(r"^dep\s+github.com/go-chi/chi/v5\s+v5[.]4[.]0\s",output,re.M), "Unexpected chi version")
-    require(re.search(r"^dep\s+github.com/go-jose/go-jose/v4\s+v4[.]1[.]6\s",output,re.M), "Unexpected JOSE v4 version")
+    check_build_info(output)
     with tempfile.TemporaryDirectory(prefix="score-it-caddy-runtime-") as temp:
         directory = Path(temp)
         path = directory / "caddy.tar"

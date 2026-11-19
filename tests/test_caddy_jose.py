@@ -34,7 +34,8 @@ class CaddyJOSETests(unittest.TestCase):
         with self.assertRaises(RuntimeError):self.check()
 
     def test_missing_partial_or_changed_source_controls_stop(self):
-        for change in (lambda p:p['native_tests'].__setitem__('negative_controls',3),
+        for change in (lambda p:p['native_tests'].__setitem__('go','go1.26.10'),
+                       lambda p:p['native_tests'].__setitem__('negative_controls',3),
                        lambda p:p['native_tests'].__setitem__('probe_cases',64),
                        lambda p:p['native_tests']['dos_probes']['v3'].__setitem__('cbc',14),
                        lambda p:p['native_tests']['dos_probes']['vendor'].__setitem__('json',33),
@@ -74,7 +75,7 @@ class CaddyJOSETests(unittest.TestCase):
         self.report['Metadata']['ImageID']='sha256:'+'b'*64
         with self.assertRaises(RuntimeError):self.check()
         self.report['Metadata']['ImageID']=self.identity
-        for cve in ('CVE-2026-78661','CVE-2026-97045','CVE-2026-114437'):
+        for cve in ('CVE-2026-78661','CVE-2026-97045','CVE-2026-114437','CVE-2026-97054'):
             with self.subTest(cve=cve),self.assertRaises(RuntimeError):
                 self.row['VulnerabilityID']=cve;self.row['Severity']='UNKNOWN';self.check()
 

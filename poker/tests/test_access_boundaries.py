@@ -20,6 +20,8 @@ from poker.models import (
 
 @override_settings(DEBUG=False, SECURE_PROXY_SSL_HEADER=("HTTP_X_FORWARDED_PROTO", "https"))
 class AccessBoundaryTests(TestCase):
+    workspace_indices = ("user_settings", "voting_list", "sprint_list", "team_list")
+
     @classmethod
     def setUpTestData(cls):
         cls.owner = get_user_model().objects.create_user("boundary-owner", password="test-owner-password")
@@ -112,9 +114,40 @@ class AccessBoundaryTests(TestCase):
     def test_route_matrix_covers_all_object_management_names(self):
         from poker.urls import urlpatterns
         reads, writes = self.private_routes(self.foreign)
-        public = {'organizer_invitation_accept', 'dashboard', 'project_create', 'room', 'room_join',
-                  'room_resume', 'room_state', 'room_vote', 'room_navigate', 'room_complete'}
-        self.assertEqual({p.name for p in urlpatterns} - public, {name for name, _ in reads + writes})
+        non_object_routes = {'organizer_invitation_accept', 'dashboard', 'project_create', 'room', 'room_join',
+                             'room_resume', 'room_state', 'room_vote', 'room_navigate', 'room_complete',
+                             *self.workspace_indices}
+        self.assertEqual({p.name for p in urlpatterns} - non_object_routes, {name for name, _ in reads + writes})
+
+    def test_workspace_indices_require_an_organizer_login(self):
+        public_url = self.owned["room"].get_public_url()
+        participant = self.participant_client(self.owned["first"])
+        for client in (Client(), participant):
+            for name in self.workspace_indices:
+                url = reverse(f"poker:{name}")
+                with self.subTest(url=url):
+                    response = client.get(url, secure=True)
+                    self.assertRedirects(response, f"{reverse('login')}?next={url}", fetch_redirect_response=False)
+        for client in (participant, self.client):
+            self.assertNotContains(client.get(public_url, secure=True), 'class="workspace-nav"')
+
+    def test_workspace_lists_show_only_own_projects_and_separate_archive(self):
+        for route, key in (("voting_list", "room"), ("sprint_list", "sprint"), ("team_list", "project")):
+            with self.subTest(route=route):
+                url = reverse(f"poker:{route}")
+                own = self.owned[key]
+                foreign = self.foreign[key]
+                listed = self.client.get(url, secure=True)
+                self.assertContains(listed, own.name)
+                self.assertNotContains(listed, foreign.name)
+                if key != "project":
+                    for obj in (own, foreign):
+                        obj.archived_at = timezone.now()
+                        obj.save(update_fields=("archived_at",))
+                    self.assertNotContains(self.client.get(url, secure=True), own.name)
+                    archive = self.client.get(url, {"archive": "1"}, secure=True)
+                    self.assertContains(archive, own.name)
+                    self.assertNotContains(archive, foreign.name)
 
     def test_anonymous_and_participant_sessions_cannot_manage_objects(self):
         anonymous = Client(enforce_csrf_checks=True)
