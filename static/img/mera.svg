@@ -1,4 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 34 34">
-  <rect width="34" height="34" rx="9" fill="#33e771"/>
-  <path fill="#212a34" d="M8.5 25V9h3.3l5.2 7.8L22.2 9h3.3v16h-3.2V14.1L17 22l-5.3-7.9V25z"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="34" height="34" viewBox="0 0 34 34">
+  <defs>
+    <clipPath id="tile">
+      <rect width="34" height="34" rx="9"/>
+    </clipPath>
+  </defs>
+  <g clip-path="url(#tile)">
+    <rect width="34" height="34" fill="#33e771"/>
+    <path fill="#000" d="M1 34V1h7l9 13 9-13h7v33h-7V13L17 26 8 13v21z"/>
+  </g>
 </svg>
