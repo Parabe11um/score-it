@@ -1,0 +1,30 @@
+<details class="card action-card project-action" {% if create_form.errors %}open{% endif %}>
+    <summary>
+        <span><strong>Создать спринт</strong><small>Собрать оценённые задачи</small></span>
+    </summary>
+    <form method="post" action="{% url 'poker:sprint_create' project.pk %}" class="stack-form details-form" data-capacity-source-form>
+        {% csrf_token %}
+        {% for field in create_form %}
+            {% if "_capacity" not in field.name %}
+                <div class="field field--compact">
+                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}
+                    {% if field.help_text %}<small class="help-text">{{ field.help_text }}</small>{% endif %}
+                    {% for error in field.errors %}<div class="form-error">{{ error }}</div>{% endfor %}
+                </div>
+            {% endif %}
+        {% endfor %}
+        <fieldset class="capacity-inputs" data-manual-capacity>
+            <legend>Ёмкость по компетенциям, часы</legend>
+            <p>Укажите доступные часы по типам задач. Неуточнённая разработка сохраняет прежнюю общую ёмкость.</p>
+            {% for field in create_form %}
+                {% if "_capacity" in field.name %}
+                    <div class="capacity-input capacity-input--{{ field.name }}">
+                        <label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}
+                        {% for error in field.errors %}<div class="form-error">{{ error }}</div>{% endfor %}
+                    </div>
+                {% endif %}
+            {% endfor %}
+        </fieldset>
+        <button class="button button--primary" type="submit">Создать спринт</button>
+    </form>
+</details>

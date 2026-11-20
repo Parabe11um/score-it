@@ -1,7 +1,7 @@
 {% extends "poker/workspace.html" %}
 {% block title %}Команда и ёмкость — {{ sprint.name }} — {{ brand_name }}{% endblock %}
 {% block content %}
-<nav class="breadcrumbs"><a href="{{ sprint.project.get_absolute_url }}">{{ sprint.project.name }}</a><span>›</span><a href="{{ sprint.get_absolute_url }}">{{ sprint.name }}</a><span>›</span><span>Команда и ёмкость</span></nav>
+<nav class="breadcrumbs" aria-label="Расположение"><a href="{% url 'poker:project_overview' sprint.project_id %}">{{ sprint.project.name }}</a><span aria-hidden="true">›</span><a href="{% url 'poker:project_sprints' sprint.project_id %}{% if sprint.archived_at %}?archive=1{% endif %}">Спринты</a><span aria-hidden="true">›</span><a href="{{ sprint.get_absolute_url }}">{{ sprint.name }}</a><span>›</span><span>Команда и ёмкость</span></nav>
 <div class="page-heading page-heading--compact">
     <div><span class="eyebrow">{{ sprint.get_status_display }}</span><h1>{{ sprint.name }}</h1><p>Доступность сотрудников и часы для планирования.</p></div>
     <a class="button button--secondary" href="{% url 'poker:sprint_export' sprint.pk %}">Отчёт по ёмкости</a>

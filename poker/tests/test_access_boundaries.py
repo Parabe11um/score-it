@@ -73,7 +73,8 @@ class AccessBoundaryTests(TestCase):
     def private_routes(self, item):
         p, t, r, s = (item[key].pk for key in ('project', 'task', 'room', 'sprint'))
         reads = [
-            ('project_detail', [p]), ('project_team', [p]),
+            ('project_overview', [p]), ('project_detail', [p]), ('project_voting', [p]),
+            ('project_sprints', [p]), ('project_team', [p]),
             ('project_member_edit', [p, item['member'].pk]), ('session_manage', [r]),
             ('session_export_csv', [r]), ('session_export_xlsx', [r]), ('session_state', [r]),
             ('sprint_detail', [s]), ('sprint_team', [s]), ('sprint_export', [s]),
@@ -131,23 +132,46 @@ class AccessBoundaryTests(TestCase):
         for client in (participant, self.client):
             self.assertNotContains(client.get(public_url, secure=True), 'class="workspace-nav"')
 
-    def test_workspace_lists_show_only_own_projects_and_separate_archive(self):
-        for route, key in (("voting_list", "room"), ("sprint_list", "sprint"), ("team_list", "project")):
+    def test_project_lists_show_only_selected_project_and_separate_archive(self):
+        for route, key in (("project_voting", "room"), ("project_sprints", "sprint")):
             with self.subTest(route=route):
-                url = reverse(f"poker:{route}")
+                url = reverse(f"poker:{route}", args=[self.owned["project"].pk])
                 own = self.owned[key]
-                foreign = self.foreign[key]
-                listed = self.client.get(url, secure=True)
-                self.assertContains(listed, own.name)
-                self.assertNotContains(listed, foreign.name)
-                if key != "project":
-                    for obj in (own, foreign):
-                        obj.archived_at = timezone.now()
-                        obj.save(update_fields=("archived_at",))
-                    self.assertNotContains(self.client.get(url, secure=True), own.name)
-                    archive = self.client.get(url, {"archive": "1"}, secure=True)
-                    self.assertContains(archive, own.name)
-                    self.assertNotContains(archive, foreign.name)
+                for archived in (False, True):
+                    listed = self.client.get(url, {"archive": "1"} if archived else {}, secure=True)
+                    self.assertEqual(list(listed.context["page"]), [own])
+                    if not archived:
+                        for obj in (own, self.sibling[key], self.foreign[key]):
+                            obj.archived_at = timezone.now()
+                            obj.save(update_fields=("archived_at",))
+                        self.assertEqual(list(self.client.get(url, secure=True).context["page"]), [])
+
+    def test_project_menu_keeps_selection_and_excludes_other_owners(self):
+        owned = self.owned["project"]
+        sibling = self.sibling["project"]
+        foreign = self.foreign["project"]
+        overview = reverse("poker:project_overview", args=[owned.pk])
+        url = reverse("poker:project_voting", args=[owned.pk])
+        for response in (
+            self.client.get(url, secure=True),
+            self.client.get(self.owned["room"].get_absolute_url(), secure=True),
+            self.client.get(self.owned["sprint"].get_absolute_url(), secure=True),
+        ):
+            self.assertContains(response, f'href="{overview}" aria-current="location"')
+            self.assertContains(response, sibling.name)
+            self.assertNotContains(response, foreign.name)
+
+    def test_old_sprint_list_bookmark_redirects_to_project_selection_or_its_archive(self):
+        url = reverse("poker:sprint_list") + "?archive=1"
+        self.assertRedirects(
+            self.client.get(url, secure=True), reverse("poker:dashboard"),
+            fetch_redirect_response=False,
+        )
+        self.client.force_login(self.other)
+        archive = reverse("poker:project_sprints", args=[self.foreign["project"].pk]) + "?archive=1"
+        self.assertRedirects(
+            self.client.get(url, secure=True), archive, fetch_redirect_response=False,
+        )
 
     def test_anonymous_and_participant_sessions_cannot_manage_objects(self):
         anonymous = Client(enforce_csrf_checks=True)

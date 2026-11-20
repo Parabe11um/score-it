@@ -1,0 +1,50 @@
+{% extends "poker/project_workspace.html" %}
+
+{% block project_content %}
+<div class="workspace-metrics">
+    <a class="workspace-metric" href="{{ project.get_absolute_url }}?tasks=unestimated">
+        <span>Задачи без оценки</span><strong>{{ unestimated_task_count }}</strong>
+    </a>
+    <a class="workspace-metric" href="{% url 'poker:project_voting' project.pk %}">
+        <span>Активные голосования</span><strong>{{ active_room_count }}</strong>
+    </a>
+    <a class="workspace-metric" href="{% url 'poker:project_sprints' project.pk %}">
+        <span>Активные спринты</span><strong>{{ active_sprint_count }}</strong>
+    </a>
+</div>
+
+{% if active_rooms or active_sprints %}
+<div class="dashboard-overview">
+    {% if active_rooms %}
+    <section class="card overview-card">
+        <h2>Голосования в работе</h2>
+        <div class="overview-list">
+            {% for room in active_rooms %}
+                <a class="overview-item" href="{{ room.get_absolute_url }}">
+                    <strong>{{ room.name }}</strong>
+                    <span>Готово {{ room.queue_completed }} из {{ room.queue_total }}</span>
+                </a>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+    {% if active_sprints %}
+    <section class="card overview-card">
+        <h2>Спринты в работе</h2>
+        <div class="overview-list">
+            {% for sprint in active_sprints %}
+                <a class="overview-item" href="{{ sprint.get_absolute_url }}">
+                    <strong>{{ sprint.name }}</strong>
+                    {% if sprint.end_date %}
+                        <span{% if sprint.end_date < today %} class="text-danger"{% endif %}>до {{ sprint.end_date|date:"d.m.Y" }}</span>
+                    {% endif %}
+                </a>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+</div>
+{% else %}
+    <div class="card workspace-index"><p class="workspace-index__empty">Активных голосований и спринтов пока нет.</p></div>
+{% endif %}
+{% endblock %}

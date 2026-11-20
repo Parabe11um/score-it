@@ -83,7 +83,7 @@ class OrganizerInvitationTests(TestCase):
             reverse("poker:project_create"), {"name": "Свой проект"}
         )
         created_project = Project.objects.get(name="Свой проект")
-        self.assertRedirects(response, created_project.get_absolute_url())
+        self.assertRedirects(response, reverse("poker:project_overview", args=[created_project.pk]))
         self.assertEqual(created_project.owner, organizer)
 
         response = client.get(reverse("poker:dashboard"))

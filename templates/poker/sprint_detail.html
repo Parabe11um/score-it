@@ -4,7 +4,7 @@
 {% block title %}{{ sprint.name }} — {{ brand_name }}{% endblock %}
 
 {% block content %}
-<nav class="breadcrumbs"><a href="{{ sprint.project.get_absolute_url }}">{{ sprint.project.name }}</a><span>›</span><span>{{ sprint.name }}</span></nav>
+<nav class="breadcrumbs" aria-label="Расположение"><a href="{% url 'poker:project_overview' sprint.project_id %}">{{ sprint.project.name }}</a><span aria-hidden="true">›</span><a href="{% url 'poker:project_sprints' sprint.project_id %}{% if sprint.archived_at %}?archive=1{% endif %}">Спринты</a><span aria-hidden="true">›</span><span>{{ sprint.name }}</span></nav>
 <div class="page-heading page-heading--compact">
     <div><span class="eyebrow">ПЛАНИРОВАНИЕ СПРИНТА</span><h1>{{ sprint.name }}</h1><p>{{ sprint.get_status_display }}{% if sprint.archived_at %} · В архиве{% endif %}{% if sprint.start_date %} · {{ sprint.start_date|date:"d.m.Y" }}{% endif %}{% if sprint.end_date %} — {{ sprint.end_date|date:"d.m.Y" }}{% endif %}{% if sprint.goal %} · {{ sprint.goal }}{% endif %}</p></div>
     <div class="page-heading__actions">

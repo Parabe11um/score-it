@@ -13,6 +13,7 @@ class RoomPickerTests(TestCase):
     def setUp(self):
         self.owner = get_user_model().objects.create_user('picker-owner')
         self.project = Project.objects.create(owner=self.owner, name='Picker')
+        self.voting_url = reverse('poker:project_voting', args=[self.project.pk])
         self.client.force_login(self.owner)
         self.ready = self.task('READY', competency='analysis')
         self.estimated = self.task('ESTIMATED', status='estimated', imported_estimate=12)
@@ -50,7 +51,7 @@ class RoomPickerTests(TestCase):
         self.assertEqual(list(self.room.queue_items.values_list('task_id', flat=True)), [self.ready.pk])
 
     def test_stale_form_is_revalidated_after_task_gets_an_estimate(self):
-        self.client.get(self.project.get_absolute_url())
+        self.client.get(self.voting_url)
         self.ready.status = 'estimated'
         self.ready.estimate_sum = 12
         self.ready.estimate_count = 1
@@ -59,7 +60,9 @@ class RoomPickerTests(TestCase):
         self.assertEqual(response.status_code, 400)
 
     def test_competency_values_render_and_backlog_filter_does_not_disable_room_creation(self):
-        response = self.client.get(self.project.get_absolute_url(), {'competency': 'testing'})
+        backlog = self.client.get(self.project.get_absolute_url(), {'competency': 'testing'})
+        self.assertNotContains(backlog, 'data-task-visible-selection')
+        response = self.client.get(self.voting_url)
         content = response.content.decode().split('data-task-visible-selection>', 1)[1].split('</form>', 1)[0]
         self.assertIn('data-competency="analysis"', content)
         self.assertIn('<option value="development_abs">', content)
@@ -71,6 +74,6 @@ class RoomPickerTests(TestCase):
 
     def test_empty_candidate_list_explains_why_and_disables_submit(self):
         self.ready.delete()
-        response = self.client.get(self.project.get_absolute_url())
+        response = self.client.get(self.voting_url)
         self.assertContains(response, 'Нет неоценённых задач, доступных для оценки.')
         self.assertContains(response, 'data-task-submit disabled')
