@@ -98,11 +98,11 @@ class OrganizerViewsTests(TestCase):
         response = self.client.get(self.project.get_absolute_url())
         self.assertEqual(response.status_code, 404)
 
-    def test_project_page_offers_bulk_queue_and_minimum_votes(self):
+    def test_project_voting_offers_bulk_queue_and_minimum_votes(self):
         Task.objects.create(project=self.project, number="ABS-1", title="Первая")
         self.client.force_login(self.user)
 
-        response = self.client.get(self.project.get_absolute_url())
+        response = self.client.get(reverse("poker:project_voting", args=[self.project.pk]))
 
         self.assertContains(response, "Создать комнату с очередью")
         self.assertContains(response, "Минимум голосов")
@@ -324,15 +324,15 @@ class OrganizerViewsTests(TestCase):
         )
         self.client.force_login(self.user)
 
-        self.client.post(reverse("poker:session_archive", args=[voting_session.pk]))
+        url = reverse("poker:project_voting", args=[self.project.pk])
+        response = self.client.post(reverse("poker:session_archive", args=[voting_session.pk]))
+        self.assertRedirects(response, url)
         voting_session.refresh_from_db()
         self.assertIsNotNone(voting_session.archived_at)
-        active_page = self.client.get(self.project.get_absolute_url())
-        self.assertNotIn(voting_session, list(active_page.context["sessions"]))
-        archive_page = self.client.get(
-            self.project.get_absolute_url(), {"archive": "1"}
-        )
-        self.assertIn(voting_session, list(archive_page.context["sessions"]))
+        active_page = self.client.get(url)
+        self.assertNotIn(voting_session, list(active_page.context["page"]))
+        archive_page = self.client.get(url, {"archive": "1"})
+        self.assertIn(voting_session, list(archive_page.context["page"]))
 
         self.client.post(reverse("poker:session_restore", args=[voting_session.pk]))
         voting_session.refresh_from_db()
@@ -341,8 +341,8 @@ class OrganizerViewsTests(TestCase):
         self.client.post(reverse("poker:session_delete", args=[voting_session.pk]))
         self.assertFalse(VotingSession.objects.filter(pk=voting_session.pk).exists())
 
-    def test_dashboard_summarizes_active_work(self):
-        new_task = Task.objects.create(
+    def test_project_overview_summarizes_only_selected_project(self):
+        Task.objects.create(
             project=self.project, number="ABS-1", title="Новая задача"
         )
         active_room = VotingSession.objects.create(
@@ -350,12 +350,6 @@ class OrganizerViewsTests(TestCase):
             name="Активная оценка",
             status=VotingSession.Status.ACTIVE,
         )
-        Participant.objects.create(
-            session=active_room,
-            name="Анна",
-            completed_at=timezone.now(),
-        )
-        Participant.objects.create(session=active_room, name="Борис")
         active_sprint = Sprint.objects.create(
             project=self.project,
             name="Текущий спринт",
@@ -364,17 +358,27 @@ class OrganizerViewsTests(TestCase):
             capacity=20,
         )
         self.client.force_login(self.user)
+        sibling = Project.objects.create(owner=self.user, name="Другой проект")
+        Task.objects.create(project=sibling, number="OTHER-1", title="Чужой бэклог")
+        VotingSession.objects.create(
+            project=sibling, name="Другое голосование", status=VotingSession.Status.ACTIVE,
+        )
+        Sprint.objects.create(project=sibling, name="Другой спринт", status=Sprint.Status.ACTIVE)
 
-        response = self.client.get(reverse("poker:dashboard"))
+        dashboard = self.client.get(reverse("poker:dashboard"))
+        self.assertContains(dashboard, self.project.name)
+        self.assertNotContains(dashboard, active_room.name)
+        self.assertNotContains(dashboard, active_sprint.name)
 
+        response = self.client.get(reverse("poker:project_overview", args=[self.project.pk]))
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.context["new_task_count"], 1)
         self.assertEqual(response.context["unestimated_task_count"], 1)
-        self.assertEqual(response.context["incomplete_participant_count"], 1)
-        self.assertEqual(list(response.context["active_rooms"]), [active_room])
-        self.assertEqual(list(response.context["active_sprints"]), [active_sprint])
-        self.assertContains(response, "Активная оценка")
-        self.assertContains(response, "Текущий спринт")
+        self.assertEqual(response.context["active_room_count"], 1)
+        self.assertEqual(response.context["active_sprint_count"], 1)
+        self.assertContains(response, active_room.name)
+        self.assertContains(response, active_sprint.name)
+        self.assertNotContains(response, "Другое голосование")
+        self.assertNotContains(response, "Другой спринт")
 
 
 class VotingFlowTests(TestCase):
@@ -1409,16 +1413,16 @@ class SprintTests(TestCase):
             reverse("poker:sprint_set_status", args=[self.sprint.pk]),
             {"status": Sprint.Status.COMPLETED},
         )
-        self.client.post(reverse("poker:sprint_archive", args=[self.sprint.pk]))
+        url = reverse("poker:project_sprints", args=[self.project.pk])
+        response = self.client.post(reverse("poker:sprint_archive", args=[self.sprint.pk]))
         self.sprint.refresh_from_db()
         self.assertEqual(self.sprint.status, Sprint.Status.COMPLETED)
         self.assertIsNotNone(self.sprint.archived_at)
-        active_page = self.client.get(self.project.get_absolute_url())
-        self.assertNotIn(self.sprint, list(active_page.context["sprints"]))
-        archive_page = self.client.get(
-            self.project.get_absolute_url(), {"archive": "1"}
-        )
-        self.assertIn(self.sprint, list(archive_page.context["sprints"]))
+        self.assertRedirects(response, url)
+        active_page = self.client.get(url)
+        self.assertNotIn(self.sprint, list(active_page.context["page"]))
+        archive_page = self.client.get(url, {"archive": "1"})
+        self.assertIn(self.sprint, list(archive_page.context["page"]))
 
         self.client.post(reverse("poker:sprint_restore", args=[self.sprint.pk]))
         self.sprint.refresh_from_db()

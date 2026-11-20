@@ -104,7 +104,11 @@ async function main() {
         const importPath = `/projects/${fixture.project}/tasks/import/file/`;
         const importForm = owner.locator(`form[action="${importPath}"]`);
         await check('native_malformed_xlsx_returns_a_form_error', async () => {
-            await owner.goto(base + `/projects/${fixture.project}/`);
+            await owner.locator(`.project-list a[href="/projects/${fixture.project}/overview/"]`).click();
+            const sections = owner.getByRole('navigation', {name: 'Разделы проекта'});
+            await sections.getByRole('link', {name: 'Задачи', exact: true}).click();
+            await expect(owner).toHaveURL(base + `/projects/${fixture.project}/`);
+            await owner.locator('details.project-action:not([open]) > summary').click();
             await importForm.locator('[name=task_file]').setInputFiles({name: 'synthetic.xlsx',
                 mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: Buffer.from('PK-bad')});
             const rejected = owner.waitForResponse(response => response.request().method() === 'POST'
@@ -139,7 +143,9 @@ async function main() {
 
         let publicUrl, roomId;
         await check('native_create_voting_room', async () => {
-            await owner.goto(base + `/projects/${fixture.project}/`);
+            await owner.getByRole('navigation', {name: 'Разделы проекта'})
+                .getByRole('link', {name: 'Голосования', exact: true}).click();
+            await expect(owner).toHaveURL(base + `/projects/${fixture.project}/sessions/`);
             const form = owner.locator(`form[action="/projects/${fixture.project}/sessions/new/"]`);
             await form.locator('xpath=..').locator('summary').click();
             await form.locator('[name=name]').fill(fixture.room_name);

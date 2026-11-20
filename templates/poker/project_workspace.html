@@ -1,0 +1,12 @@
+{% extends "poker/workspace.html" %}
+
+{% block title %}{{ project.name }} — {{ brand_name }}{% endblock %}
+
+{% block content %}
+<nav class="breadcrumbs" aria-label="Список проектов">
+    <a href="{% url 'poker:dashboard' %}"><span aria-hidden="true">←</span> Все проекты</a>
+</nav>
+<div class="page-heading page-heading--compact project-heading"><h1>{{ project.name }}</h1></div>
+{% include "poker/project_nav.html" %}
+{% block project_content %}{% endblock %}
+{% endblock %}

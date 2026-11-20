@@ -1,6 +1,7 @@
 <nav class="workspace-tabs" aria-label="Разделы проекта">
-    <a href="{{ project.get_absolute_url }}#tasks" {% if active == "tasks" %}aria-current="page"{% endif %}>Задачи</a>
-    <a href="{% url 'poker:project_team' project.pk %}" {% if active == "team" %}aria-current="page"{% endif %}>Команда</a>
-    <a href="{{ project.get_absolute_url }}#rooms">Комнаты оценки</a>
-    <a href="{{ project.get_absolute_url }}#sprints">Спринты</a>
+    <a href="{% url 'poker:project_overview' project.pk %}"{% if project_section == "overview" %} aria-current="page"{% endif %}>Обзор</a>
+    <a href="{{ project.get_absolute_url }}"{% if project_section == "tasks" %} aria-current="page"{% endif %}>Задачи</a>
+    <a href="{% url 'poker:project_voting' project.pk %}"{% if project_section == "voting" %} aria-current="page"{% endif %}>Голосования</a>
+    <a href="{% url 'poker:project_sprints' project.pk %}"{% if project_section == "sprints" %} aria-current="page"{% endif %}>Спринты</a>
+    <a href="{% url 'poker:project_team' project.pk %}"{% if project_section == "team" %} aria-current="page"{% endif %}>Команда</a>
 </nav>

@@ -1,19 +1,22 @@
-{% extends "poker/workspace.html" %}
+{% extends "poker/project_workspace.html" %}
+{% load static %}
 
-{% block title %}{{ heading }} — {{ brand_name }}{% endblock %}
+{% block title %}{{ heading }} — {{ block.super }}{% endblock %}
 
-{% block content %}
-<div class="page-heading">
-    <div>
-        <h1>{{ heading }}</h1>
-        <p>{{ description }}</p>
-    </div>
-    <a class="button button--secondary" href="{% url 'poker:dashboard' %}">К проектам</a>
-</div>
+{% block project_content %}
+<h2 class="visually-hidden">{{ heading }}</h2>
+{% if create_form %}
+    {% if project_section == "voting" %}
+        {% include 'poker/project_voting_form.html' %}
+    {% else %}
+        {% include 'poker/project_sprint_form.html' %}
+    {% endif %}
+{% endif %}
 
+{% url list_route project.pk as list_url %}
 <nav class="workspace-filters" aria-label="Архив">
-    <a class="filter-chip{% if not archived %} filter-chip--active{% endif %}" href="{% url list_route %}"{% if not archived %} aria-current="page"{% endif %}>Вне архива</a>
-    <a class="filter-chip{% if archived %} filter-chip--active{% endif %}" href="{% url list_route %}?archive=1"{% if archived %} aria-current="page"{% endif %}>Архив</a>
+    <a class="filter-chip{% if not archived %} filter-chip--active{% endif %}" href="{{ list_url }}"{% if not archived %} aria-current="page"{% endif %}>Вне архива</a>
+    <a class="filter-chip{% if archived %} filter-chip--active{% endif %}" href="{{ list_url }}?archive=1"{% if archived %} aria-current="page"{% endif %}>Архив</a>
 </nav>
 
 <div class="card workspace-index">
@@ -24,13 +27,11 @@
                     <a class="workspace-list__link" href="{{ item.get_absolute_url }}">
                         <span class="workspace-list__body">
                             <strong>{{ item.name }}</strong>
-                            <small>{{ item.project.name }}
-                                {% if show_dates %}
-                                    {% if item.start_date and item.end_date %} · {{ item.start_date|date:"d.m.Y" }} — {{ item.end_date|date:"d.m.Y" }}
-                                    {% elif item.start_date %} · с {{ item.start_date|date:"d.m.Y" }}
-                                    {% elif item.end_date %} · до {{ item.end_date|date:"d.m.Y" }}{% endif %}
-                                {% else %} · {{ item.created_at|date:"d.m.Y" }}{% endif %}
-                            </small>
+                            {% if project_section == "sprints" %}
+                                {% if item.start_date and item.end_date %}<small>{{ item.start_date|date:"d.m.Y" }} — {{ item.end_date|date:"d.m.Y" }}</small>
+                                {% elif item.start_date %}<small>с {{ item.start_date|date:"d.m.Y" }}</small>
+                                {% elif item.end_date %}<small>до {{ item.end_date|date:"d.m.Y" }}</small>{% endif %}
+                            {% else %}<small>{{ item.created_at|date:"d.m.Y" }}</small>{% endif %}
                         </span>
                         <span class="pill">{{ item.get_status_display }}</span>
                         <span class="workspace-list__arrow" aria-hidden="true">›</span>
@@ -43,4 +44,14 @@
         <p class="workspace-index__empty">{% if archived %}Архив пока пуст.{% else %}{{ empty_message }}{% endif %}</p>
     {% endif %}
 </div>
+{% endblock %}
+
+{% block scripts %}
+{% if create_form %}
+    {% if project_section == "voting" %}
+        <script src="{% static 'js/task-picker.js' %}" defer></script>
+    {% else %}
+        <script src="{% static 'js/capacity-source.js' %}" defer></script>
+    {% endif %}
+{% endif %}
 {% endblock %}

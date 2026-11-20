@@ -23,7 +23,8 @@ def project_team(request, pk, member_pk=None):
         messages.success(request, "Сотрудник сохранён. Параметры существующих спринтов не изменились.")
         return redirect("poker:project_team", pk=project.pk)
     return render(request, "poker/project_team.html", {
-        "project": project, "members": project.members.all(), "member": member, "member_form": form,
+        "project": project, "project_section": "team",
+        "members": project.members.all(), "member": member, "member_form": form,
     }, status=400 if request.method == "POST" else 200)
 
 

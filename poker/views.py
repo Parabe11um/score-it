@@ -46,6 +46,7 @@ from .import_process import bounded_import_view
 from .sprint_import import available_sprint_tasks, save_sprint_import
 from .team import add_project_members
 from .eva_readiness import EvaReadiness, unestimated_tasks
+from .workspace_views import project_sprints_response, project_voting_response
 
 
 def _format_decimal(value):
@@ -506,11 +507,8 @@ def _project_detail_context(
     *,
     task_filter="all",
     competency_filter="all",
-    show_archived=False,
     task_import_form=None,
     task_file_import_form=None,
-    session_form=None,
-    sprint_form=None,
 ):
     task_filter_labels = (
         ("all", "Все"),
@@ -580,16 +578,11 @@ def _project_detail_context(
     for task in filtered_tasks:
         task.eva_readiness = readiness.check(task)
 
-    sessions = project.voting_sessions.select_related("current_task").filter(
-        archived_at__isnull=not show_archived
-    )
-    sprints = project.sprints.filter(
-        archived_at__isnull=not show_archived
-    )
     return {
         "project": project,
+        "project_section": "tasks",
         "tasks": filtered_tasks,
-        "task_total": project.tasks.count(),
+        "task_total": filter_counts["all"],
         "task_filter": task_filter,
         "task_filters": [
             {"value": value, "label": label, "count": filter_counts[value]}
@@ -605,102 +598,17 @@ def _project_detail_context(
             for value, label in competency_filter_labels
         ],
         "competency_choices": Task.Competency.choices,
-        "sessions": sessions,
-        "session_total": project.voting_sessions.count(),
-        "sprints": sprints,
-        "sprint_total": project.sprints.count(),
-        "show_archived": show_archived,
-        "archived_total": (
-            project.voting_sessions.filter(archived_at__isnull=False).count()
-            + project.sprints.filter(archived_at__isnull=False).count()
-        ),
         "task_import_form": task_import_form or BulkTaskImportForm(),
         "task_file_import_form": task_file_import_form or TaskFileImportForm(),
-        "session_form": session_form or VotingSessionForm(project=project),
-        "sprint_form": sprint_form or SprintForm(project=project),
     }
 
 
 def _dashboard_context(user, project_form=None):
-    projects = list(
-        Project.objects.filter(owner=user)
-        .prefetch_related("tasks", "voting_sessions", "sprints")
-        .order_by("-updated_at")
-    )
-    active_rooms = list(
-        VotingSession.objects.filter(
-            project__owner=user,
-            status=VotingSession.Status.ACTIVE,
-            archived_at__isnull=True,
-        )
-        .select_related("project")
-        .annotate(
-            participant_count=Count("participants", distinct=True),
-            completed_participant_count=Count(
-                "participants",
-                filter=Q(participants__completed_at__isnull=False),
-                distinct=True,
-            ),
-            queue_total=Count("queue_items", distinct=True),
-            queue_completed=Count(
-                "queue_items",
-                filter=Q(queue_items__status=VotingSessionTask.Status.COMPLETED),
-                distinct=True,
-            ),
-        )
-        .order_by("-created_at")
-    )
-    for voting_session in active_rooms:
-        voting_session.incomplete_participant_count = (
-            voting_session.participant_count
-            - voting_session.completed_participant_count
-        )
-
-    active_sprints = list(
-        Sprint.objects.filter(
-            project__owner=user,
-            status=Sprint.Status.ACTIVE,
-            archived_at__isnull=True,
-        )
-        .select_related("project")
-        .order_by("end_date", "-created_at")
-    )
-    upcoming_sprints = list(
-        Sprint.objects.filter(
-            project__owner=user,
-            status__in=(Sprint.Status.PLANNING, Sprint.Status.ACTIVE),
-            archived_at__isnull=True,
-            end_date__isnull=False,
-        )
-        .select_related("project")
-        .order_by("end_date")[:5]
-    )
-    unestimated_tasks = Task.objects.filter(
-        project__owner=user,
-        completed_at__isnull=True,
-        status=Task.Status.UNESTIMATED,
-    )
-    new_task_count = (
-        unestimated_tasks.annotate(
-            has_voting_history=Exists(
-                VotingSessionTask.objects.filter(task_id=OuterRef("pk"))
-            )
-        )
-        .filter(has_voting_history=False)
-        .count()
-    )
     return {
-        "projects": projects,
+        "projects": Project.objects.filter(owner=user)
+        .annotate(task_count=Count("tasks"))
+        .order_by("name", "pk"),
         "project_form": project_form or ProjectForm(),
-        "active_rooms": active_rooms,
-        "active_sprints": active_sprints,
-        "upcoming_sprints": upcoming_sprints,
-        "incomplete_participant_count": sum(
-            item.incomplete_participant_count for item in active_rooms
-        ),
-        "new_task_count": new_task_count,
-        "unestimated_task_count": unestimated_tasks.count(),
-        "today": timezone.localdate(),
     }
 
 
@@ -766,7 +674,7 @@ def project_create(request):
         project.owner = request.user
         project.save()
         messages.success(request, f"Проект «{project.name}» создан.")
-        return redirect(project)
+        return redirect("poker:project_overview", pk=project.pk)
 
     return render(
         request,
@@ -779,6 +687,8 @@ def project_create(request):
 @login_required
 def project_detail(request, pk):
     project = _project_for_user(request.user, pk)
+    if request.GET.get("archive") == "1":
+        return redirect(reverse("poker:project_voting", args=[pk]) + "?archive=1")
     return render(
         request,
         "poker/project_detail.html",
@@ -786,7 +696,6 @@ def project_detail(request, pk):
             project,
             task_filter=request.GET.get("tasks", "all"),
             competency_filter=request.GET.get("competency", "all"),
-            show_archived=request.GET.get("archive") == "1",
         ),
     )
 
@@ -954,12 +863,7 @@ def session_create(request, pk):
         )
         return redirect(voting_session)
     messages.error(request, "Не удалось создать комнату: проверьте параметры.")
-    return render(
-        request,
-        "poker/project_detail.html",
-        _project_detail_context(project, session_form=form),
-        status=400,
-    )
+    return project_voting_response(request, project, form=form)
 
 
 @login_required
@@ -1354,7 +1258,7 @@ def session_archive(request, pk):
         voting_session.archived_at = timezone.now()
         voting_session.save(update_fields=("archived_at",))
         messages.success(request, f"Комната «{voting_session.name}» перемещена в архив.")
-    return redirect(voting_session.project)
+    return redirect("poker:project_voting", pk=voting_session.project_id)
 
 
 @login_required
@@ -1372,11 +1276,11 @@ def session_restore(request, pk):
 @require_POST
 def session_delete(request, pk):
     voting_session = _session_for_user(request.user, pk)
-    project = voting_session.project
+    project_id = voting_session.project_id
     session_name = voting_session.name
     voting_session.delete()
     messages.success(request, f"Комната «{session_name}» удалена.")
-    return redirect(project)
+    return redirect("poker:project_voting", pk=project_id)
 
 
 @login_required
@@ -1817,12 +1721,7 @@ def sprint_create(request, pk):
         messages.success(request, f"Спринт «{sprint.name}» создан.")
         return redirect(sprint)
     messages.error(request, "Не удалось создать спринт: проверьте параметры.")
-    return render(
-        request,
-        "poker/project_detail.html",
-        _project_detail_context(project, sprint_form=form),
-        status=400,
-    )
+    return project_sprints_response(request, project, form=form)
 
 
 @login_required
@@ -1995,7 +1894,7 @@ def sprint_archive(request, pk):
         sprint.archived_at = timezone.now()
         sprint.save(update_fields=("archived_at",))
         messages.success(request, f"Спринт «{sprint.name}» перемещён в архив.")
-    return redirect(sprint.project)
+    return redirect("poker:project_sprints", pk=sprint.project_id)
 
 
 @login_required
@@ -2013,11 +1912,11 @@ def sprint_restore(request, pk):
 @require_POST
 def sprint_delete(request, pk):
     sprint = _sprint_for_user(request.user, pk)
-    project = sprint.project
+    project_id = sprint.project_id
     sprint_name = sprint.name
     sprint.delete()
     messages.success(request, f"Спринт «{sprint_name}» удалён.")
-    return redirect(project)
+    return redirect("poker:project_sprints", pk=project_id)
 
 
 @login_required

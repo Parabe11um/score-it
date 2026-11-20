@@ -4,7 +4,7 @@
 {% block title %}{{ voting_session.name }} — {{ brand_name }}{% endblock %}
 
 {% block content %}
-<nav class="breadcrumbs"><a href="{{ voting_session.project.get_absolute_url }}">{{ voting_session.project.name }}</a><span>›</span><span>{{ voting_session.name }}</span></nav>
+<nav class="breadcrumbs" aria-label="Расположение"><a href="{% url 'poker:project_overview' voting_session.project_id %}">{{ voting_session.project.name }}</a><span aria-hidden="true">›</span><a href="{% url 'poker:project_voting' voting_session.project_id %}{% if voting_session.archived_at %}?archive=1{% endif %}">Голосования</a><span aria-hidden="true">›</span><span>{{ voting_session.name }}</span></nav>
 
 <div class="page-heading page-heading--compact">
     <div>

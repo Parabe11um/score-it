@@ -3,94 +3,34 @@
 {% block title %}Проекты — {{ brand_name }}{% endblock %}
 
 {% block content %}
-<div class="page-heading">
-    <div>
-        <span class="eyebrow">РАБОЧЕЕ ПРОСТРАНСТВО</span>
-        <h1>Проекты</h1>
-        <p>Соберите задачи, проведите оценку и сформируйте спринт.</p>
+<div class="project-index-header">
+    <div class="page-heading page-heading--compact">
+        <div>
+            <h1>Проекты</h1>
+            <p>{% if projects %}Выберите проект, чтобы продолжить работу.{% else %}Создайте первый проект, чтобы загрузить задачи.{% endif %}</p>
+        </div>
     </div>
-</div>
-
-<div class="workspace-metrics">
-    <div class="workspace-metric"><span>Активные комнаты</span><strong>{{ active_rooms|length }}</strong></div>
-    <div class="workspace-metric"><span>Не завершили оценку</span><strong>{{ incomplete_participant_count }}</strong></div>
-    <div class="workspace-metric"><span>Активные спринты</span><strong>{{ active_sprints|length }}</strong></div>
-    <div class="workspace-metric"><span>Новые задачи</span><strong>{{ new_task_count }}</strong></div>
-    <div class="workspace-metric"><span>Не оценены</span><strong>{{ unestimated_task_count }}</strong></div>
-</div>
-
-<div class="dashboard-overview">
-    <section class="card overview-card">
-        <div class="section-heading"><div><h2>Активные комнаты</h2><p>Текущая оценка команд.</p></div><span class="pill">{{ active_rooms|length }}</span></div>
-        <div class="overview-list">
-            {% for room in active_rooms %}
-                <a class="overview-item" href="{{ room.get_absolute_url }}"><div><strong>{{ room.name }}</strong><small>{{ room.project.name }} · {{ room.queue_completed }} из {{ room.queue_total }} задач</small></div><span>{% if room.incomplete_participant_count %}Не завершили: {{ room.incomplete_participant_count }}{% else %}Все завершили{% endif %}</span></a>
-            {% empty %}<div class="compact-empty">Активных комнат нет.</div>{% endfor %}
-        </div>
-    </section>
-
-    <section class="card overview-card">
-        <div class="section-heading"><div><h2>Активные спринты</h2><p>Текущий план и ёмкость.</p></div><span class="pill">{{ active_sprints|length }}</span></div>
-        <div class="overview-list">
-            {% for sprint in active_sprints %}
-                <a class="overview-item" href="{{ sprint.get_absolute_url }}"><div><strong>{{ sprint.name }}</strong><small>{{ sprint.project.name }} · {{ sprint.active_task_count }} задач</small></div><span>{% if sprint.has_capacity %}{{ sprint.total_estimate_display }} из {{ sprint.capacity_total_display }} ч{% else %}{{ sprint.total_estimate_display }} ч{% endif %}</span></a>
-            {% empty %}<div class="compact-empty">Активных спринтов нет.</div>{% endfor %}
-        </div>
-    </section>
-
-    <section class="card overview-card">
-        <div class="section-heading"><div><h2>Ближайшие завершения</h2><p>Планируемые и активные спринты.</p></div></div>
-        <div class="overview-list">
-            {% for sprint in upcoming_sprints %}
-                <a class="overview-item" href="{{ sprint.get_absolute_url }}"><div><strong>{{ sprint.name }}</strong><small>{{ sprint.project.name }} · {{ sprint.get_status_display }}</small></div><span class="{% if sprint.end_date < today %}text-danger{% endif %}">{{ sprint.end_date|date:"d.m.Y" }}</span></a>
-            {% empty %}<div class="compact-empty">Даты завершения не заданы.</div>{% endfor %}
-        </div>
-    </section>
-</div>
-
-<div class="dashboard-grid">
-    <section class="card">
-        <div class="section-heading">
-            <div>
-                <h2>Новый проект</h2>
-                <p>Проект объединяет задачи, комнаты и спринты.</p>
-            </div>
-        </div>
-        <form method="post" action="{% url 'poker:project_create' %}" class="stack-form">
+    <details class="project-create"{% if not projects or project_form.errors %} open{% endif %}>
+        <summary class="button button--primary"><span aria-hidden="true">＋</span> Новый проект</summary>
+        <form method="post" action="{% url 'poker:project_create' %}" class="card stack-form project-create__form">
             {% csrf_token %}
-            {% for field in project_form %}
-                <div class="field">
-                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
-                    {{ field }}
-                    {% for error in field.errors %}<div class="form-error">{{ error }}</div>{% endfor %}
-                </div>
-            {% endfor %}
-            <button class="button button--primary" type="submit">Создать проект</button>
+            {% include "poker/form_fields.html" with form=project_form %}
+            <div><button class="button button--primary" type="submit">Создать проект</button></div>
         </form>
-    </section>
-
-    <section class="project-list">
-        {% for project in projects %}
-            <a class="card project-card" href="{{ project.get_absolute_url }}">
-                <div>
-                    <span class="status-dot status-dot--active"></span>
-                    <h2>{{ project.name }}</h2>
-                    <p>Изменён {{ project.updated_at|date:"d.m.Y H:i" }}</p>
-                </div>
-                <div class="metric-row">
-                    <span><strong>{{ project.tasks.count }}</strong> задач</span>
-                    <span><strong>{{ project.voting_sessions.count }}</strong> комнат</span>
-                    <span><strong>{{ project.sprints.count }}</strong> спринтов</span>
-                </div>
-                <span class="project-card__arrow">→</span>
-            </a>
-        {% empty %}
-            <div class="empty-state card">
-                <div class="empty-state__icon">＋</div>
-                <h2>Пока нет проектов</h2>
-                <p>Создайте первый проект, чтобы загрузить задачи.</p>
-            </div>
-        {% endfor %}
-    </section>
+    </details>
 </div>
+
+{% if projects %}
+<div class="project-list">
+    {% for project in projects %}
+        <a class="card project-card" href="{% url 'poker:project_overview' project.pk %}">
+            <div>
+                <h2>{{ project.name }}</h2>
+                <p>Задач: {{ project.task_count }}</p>
+            </div>
+            <span class="project-card__arrow" aria-hidden="true">→</span>
+        </a>
+    {% endfor %}
+</div>
+{% endif %}
 {% endblock %}

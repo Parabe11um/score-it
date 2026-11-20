@@ -1,143 +1,39 @@
-{% extends "poker/workspace.html" %}
-{% load static %}
+{% extends "poker/project_workspace.html" %}
 
-{% block title %}{{ project.name }} — {{ brand_name }}{% endblock %}
+{% block title %}Задачи — {{ block.super }}{% endblock %}
 
-{% block content %}
-<nav class="breadcrumbs"><a href="{% url 'poker:dashboard' %}">Проекты</a><span>›</span><span>{{ project.name }}</span></nav>
-
-<div class="page-heading page-heading--compact">
-    <div>
-        <span class="eyebrow">ПРОЕКТ</span>
-        <h1>{{ project.name }}</h1>
-        <p>{{ task_total }} задач · {{ session_total }} комнат · {{ sprint_total }} спринтов</p>
+{% block project_content %}
+<details class="card action-card project-action"{% if not task_total or task_import_form.errors or task_file_import_form.errors %} open{% endif %}>
+    <summary>
+        <span><strong>Добавить задачи</strong><small>Из файла CSV/XLSX или списком</small></span>
+    </summary>
+    <div class="details-form">
+        {% url 'poker:task_import_file' project.pk as file_import_url %}
+        {% include 'poker/task_file_import_form.html' %}
     </div>
-    {% if show_archived %}
-        <a class="button button--secondary" href="{{ project.get_absolute_url }}">← Вернуться к активным</a>
-    {% elif archived_total %}
-        <a class="button button--secondary" href="?archive=1">Архив · {{ archived_total }}</a>
-    {% endif %}
-</div>
-
-{% include 'poker/project_nav.html' with active='tasks' %}
-<div class="three-column-actions">
-    <details class="card action-card" open>
-        <summary>
-            <span class="action-card__number">1</span>
-            <span><strong>Добавить задачи</strong><small>Из файла CSV/XLSX или списком</small></span>
-        </summary>
-        <div class="details-form">
-            {% url 'poker:task_import_file' project.pk as file_import_url %}
-            {% include 'poker/task_file_import_form.html' %}
-        </div>
-        <details class="text-task-import" {% if task_import_form.errors %}open{% endif %}>
-        <summary>Вставить задачи списком</summary>
-        <form method="post" action="{% url 'poker:task_import' project.pk %}" class="stack-form details-form">
-            {% csrf_token %}
-            <div class="field">
-                <label>{{ task_import_form.competency.label }}</label>
-                <div class="competency-picker">
-                    {% for radio in task_import_form.competency %}
-                        <label class="competency-option competency-option--{{ radio.data.value|default:'none' }}">
-                            {{ radio.tag }}<span>{{ radio.choice_label }}</span>
-                        </label>
-                    {% endfor %}
-                </div>
-                {% for error in task_import_form.competency.errors %}<div class="form-error">{{ error }}</div>{% endfor %}
-                <div class="help-text">{{ task_import_form.competency.help_text }}</div>
-            </div>
-            {{ task_import_form.tasks_text }}
-            {% for error in task_import_form.tasks_text.errors %}<div class="form-error">{{ error }}</div>{% endfor %}
-            <div class="help-text">{{ task_import_form.tasks_text.help_text }}</div>
-            <button class="button button--primary" type="submit">Импортировать задачи</button>
-        </form>
-        </details>
-    </details>
-
-    <details class="card action-card" {% if session_form.errors %}open{% endif %}>
-        <summary>
-            <span class="action-card__number">2</span>
-            <span><strong>Создать голосование</strong><small>Получить ссылку для команды</small></span>
-        </summary>
-        <form method="post" action="{% url 'poker:session_create' project.pk %}" class="stack-form details-form" data-task-picker data-task-visible-selection>
-            {% csrf_token %}
-            <div class="field">
-                <label for="{{ session_form.name.id_for_label }}">Название комнаты</label>
-                {{ session_form.name }}
-                {% for error in session_form.name.errors %}<div class="form-error">{{ error }}</div>{% endfor %}
-            </div>
-            <div class="field">
-                <label for="{{ session_form.minimum_participants.id_for_label }}">Минимум голосов</label>
-                {{ session_form.minimum_participants }}
-                <div class="help-text">Карты нельзя раскрыть, пока не проголосует указанное число участников.</div>
-                {% for error in session_form.minimum_participants.errors %}<div class="form-error">{{ error }}</div>{% endfor %}
-            </div>
-            <div class="field">
-                <div class="picker-heading">
-                    <label>Задачи в очереди</label>
-                    <strong data-task-count>0 выбрано</strong>
-                </div>
-                <label for="room-competency">Компетенция</label>
-                <select id="room-competency" class="form-control" data-task-competency>
-                    <option value="all">Все компетенции</option>
-                    {% for value, label in competency_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
-                </select>
-                <div class="picker-tools">
-                    <input type="search" placeholder="Найти задачу" aria-label="Найти задачу" data-task-search>
-                    <div class="button-row">
-                        <button class="button button--ghost button--small" type="button" data-task-select-all>Выбрать все</button>
-                        <button class="button button--ghost button--small" type="button" data-task-select-none>Снять</button>
-                    </div>
-                </div>
-                <div class="queue-picker" data-task-options>
-                    {% for choice in session_form.task_ids %}
-                        <label class="queue-picker__item" data-task-option data-search-text="{{ choice.choice_label|lower }}" data-competency="{{ choice.data.value.instance.competency }}">
-                            {{ choice.tag }}<span>{{ choice.choice_label }}</span>
-                        </label>
-                    {% empty %}
-                        <div class="compact-empty">Нет неоценённых задач, доступных для оценки. Импортируйте актуальные данные EVA и проверьте готовность аналитики.</div>
-                    {% endfor %}
-                </div>
-                <div class="compact-empty" data-task-empty hidden>По выбранным фильтрам задач нет.</div>
-                {% for error in session_form.task_ids.errors %}<div class="form-error">{{ error }}</div>{% endfor %}
-                <div class="help-text">Только неоценённые задачи, доступные для оценки и не включённые в спринт. В комнату попадут отмеченные задачи, видимые по фильтру. Порядок совпадает с бэклогом.</div>
-            </div>
-            <button class="button button--primary" type="submit" data-task-submit {% if not session_form.task_ids.field.queryset %}disabled{% endif %}>Создать комнату с очередью</button>
-        </form>
-    </details>
-
-    <details class="card action-card" {% if sprint_form.errors %}open{% endif %}>
-        <summary>
-            <span class="action-card__number">3</span>
-            <span><strong>Создать спринт</strong><small>Собрать оценённые задачи</small></span>
-        </summary>
-        <form method="post" action="{% url 'poker:sprint_create' project.pk %}" class="stack-form details-form" data-capacity-source-form>
-            {% csrf_token %}
-            {% for field in sprint_form %}
-                {% if "_capacity" not in field.name %}
-                    <div class="field field--compact">
-                        <label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}
-                        {% if field.help_text %}<small class="help-text">{{ field.help_text }}</small>{% endif %}
-                        {% for error in field.errors %}<div class="form-error">{{ error }}</div>{% endfor %}
-                    </div>
-                {% endif %}
-            {% endfor %}
-            <fieldset class="capacity-inputs" data-manual-capacity>
-                <legend>Ёмкость по компетенциям, часы</legend>
-                <p>Укажите доступные часы по типам задач. Неуточнённая разработка сохраняет прежнюю общую ёмкость.</p>
-                {% for field in sprint_form %}
-                    {% if "_capacity" in field.name %}
-                        <div class="capacity-input capacity-input--{{ field.name }}">
-                            <label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}
-                            {% for error in field.errors %}<div class="form-error">{{ error }}</div>{% endfor %}
-                        </div>
-                    {% endif %}
+    <details class="text-task-import" {% if task_import_form.errors %}open{% endif %}>
+    <summary>Вставить задачи списком</summary>
+    <form method="post" action="{% url 'poker:task_import' project.pk %}" class="stack-form details-form">
+        {% csrf_token %}
+        <div class="field">
+            <label>{{ task_import_form.competency.label }}</label>
+            <div class="competency-picker">
+                {% for radio in task_import_form.competency %}
+                    <label class="competency-option competency-option--{{ radio.data.value|default:'none' }}">
+                        {{ radio.tag }}<span>{{ radio.choice_label }}</span>
+                    </label>
                 {% endfor %}
-            </fieldset>
-            <button class="button button--primary" type="submit">Создать спринт</button>
-        </form>
+            </div>
+            {% for error in task_import_form.competency.errors %}<div class="form-error">{{ error }}</div>{% endfor %}
+            <div class="help-text">{{ task_import_form.competency.help_text }}</div>
+        </div>
+        {{ task_import_form.tasks_text }}
+        {% for error in task_import_form.tasks_text.errors %}<div class="form-error">{{ error }}</div>{% endfor %}
+        <div class="help-text">{{ task_import_form.tasks_text.help_text }}</div>
+        <button class="button button--primary" type="submit">Импортировать задачи</button>
+    </form>
     </details>
-</div>
+</details>
 
 <section class="card section-card" id="tasks">
     <div class="section-heading">
@@ -147,7 +43,7 @@
     <nav class="filter-bar" aria-label="Фильтры задач">
         {% for filter in task_filters %}
             <a class="filter-chip {% if task_filter == filter.value %}filter-chip--active{% endif %}"
-               href="?tasks={{ filter.value }}&amp;competency={{ competency_filter }}{% if show_archived %}&amp;archive=1{% endif %}">
+               href="?tasks={{ filter.value }}&amp;competency={{ competency_filter }}">
                 {{ filter.label }} <span>{{ filter.count }}</span>
             </a>
         {% endfor %}
@@ -155,7 +51,7 @@
     <nav class="filter-bar filter-bar--competency" aria-label="Фильтры по типу задачи">
         {% for filter in competency_filters %}
             <a class="filter-chip competency-filter competency-filter--{{ filter.value }} {% if competency_filter == filter.value %}filter-chip--active{% endif %}"
-               href="?tasks={{ task_filter }}&amp;competency={{ filter.value }}{% if show_archived %}&amp;archive=1{% endif %}">
+               href="?tasks={{ task_filter }}&amp;competency={{ filter.value }}">
                 {{ filter.label }} <span>{{ filter.count }}</span>
             </a>
         {% endfor %}
@@ -170,7 +66,7 @@
                     <td>
                         <div class="task-title-cell">{{ task.title }}</div><small>Квота: {{ task.quota|default:"Не указана" }}</small>
                         {% if task.eva_readiness.message and not task.completed_at %}<p class="help-text">{{ task.eva_readiness.message }}</p>{% endif %}
-                        <form method="post" action="{% url 'poker:task_competency_update' project.pk task.pk %}?tasks={{ task_filter }}&amp;competency={{ competency_filter }}{% if show_archived %}&amp;archive=1{% endif %}" class="task-competency-form">
+                        <form method="post" action="{% url 'poker:task_competency_update' project.pk task.pk %}?tasks={{ task_filter }}&amp;competency={{ competency_filter }}" class="task-competency-form">
                             {% csrf_token %}
                             <label class="visually-hidden" for="task-competency-{{ task.pk }}">Тип задачи {{ task.number }}</label>
                             <select id="task-competency-{{ task.pk }}" name="competency" class="competency-select competency-select--{{ task.competency|default:'none' }}" onchange="this.form.submit()">
@@ -212,31 +108,4 @@
         </table>
     </div>
 </section>
-
-<div class="split-grid">
-    <section class="card section-card" id="rooms">
-        <div class="section-heading"><div><h2>{% if show_archived %}Архивные комнаты{% else %}Комнаты{% endif %}</h2><p>Сессии Planning Poker.</p></div></div>
-        <div class="item-list">
-            {% for item in sessions %}
-                <a class="list-item" href="{{ item.get_absolute_url }}">
-                    <div><strong>{{ item.name }}</strong><small>{% if item.archived_at %}Архив · {% endif %}{{ item.get_status_display }} · {{ item.created_at|date:"d.m.Y H:i" }}</small></div>
-                    <span>→</span>
-                </a>
-            {% empty %}<div class="compact-empty">{% if show_archived %}В архиве комнат нет.{% else %}Комнат пока нет.{% endif %}</div>{% endfor %}
-        </div>
-    </section>
-    <section class="card section-card" id="sprints">
-        <div class="section-heading"><div><h2>{% if show_archived %}Архивные спринты{% else %}Спринты{% endif %}</h2><p>Планы из оценённых задач.</p></div></div>
-        <div class="item-list">
-            {% for sprint in sprints %}
-                <a class="list-item" href="{{ sprint.get_absolute_url }}">
-                    <div><strong>{{ sprint.name }}</strong><small>{% if sprint.archived_at %}Архив · {% endif %}{{ sprint.get_status_display }} · {{ sprint.active_task_count }} задач · {{ sprint.total_estimate_display }} ч</small></div>
-                    <span>→</span>
-                </a>
-            {% empty %}<div class="compact-empty">{% if show_archived %}В архиве спринтов нет.{% else %}Спринтов пока нет.{% endif %}</div>{% endfor %}
-        </div>
-    </section>
-</div>
 {% endblock %}
-
-{% block scripts %}<script src="{% static 'js/task-picker.js' %}" defer></script><script src="{% static 'js/capacity-source.js' %}" defer></script>{% endblock %}
