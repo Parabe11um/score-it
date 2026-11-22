@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}{{ board.name }} · Доска — {{ brand_name }}{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/boards.css' %}">{% endblock %}
+
+{% block content %}
+<header class="board-heading">
+    <h1>{{ board.name }}</h1>
+    <span class="board-badge">Гость · {% if can_edit %}Редактирование{% else %}Просмотр{% endif %}</span>
+</header>
+{% include "poker/board_editor.html" %}
+{% endblock %}
+
+{% block scripts %}<script src="{% static 'js/board.js' %}" defer></script>{% endblock %}

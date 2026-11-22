@@ -12,7 +12,7 @@ from django.views.debug import ExceptionReporter
 
 # Tokens are UUIDs; include percent-encoded hyphens seen in raw HTTP request logs.
 _UUID = re.compile(r"[0-9a-f]{8}(?:-|%2d)[0-9a-f]{4}(?:-|%2d)[0-9a-f]{4}(?:-|%2d)[0-9a-f]{4}(?:-|%2d)[0-9a-f]{12}", re.I)
-_TOKEN_PATH = re.compile(r"(/(?:room|organizer/invite|resume)/)[^/\s?\#\"'<>]+", re.I)
+_TOKEN_PATH = re.compile(r"(/(?:room|organizer/invite|resume|board-access)/)[^/\s?\#\"'<>]+", re.I)
 
 
 def redact_tokens(value):
@@ -40,7 +40,7 @@ class TokenLinkPrivacyMiddleware:
 
     def __call__(self, request):
         response = self.get_response(request)
-        if request.path.startswith(("/room/", "/organizer/invite/")):
+        if request.path.startswith(("/room/", "/organizer/invite/", "/board-access/")):
             response["Cache-Control"] = "private, no-store"
             response["Referrer-Policy"] = settings.SECURE_REFERRER_POLICY
         return response

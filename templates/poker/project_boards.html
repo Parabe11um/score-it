@@ -1,0 +1,30 @@
+{% extends "poker/project_workspace.html" %}
+
+{% block title %}Доски · {{ project.name }} — {{ brand_name }}{% endblock %}
+
+{% block project_content %}
+<div class="page-heading page-heading--compact">
+    <h2>Доски проекта</h2>
+    <p>Схемы, заметки и идеи команды на одном полотне.</p>
+</div>
+<section class="card section-card">
+    <form method="post" class="resource-add-form">
+        {% csrf_token %}
+        {% include "poker/form_fields.html" %}
+        <button class="button button--primary" type="submit">Создать доску</button>
+    </form>
+</section>
+
+<section class="card section-card" aria-label="Список досок">
+    <div class="overview-list">
+    {% for board in boards %}
+        <a class="overview-item" href="{{ board.get_absolute_url }}">
+            <strong>{{ board.name }}</strong>
+            <span>{{ board.created_at|date:"d.m.Y" }} · Открыть →</span>
+        </a>
+    {% empty %}
+        <p class="workspace-index__empty">Досок пока нет. Создайте первую, чтобы пригласить коллег.</p>
+    {% endfor %}
+    </div>
+</section>
+{% endblock %}
