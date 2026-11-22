@@ -1,6 +1,6 @@
 from django.urls import path
 
-from . import team_views, views, workspace_views
+from . import board_views, team_views, views, workspace_views
 
 
 app_name = "poker"
@@ -21,6 +21,28 @@ urlpatterns = [
     path("projects/<int:pk>/overview/", workspace_views.project_overview, name="project_overview"),
     path("projects/<int:pk>/sessions/", workspace_views.project_voting, name="project_voting"),
     path("projects/<int:pk>/sprints/", workspace_views.project_sprints, name="project_sprints"),
+    path("projects/<int:pk>/boards/", board_views.project_boards, name="project_boards"),
+    path("projects/<int:pk>/boards/<uuid:board_id>/", board_views.board_detail, name="board_detail"),
+    path("projects/<int:pk>/boards/<uuid:board_id>/state/", board_views.board_state, name="board_state"),
+    path("projects/<int:pk>/boards/<uuid:board_id>/change/", board_views.board_change, name="board_change"),
+    path("projects/<int:pk>/boards/<uuid:board_id>/upload/", board_views.board_upload, name="board_upload"),
+    path(
+        "projects/<int:pk>/boards/<uuid:board_id>/images/<uuid:element_id>/",
+        board_views.board_image, name="board_image",
+    ),
+    path(
+        "projects/<int:pk>/boards/<uuid:board_id>/links/new/",
+        board_views.board_link_create, name="board_link_create",
+    ),
+    path(
+        "projects/<int:pk>/boards/<uuid:board_id>/links/<uuid:link_id>/revoke/",
+        board_views.board_link_revoke, name="board_link_revoke",
+    ),
+    path("board-access/<uuid:link_id>/", board_views.board_guest, name="board_guest"),
+    path("board-access/<uuid:link_id>/state/", board_views.board_state, name="board_guest_state"),
+    path("board-access/<uuid:link_id>/change/", board_views.board_change, name="board_guest_change"),
+    path("board-access/<uuid:link_id>/upload/", board_views.board_upload, name="board_guest_upload"),
+    path("board-access/<uuid:link_id>/images/<uuid:element_id>/", board_views.board_image, name="board_guest_image"),
     path("projects/<int:pk>/team/", team_views.project_team, name="project_team"),
     path("projects/<int:pk>/team/<int:member_pk>/", team_views.project_team, name="project_member_edit"),
     path("projects/<int:pk>/tasks/import/", views.task_import, name="task_import"),

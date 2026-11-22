@@ -1071,3 +1071,49 @@ class SprintTask(models.Model):
 
     def __str__(self):
         return f"{self.sprint}: {self.task.number}"
+
+
+class Board(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="boards")
+    name = models.CharField(max_length=100)
+    revision = models.PositiveBigIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at", "pk")
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("poker:board_detail", args=(self.project_id, self.pk))
+
+
+class BoardLink(models.Model):
+    class Permission(models.TextChoices):
+        VIEW = "view", "Просмотр"
+        EDIT = "edit", "Редактирование"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    board = models.ForeignKey(Board, on_delete=models.CASCADE, related_name="links")
+    secret_digest = models.CharField(max_length=64, editable=False)
+    permission = models.CharField(max_length=4, choices=Permission.choices)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    revoked_at = models.DateTimeField(null=True, blank=True)
+
+
+class BoardElement(models.Model):
+    board = models.ForeignKey(Board, on_delete=models.CASCADE, related_name="elements")
+    key = models.UUIDField()
+    kind = models.CharField(max_length=9)
+    data = models.JSONField(default=dict)
+    revision = models.PositiveBigIntegerField()
+    deleted = models.BooleanField(default=False)
+    image = models.BinaryField(null=True, editable=False)
+    image_type = models.CharField(max_length=10, blank=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=("board", "key"), name="board_element_key")]
+        indexes = [models.Index(fields=("board", "revision"), name="board_element_revision")]

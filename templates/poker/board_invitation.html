@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Приглашение на доску — {{ brand_name }}{% endblock %}
+
+{% block content %}
+<section class="card section-card">
+    <h1>Приглашение на доску</h1>
+    <p data-board-invitation-status aria-live="polite">Открываем доску…</p>
+    <form hidden method="post" data-board-invitation>
+        {% csrf_token %}
+        <input type="hidden" name="code">
+    </form>
+    <noscript><p>Для открытия доски включите JavaScript в браузере.</p></noscript>
+</section>
+{% endblock %}
+
+{% block scripts %}<script src="{% static 'js/board.js' %}" defer></script>{% endblock %}

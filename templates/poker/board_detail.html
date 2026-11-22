@@ -1,0 +1,49 @@
+{% extends "poker/project_workspace.html" %}
+{% load static %}
+
+{% block title %}{{ board.name }} · Доска — {{ brand_name }}{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/boards.css' %}">{% endblock %}
+
+{% block project_content %}
+<nav class="breadcrumbs" aria-label="Доски проекта">
+    <a href="{% url 'poker:project_boards' project.pk %}">← Все доски</a>
+</nav>
+<div class="board-heading">
+    <h2>{{ board.name }}</h2>
+</div>
+<details class="card board-share"{% if issued_url or link_form.errors %} open{% endif %}>
+    <summary>Поделиться доской</summary>
+    <p class="help-text">Коллега откроет доску без входа. Ссылка даёт доступ только к этой доске.</p>
+    {% if issued_url %}
+        <div class="board-share__issued">
+            <label for="board-share-link">Гостевая ссылка</label>
+            <div class="board-inline">
+                <input id="board-share-link" type="text" value="{{ issued_url }}" readonly data-board-share-url>
+                <button class="button button--secondary button--small" type="button" data-board-copy>Копировать</button>
+            </div>
+            <small class="help-text" data-board-copy-feedback aria-live="polite">Скопируйте её сейчас: после закрытия страницы она больше не показывается.</small>
+        </div>
+    {% endif %}
+    <form method="post" class="board-inline board-share__form" action="{% url 'poker:board_link_create' project.pk board.pk %}">
+        {% csrf_token %}
+        {% include "poker/form_fields.html" with form=link_form %}
+        <button class="button button--primary button--small" type="submit">Создать ссылку</button>
+    </form>
+    {% if links %}
+    <ul class="board-share__links" aria-label="Действующие ссылки">
+        {% for link in links %}
+        <li>
+            <div><strong>{{ link.get_permission_display }}</strong> <span>до {{ link.expires_at|date:"d.m.Y H:i" }}</span></div>
+            <form method="post" action="{% url 'poker:board_link_revoke' project.pk board.pk link.pk %}">
+                {% csrf_token %}
+                <button class="button button--ghost button--small" type="submit">Отозвать</button>
+            </form>
+        </li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+</details>
+{% include "poker/board_editor.html" %}
+{% endblock %}
+
+{% block scripts %}<script src="{% static 'js/board.js' %}" defer></script>{% endblock %}

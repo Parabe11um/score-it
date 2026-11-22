@@ -4,4 +4,5 @@
     <a href="{% url 'poker:project_voting' project.pk %}"{% if project_section == "voting" %} aria-current="page"{% endif %}>Голосования</a>
     <a href="{% url 'poker:project_sprints' project.pk %}"{% if project_section == "sprints" %} aria-current="page"{% endif %}>Спринты</a>
     <a href="{% url 'poker:project_team' project.pk %}"{% if project_section == "team" %} aria-current="page"{% endif %}>Команда</a>
+    <a href="{% url 'poker:project_boards' project.pk %}"{% if project_section == "boards" %} aria-current="page"{% endif %}>Доски</a>
 </nav>

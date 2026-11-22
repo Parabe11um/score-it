@@ -3,6 +3,7 @@
 const fs = require('node:fs');
 const assert = require('node:assert/strict');
 const {chromium, expect} = require('@playwright/test');
+const {checkBoards} = require('./boards.cjs');
 
 const input = JSON.parse(fs.readFileSync(0, 'utf8'));
 const {fixture, base_url: base} = input;
@@ -15,6 +16,7 @@ function safe(message) {
     let text = String(message);
     for (const user of fixture.users) text = text.split(user.password).join('[redacted]');
     return text.replace(/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}/gi, '[redacted]')
+        .replace(/#[A-Za-z0-9_-]{43}(?![A-Za-z0-9_-])/g, '#[redacted]')
         .replace(/(\/room\/)[^\s/'"?]+/g, '$1[redacted]')
         .replace(/\b(?:set-cookie|cookie|x-csrftoken):[^\n]+/gi, '[redacted header]')
         .replace(/\b(csrfmiddlewaretoken|csrftoken|sessionid)\s*[=:]\s*["']?[^\s;"']+/gi, '$1=[redacted]');
@@ -280,6 +282,8 @@ async function main() {
             assert.equal((await probe(second.context(), new URL(publicUrl).pathname + 'vote/', {value: 52})).status(), 409);
             assert.equal((await probe(anonymous.context(), new URL(publicUrl).pathname + 'join/', {name: 'Late voter'})).status(), 302);
         });
+        await check('board_collaboration_and_guest_permissions', () =>
+            checkBoards({base, project: fixture.project, owner, first, second, reader: anonymous}));
         await check('native_logout_removes_organizer_access', async () => {
             await nativePost(owner, '/logout/', () => owner.getByRole('button', {name: 'Выйти', exact: true}).click());
             await expect(owner).toHaveURL(base + '/login/');

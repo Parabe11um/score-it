@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import uuid
 from decimal import Decimal
 from datetime import timedelta
 
@@ -13,7 +14,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from poker.models import (
-    Participant, Project, ProjectMember, Sprint, SprintResource, SprintTask,
+    Board, Participant, Project, ProjectMember, Sprint, SprintResource, SprintTask,
     Task, Vote, VotingRound, VotingSession, VotingSessionTask,
 )
 
@@ -21,6 +22,7 @@ from poker.models import (
 @override_settings(DEBUG=False, SECURE_PROXY_SSL_HEADER=("HTTP_X_FORWARDED_PROTO", "https"))
 class AccessBoundaryTests(TestCase):
     workspace_indices = ("user_settings", "voting_list", "sprint_list", "team_list")
+    board_api = {"board_state", "board_image", "board_change", "board_upload"}
 
     @classmethod
     def setUpTestData(cls):
@@ -33,6 +35,7 @@ class AccessBoundaryTests(TestCase):
     @staticmethod
     def bundle(owner, marker):
         project = Project.objects.create(owner=owner, name=f"Private {marker} project")
+        board = Board.objects.create(project=project, name=f"Private {marker} board")
         task = Task.objects.create(project=project, number=marker + "-1", title="Private " + marker)
         estimated = Task.objects.create(project=project, number=marker + "-2", title="Estimated " + marker,
                                         status=Task.Status.ESTIMATED, imported_estimate=Decimal(8))
@@ -52,7 +55,7 @@ class AccessBoundaryTests(TestCase):
         resource = SprintResource.objects.create(sprint=sprint, member=member, full_name=member.full_name,
                                                 competency=member.competency)
         return dict(project=project, task=task, room=room, round=voting_round, first=first,
-                    second=second, sprint=sprint, member=member, resource=resource)
+                    second=second, sprint=sprint, member=member, resource=resource, board=board)
 
     def setUp(self):
         self.client = Client(enforce_csrf_checks=True)
@@ -72,6 +75,7 @@ class AccessBoundaryTests(TestCase):
 
     def private_routes(self, item):
         p, t, r, s = (item[key].pk for key in ('project', 'task', 'room', 'sprint'))
+        b = item["board"].pk
         reads = [
             ('project_overview', [p]), ('project_detail', [p]), ('project_voting', [p]),
             ('project_sprints', [p]), ('project_team', [p]),
@@ -79,6 +83,8 @@ class AccessBoundaryTests(TestCase):
             ('session_export_csv', [r]), ('session_export_xlsx', [r]), ('session_state', [r]),
             ('sprint_detail', [s]), ('sprint_team', [s]), ('sprint_export', [s]),
             ('sprint_export_eva', [s]),
+            ('project_boards', [p]), ('board_detail', [p, b]), ('board_state', [p, b]),
+            ('board_image', [p, b, uuid.UUID(int=0)]),
         ]
         writes = [(name, [p]) for name in ('project_team', 'task_import', 'task_import_file',
                                           'session_create', 'sprint_create')]
@@ -95,6 +101,8 @@ class AccessBoundaryTests(TestCase):
                                             'sprint_transfer_tasks', 'sprint_add_tasks')]
         writes += [(name, [s, item['resource'].pk]) for name in ('sprint_resource_update', 'sprint_resource_remove')]
         writes += [('sprint_remove_task', [s, item['task'].pk])]
+        writes += [(name, [p, b]) for name in ("board_change", "board_upload", "board_link_create")]
+        writes += [("project_boards", [p]), ("board_link_revoke", [p, b, uuid.UUID(int=0)])]
         return reads, writes
 
     def test_other_owner_cannot_read_or_mutate_any_management_route(self):
@@ -117,7 +125,10 @@ class AccessBoundaryTests(TestCase):
         reads, writes = self.private_routes(self.foreign)
         non_object_routes = {'organizer_invitation_accept', 'dashboard', 'project_create', 'room', 'room_join',
                              'room_resume', 'room_state', 'room_vote', 'room_navigate', 'room_complete',
-                             *self.workspace_indices}
+                             *self.workspace_indices,
+                             # Separate capability-based checks in test_boards.py.
+                             'board_guest', 'board_guest_state', 'board_guest_image',
+                             'board_guest_change', 'board_guest_upload'}
         self.assertEqual({p.name for p in urlpatterns} - non_object_routes, {name for name, _ in reads + writes})
 
     def test_workspace_indices_require_an_organizer_login(self):
@@ -182,10 +193,16 @@ class AccessBoundaryTests(TestCase):
         for client in (anonymous, participant):
             for name, args in reads:
                 response = client.get(reverse('poker:' + name, args=args), secure=True)
+                if name in self.board_api:
+                    self.assertEqual(response.status_code, 404, name)
+                    continue
                 self.assertEqual(response.status_code, 302, name)
                 self.assertTrue(response.url.startswith('/login/?next='), name)
             for name, args in writes:
                 response = self.post(client, name, args)
+                if name in self.board_api:
+                    self.assertEqual(response.status_code, 404, name)
+                    continue
                 self.assertEqual(response.status_code, 302, name)
                 self.assertTrue(response.url.startswith('/login/?next='), name)
         self.assertEqual(self.fingerprint(), initial)
