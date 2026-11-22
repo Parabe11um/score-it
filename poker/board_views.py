@@ -8,7 +8,7 @@ from datetime import timedelta
 from django import forms
 from django.contrib.auth.decorators import login_required
 from django.db import connection, transaction
-from django.db.models import F
+from django.db.models import F, Q
 from django.http import Http404, HttpResponse, HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -21,6 +21,7 @@ from django.views.decorators.http import require_GET, require_http_methods, requ
 from .board_payloads import (
     MAX_BOARD_IMAGES,
     MAX_OBJECTS,
+    SHAPES,
     InvalidBoardPayload,
     coordinate,
     normalize_image,
@@ -290,6 +291,12 @@ def board_change(request, **scope):
                 "element": _one(board, key),
             }, status=409)
 
+        # The board lock keeps the endpoints valid until the arrow is saved.
+        if kind == "arrow" and board.elements.filter(
+            key__in=(data["source"], data["target"]), deleted=False, kind__in=SHAPES,
+        ).count() != 2:
+            return _error("Один из блоков недоступен. Выберите два блока на этой доске.", 409)
+
         board.revision += 1
         element.revision = board.revision
         if kind is None:
@@ -297,6 +304,10 @@ def board_change(request, **scope):
             element.data = {}
             element.image = None
             element.image_type = ""
+            if element.kind in SHAPES:
+                board.elements.filter(kind="arrow", deleted=False).filter(
+                    Q(data__source=str(key)) | Q(data__target=str(key)),
+                ).update(deleted=True, data={}, revision=board.revision)
         else:
             element.data = data
         board.save(update_fields=("revision",))

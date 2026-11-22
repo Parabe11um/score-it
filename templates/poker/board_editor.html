@@ -2,63 +2,82 @@
          data-board-guest="{{ guest|yesno:'true,false' }}" data-state-url="{{ state_url }}" data-change-url="{{ change_url }}"
          data-upload-url="{{ upload_url }}" data-image-base="{{ image_base }}" aria-label="Редактор доски">
     {% if can_edit %}{% csrf_token %}{% endif %}
-    <div class="board-toolbar" data-board-controls>
-        <div class="board-tools" role="group" aria-label="Инструменты">
+    <div class="board-workspace">
+        <aside class="board-sidebar" data-board-controls aria-label="Инструменты доски">
+            <div class="board-tools" role="group" aria-label="Инструменты">
+                {% if can_edit %}
+                    {% include "poker/board_tool.html" with tool="select" label="Выбрать" active=True only %}
+                {% endif %}
+                {% if can_edit %}
+                    {% include "poker/board_tool.html" with tool="hand" label="Рука" only %}
+                {% else %}
+                    {% include "poker/board_tool.html" with tool="hand" label="Рука" active=True only %}
+                {% endif %}
+                {% if can_edit %}
+                    {% include "poker/board_tool.html" with tool="stroke" label="Карандаш" only %}
+                    {% include "poker/board_tool.html" with tool="arrow" label="Стрелка" only %}
+                    {% include "poker/board_tool.html" with tool="circle" label="Круг" only %}
+                    {% include "poker/board_tool.html" with tool="square" label="Квадрат" only %}
+                    {% include "poker/board_tool.html" with tool="rectangle" label="Прямоугольник" only %}
+                    {% include "poker/board_tool.html" with tool="note" label="Стикер" only %}
+                    {% include "poker/board_tool.html" with tool="upload" label="Изображение" only %}
+                    <input type="file" data-board-file accept="image/png,image/jpeg" hidden>
+                {% endif %}
+            </div>
             {% if can_edit %}
-                <button type="button" data-board-tool="select" aria-pressed="true">Выбрать</button>
-            {% endif %}
-            <button type="button" data-board-tool="hand" aria-pressed="{{ can_edit|yesno:'false,true' }}">Рука</button>
-            {% if can_edit %}
-                <button type="button" data-board-tool="stroke" aria-pressed="false">Карандаш</button>
-                <button type="button" data-board-tool="circle" aria-pressed="false">Круг</button>
-                <button type="button" data-board-tool="square" aria-pressed="false">Квадрат</button>
-                <button type="button" data-board-tool="rectangle" aria-pressed="false">Прямоугольник</button>
-                <button type="button" data-board-tool="note" aria-pressed="false">Стикер</button>
-                <button type="button" data-board-upload>Изображение</button>
-                <input type="file" data-board-file accept="image/png,image/jpeg" hidden>
-            {% endif %}
-        </div>
-        <div class="board-tools" role="group" aria-label="Вид доски">
-            {% if can_edit %}
-                <label class="board-color">Цвет
-                    <select data-board-color>
+                <div class="board-sidebar__section">
+                    <label class="board-color" for="board-color">Цвет</label>
+                    <select id="board-color" data-board-color>
                         <option value="ink">Нейтральный</option>
                         <option value="mint">Зелёный</option>
                         <option value="blue">Голубой</option>
                         <option value="yellow">Жёлтый</option>
                         <option value="pink">Розовый</option>
                     </select>
-                </label>
+                </div>
+                <div class="board-tools board-sidebar__section" role="group" aria-label="Выбранный элемент" data-board-properties hidden>
+                    {% include "poker/board_tool.html" with tool="edit-label" label="Подпись" only %}
+                    {% include "poker/board_tool.html" with tool="save-label" label="Готово" only %}
+                    {% include "poker/board_tool.html" with tool="delete" label="Удалить элемент" only %}
+                </div>
             {% endif %}
-            <button type="button" data-board-zoom="out" aria-label="Уменьшить масштаб">−</button>
-            <button type="button" data-board-zoom="reset" aria-label="Вернуть исходный вид">100%</button>
-            <button type="button" data-board-zoom="in" aria-label="Увеличить масштаб">+</button>
-            <button type="button" data-board-zoom="fit">Вся доска</button>
+        </aside>
+        <div class="board-stage">
+            <div class="board-toolbar">
+                <div class="board-view-tools" role="group" aria-label="Масштаб" data-board-view>
+                    <button type="button" data-board-zoom="out" aria-label="Уменьшить масштаб">−</button>
+                    <button type="button" data-board-zoom="reset" aria-label="Вернуть исходный вид">100%</button>
+                    <button type="button" data-board-zoom="in" aria-label="Увеличить масштаб">+</button>
+                    <button type="button" data-board-zoom="fit">Вся доска</button>
+                </div>
+                <button class="board-fullscreen" type="button" data-board-fullscreen aria-pressed="false" title="На весь экран">
+                    {% include "poker/board_tool_icon.html" with tool="fullscreen" only %}
+                    <span class="board-tool-label">На весь экран</span>
+                </button>
+            </div>
+            <div class="board-editor__viewport">
+                <svg data-board-canvas class="board-canvas" data-tool="{{ can_edit|yesno:'select,hand' }}" tabindex="0"
+                     aria-label="Полотно доски" aria-describedby="board-tool-hint" preserveAspectRatio="none">
+                    <g data-board-backdrop></g>
+                    <g data-board-connections></g>
+                    <g data-board-elements></g>
+                    <g data-board-preview pointer-events="none"></g>
+                    {% if can_edit %}
+                        <foreignObject data-board-inline-text hidden>
+                            <textarea class="board-inline-label" aria-label="Подпись на фигуре или стикере"
+                                      rows="1" maxlength="240" data-board-label></textarea>
+                        </foreignObject>
+                    {% endif %}
+                    <g data-board-handles></g>
+                </svg>
+                <p class="board-editor__empty" data-board-empty hidden>Пока пусто. {% if can_edit %}Выберите инструмент и начните рисовать.{% endif %}</p>
+            </div>
         </div>
-    </div>
-    <div class="board-editor__viewport">
-        <svg data-board-canvas class="board-canvas" data-tool="{{ can_edit|yesno:'select,hand' }}" tabindex="0"
-             aria-label="Полотно доски" aria-describedby="board-tool-hint" preserveAspectRatio="none">
-            <g data-board-backdrop></g>
-            <g data-board-elements></g>
-            <g data-board-preview pointer-events="none"></g>
-        </svg>
-        <p class="board-editor__empty" data-board-empty hidden>Пока пусто. {% if can_edit %}Выберите инструмент и начните рисовать.{% endif %}</p>
     </div>
     <div class="board-editor__foot">
         <span id="board-tool-hint" data-board-hint>{% if can_edit %}Нажмите на элемент, чтобы выбрать его.{% else %}Перетаскивайте полотно инструментом «Рука».{% endif %}</span>
         <span class="board-editor__status" role="status" data-board-status>Загружаем доску…</span>
         <button class="button button--secondary button--small" type="button" data-board-retry hidden>Повторить</button>
     </div>
-    {% if can_edit %}
-    <form class="board-properties board-inline" data-board-properties hidden>
-        <div class="field" data-board-label-fields>
-            <label for="board-label">Подпись на фигуре или стикере</label>
-            <textarea id="board-label" maxlength="240" rows="2" data-board-label></textarea>
-        </div>
-        <button class="button button--primary button--small" type="submit" data-board-save-label>Сохранить подпись</button>
-        <button class="button button--ghost button--small board-properties__delete" type="button" data-board-delete>Удалить элемент</button>
-    </form>
-    {% endif %}
     <noscript><p>Для работы с доской включите JavaScript в браузере.</p></noscript>
 </section>
