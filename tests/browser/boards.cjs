@@ -300,4 +300,98 @@ async function checkBoardHistory({base, project, owner, first, second}) {
     await expect(arrow).toHaveCount(1);
 }
 
-module.exports = {checkBoards, checkBoardHistory};
+async function checkBoardGroupTools({base, project, owner, first, second}) {
+    await newBoard(base, project, owner, 'Схема с группами');
+    const url = await issue(owner, 'edit');
+    await open(first, url);
+    const board = canvas(first);
+    const circle = element(first, 'circle');
+    const diamond = element(first, 'diamond');
+    const ellipse = element(first, 'ellipse');
+    const arrow = element(first, 'arrow');
+    const ports = first.locator('[data-board-connect]');
+    const frame = first.locator('[data-board-selection]');
+    const more = first.locator('.board-more-shapes summary');
+
+    await button(first, 'Круг').click();
+    await board.click({position: {x: 54, y: 80}});
+    await expect(caption(first)).toBeFocused();
+    await caption(first).fill('Два');
+    await first.keyboard.press('Space');
+    await expect(caption(first)).toHaveValue('Два ');
+    await expect(board).toHaveAttribute('data-tool', 'select');
+    await first.keyboard.press('Escape');
+    await more.click();
+    await button(first, 'Ромб').click();
+    await board.click({position: {x: 267, y: 80}});
+    await expect(caption(first)).toBeFocused();
+    await first.keyboard.press('Escape');
+    await button(first, 'Овал').click();
+    await board.click({position: {x: 520, y: 280}});
+    await expect(caption(first)).toBeFocused();
+    await first.keyboard.press('Escape');
+    await more.click();
+    await expect(diamond.locator('polygon')).toHaveCount(1);
+    await expect(ellipse.locator('ellipse')).toHaveCount(1);
+
+    await button(first, 'Карандаш').click();
+    await board.scrollIntoViewIfNeeded();
+    const stage = await board.boundingBox();
+    assert(stage && stage.width > 700 && stage.height > 400);
+    const at = (x, y) => ({x: stage.x + x, y: stage.y + y});
+    await first.keyboard.down('Space');
+    await expect(board).toHaveAttribute('data-tool', 'hand');
+    await drag(first, at(130, 265), at(170, 295));
+    await first.keyboard.up('Space');
+    await expect(board).toHaveAttribute('data-tool', 'stroke');
+    assert.match(await board.getAttribute('viewBox'), /^-40 -30 /);
+    await expect(element(first, 'stroke')).toHaveCount(0);
+    await button(first, 'Вернуть исходный вид').click();
+    await button(first, 'Выбрать').click();
+
+    await circle.locator('circle').click();
+    await expect(ports).toHaveCount(4);
+    await drag(first, await midpoint(first.locator('[data-board-connect="n"]')), await midpoint(diamond.locator('polygon')));
+    await expect(arrow).toHaveCount(1);
+    assert.equal(await arrowEnd(first, 'x1'), 110);
+    assert.equal(await arrowEnd(first, 'y1'), 80);
+
+    await drag(first, at(20, 45), at(452, 230));
+    await expect(frame).toHaveCount(1);
+    await expect(first.locator('[data-board-hint]')).toContainText('Фигур выделено: 2');
+    const start = await midpoint(circle.locator('circle'));
+    await drag(first, start, {x: start.x + 30, y: start.y + 35});
+    await expect(circle).toHaveAttribute('transform', 'translate(84 115)');
+    await expect(diamond).toHaveAttribute('transform', 'translate(297 115)');
+    await expect(ellipse).toHaveAttribute('transform', 'translate(520 280)');
+    assert.equal(await arrowEnd(first, 'x1'), 140);
+    assert.equal(await arrowEnd(first, 'y1'), 115);
+
+    const grip = await midpoint(first.locator('[data-board-resize="se"]'));
+    await drag(first, grip, {x: grip.x + 76, y: grip.y + 22});
+    await expect.poll(async () => Number(await circle.locator('circle').getAttribute('r'))).toBeGreaterThan(60);
+    const stretched = await diamond.getAttribute('transform');
+    assert.notEqual(stretched, 'translate(297 115)');
+    await first.keyboard.press('Control+z');
+    await expect(circle.locator('circle')).toHaveAttribute('r', '56');
+    await expect(diamond).toHaveAttribute('transform', 'translate(297 115)');
+    await first.keyboard.press('Control+Shift+z');
+    await expect(diamond).toHaveAttribute('transform', stretched);
+
+    await first.keyboard.press('Delete');
+    await expect(circle).toHaveCount(0);
+    await expect(diamond).toHaveCount(0);
+    await expect(arrow).toHaveCount(0);
+    await expect(ellipse).toHaveCount(1);
+    await first.keyboard.press('Control+z');
+    await expect(circle).toHaveCount(1);
+    await expect(diamond).toHaveAttribute('transform', stretched);
+    await expect(arrow).toHaveCount(1);
+
+    await open(second, url);
+    await expect(element(second, 'diamond')).toHaveAttribute('transform', stretched);
+    await expect(element(second, 'ellipse')).toHaveAttribute('transform', 'translate(520 280)');
+    assert.equal(await arrowEnd(second, 'y1'), 115);
+}
+
+module.exports = {checkBoards, checkBoardHistory, checkBoardGroupTools};

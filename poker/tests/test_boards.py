@@ -285,6 +285,58 @@ class BoardTests(TestCase):
         self.assertEqual(self.board.elements.get(key=start["id"]).data["x"], 27)
         self.assertFalse(self.board.elements.get(key=line["id"]).deleted)
 
+    def test_group_changes_are_atomic_and_undo_restores_shapes_and_their_connections(self):
+        url, code = self.make_link()
+        guest = self.open_guest(url, code)
+        change_url, state_url = url + "change/", url + "state/"
+        view_url, view_code = self.make_link("view")
+        observer = self.open_guest(view_url, view_code)
+        created = []
+        for kind, x in (("diamond", 0), ("ellipse", 260), ("triangle", 520)):
+            created.append(guest.send(change_url, dict(note(x=x), kind=kind), as_json=True).json()["element"])
+        left, right, other = created
+        line = arrow(left["id"], right["id"])
+        line["data"]["source_port"] = "n"
+        line = guest.send(change_url, line, as_json=True).json()["element"]
+        unchanged = guest.get(state_url).json()
+
+        move = [{**patch(item), "data": {**item["data"], "x": item["data"]["x"] + 40}}
+                for item in (left, right)]
+        self.assertEqual(observer.send(view_url + "change/", move, as_json=True).status_code, 403)
+        self.assertEqual(guest.send(change_url, [move[0], dict(move[1], revision=1)], as_json=True).status_code, 409)
+        self.assertEqual(guest.send(change_url, [move[0], move[0]], as_json=True).status_code, 400)
+        self.assertEqual(guest.get(state_url).json(), unchanged)
+
+        result = guest.send(change_url, move, as_json=True)
+        self.assertEqual(result.status_code, 200)
+        moved = [entry["after"] for entry in result.json()["changes"]]
+        self.assertEqual({item["revision"] for item in moved}, {unchanged["revision"] + 1})
+        self.assertEqual([item["data"]["x"] for item in moved], [40, 300])
+
+        delete = [{"id": item["id"], "revision": item["revision"], "delete": True} for item in moved]
+        result = guest.send(change_url, delete, as_json=True)
+        self.assertEqual(result.status_code, 200)
+        removed = result.json()["changes"]
+        self.assertCountEqual([entry["before"]["id"] for entry in removed], [left["id"], right["id"], line["id"]])
+        self.assertTrue(all(entry["after"]["deleted"] for entry in removed))
+        self.assertEqual(guest.get(state_url).json()["elements"], [other])
+        undo = [patch(entry["before"], entry["after"]["revision"]) for entry in removed]
+        result = guest.send(url + "history/", undo, as_json=True)
+        self.assertEqual(result.status_code, 200)
+        connection = next(item for item in result.json()["elements"] if item["kind"] == "arrow")
+        self.assertEqual(connection["data"], line["data"])
+        self.assertEqual(len(observer.get(view_url + "state/").json()["elements"]), 4)
+
+    def test_arrow_port_requires_an_attached_source_and_a_cardinal_side(self):
+        url = self.path + "change/"
+        shape = self.owner_client.send(url, dict(note(), kind="hexagon"), as_json=True).json()["element"]
+        for source, port in ((shape["id"], "northwest"), (None, "e")):
+            item = arrow(source, None)
+            item["data"].update(end=[300, 120], source_port=port)
+            if source is None:
+                item["data"]["start"] = [10, 15]
+            self.assertEqual(self.owner_client.send(url, item, as_json=True).status_code, 400)
+
     def test_revoke_and_expiry_disable_previously_open_sessions(self):
         for expiry in (True, False):
             with self.subTest(expiry=expiry):

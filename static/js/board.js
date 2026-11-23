@@ -59,7 +59,19 @@
     const ns = "http://www.w3.org/2000/svg";
     const minZoom = 0.05;
     const historyLimit = 30;
-    const isShape = (item) => ["circle", "square", "rectangle", "note"].includes(item?.kind);
+    const regular = ["circle", "square"];
+    const ovals = ["circle", "ellipse"];
+    const polygons = new Map(Object.entries({
+        diamond: [[.5, 0], [1, .5], [.5, 1], [0, .5]],
+        triangle: [[.5, 0], [1, 1], [0, 1]],
+        hexagon: [[.25, 0], [.75, 0], [1, .5], [.75, 1], [.25, 1], [0, .5]],
+        data: [[.23, 0], [1, 0], [.77, 1], [0, 1]],
+    }));
+    const isShape = (item) => ["circle", "square", "rectangle", "note", "ellipse"].includes(item?.kind) || polygons.has(item?.kind);
+    const ports = {
+        n: [0, -1, -90, "сверху"], e: [1, 0, 0, "справа"],
+        s: [0, 1, 90, "снизу"], w: [-1, 0, 180, "слева"],
+    };
     const palette = {
         ink: ["#334155", "#f1f5f9"],
         mint: ["#076d35", "#dcfce7"],
@@ -69,12 +81,9 @@
     };
     const hints = {
         hand: "Перетаскивайте полотно. Масштаб меняется кнопками + и −.",
-        select: "Перетащите блок, чтобы переместить. Двойной щелчок — подпись; Delete — удаление.",
+        select: "Обведите фигуры рамкой для выделения. Удерживайте пробел для перемещения полотна.",
         stroke: "Нажмите и ведите по полотну, чтобы нарисовать линию.",
         arrow: "Перетащите стрелку или укажите начало и конец двумя щелчками. Фигуры рядом не обязательны.",
-        circle: "Щёлкните, чтобы добавить круг, или потяните, чтобы задать размер.",
-        square: "Щёлкните, чтобы добавить квадрат, или потяните, чтобы задать размер.",
-        rectangle: "Щёлкните, чтобы добавить прямоугольник, или потяните, чтобы задать размер.",
         note: "Щёлкните в том месте, где нужен стикер, затем напишите текст.",
     };
     const items = new Map();
@@ -84,12 +93,14 @@
     const redo = [];
     const replayVersions = new Map();
     let tool = canEdit ? "select" : "hand";
-    let selected = null;
+    let selection = new Set();
     let editing = null;
-    let obscured = null;
+    let obscured = new Set();
     let arrowStart = null;
     let arrowTracking = null;
     let gesture = null;
+    let spaceHeld = false;
+    let pointerOnCanvas = false;
     let cursor = null;
     let polling = false;
     let pollTimer = null;
@@ -104,8 +115,11 @@
     let zoom = 1;
 
     const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
-    const coord = (n) => Math.round(clamp(n, -100000, 100000) * 10) / 10;
-    const size = (n) => Math.round(clamp(n, 16, 4000) * 10) / 10;
+    const coordLimit = 100000, minSize = 16, maxSize = 4000;
+    const coord = (n) => Math.round(clamp(n, -coordLimit, coordLimit) * 10) / 10;
+    const size = (n) => Math.round(clamp(n, minSize, maxSize) * 10) / 10;
+    const isPanning = () => spaceHeld || tool === "hand" || gesture?.mode === "hand";
+    const selectedId = () => selection.size === 1 ? selection.values().next().value : null;
     const svg = (name, attributes = {}) => {
         const node = document.createElementNS(ns, name);
         for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, String(value));
@@ -173,10 +187,13 @@
 
     function labelBox(item) {
         const {x, y, w, h} = item.data;
-        const ratio = item.kind === "circle" ? 0.69 : 1;
-        const width = Math.max(1, w * ratio - 10);
-        const height = Math.max(1, h * ratio - 8);
-        return {x: x + (w - width) / 2, y: y + (h - height) / 2, width, height};
+        const [widthRatio, heightRatio, midY = .5] = {
+            circle: [.69, .69], ellipse: [.69, .69], diamond: [.5, .5],
+            triangle: [.46, .35, .7], hexagon: [.72, .65], data: [.55, .8],
+        }[item.kind] || [1, 1];
+        const width = Math.max(1, w * widthRatio - 10);
+        const height = Math.max(1, h * heightRatio - 8);
+        return {x: x + (w - width) / 2, y: y + h * midY - height / 2, width, height};
     }
 
     function drawItem(item, ghost = false, withoutLabel = false) {
@@ -204,10 +221,16 @@
                 "stroke-linecap": "round", "stroke-linejoin": "round"}));
             return g;
         }
+        const style = {fill, stroke, "stroke-width": 2};
         if (kind === "circle") {
-            g.append(svg("circle", {cx: d.w / 2, cy: d.h / 2, r: d.w / 2, fill, stroke, "stroke-width": 2}));
+            g.append(svg("circle", {cx: d.w / 2, cy: d.h / 2, r: d.w / 2, ...style}));
+        } else if (kind === "ellipse") {
+            g.append(svg("ellipse", {cx: d.w / 2, cy: d.h / 2, rx: d.w / 2, ry: d.h / 2, ...style}));
+        } else if (polygons.has(kind)) {
+            const points = polygons.get(kind).map(([x, y]) => [x * d.w, y * d.h].join(",")).join(" ");
+            g.append(svg("polygon", {points, "stroke-linejoin": "round", ...style}));
         } else {
-            g.append(svg("rect", {width: d.w, height: d.h, rx: kind === "note" ? 5 : 2, fill, stroke, "stroke-width": 2}));
+            g.append(svg("rect", {width: d.w, height: d.h, rx: kind === "note" ? 5 : 2, ...style}));
         }
         if (d.text && !withoutLabel) {
             const title = svg("title");
@@ -246,14 +269,17 @@
             w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys)};
     }
 
+    function enclosing(elements) {
+        const boxes = elements.map(bounds).filter(Boolean);
+        if (!boxes.length) return null;
+        const x = Math.min(...boxes.map(b => b.x)), y = Math.min(...boxes.map(b => b.y));
+        return {x, y, w: Math.max(...boxes.map(b => b.x + b.w)) - x, h: Math.max(...boxes.map(b => b.y + b.h)) - y};
+    }
+
     function fitBoard() {
-        const boxes = Array.from(items.values()).filter((item) => !item.deleted)
-            .map((item) => bounds(visibleItem(item.id))).filter(Boolean);
-        if (!boxes.length) return;
-        const x = Math.min(...boxes.map((box) => box.x));
-        const y = Math.min(...boxes.map((box) => box.y));
-        const width = Math.max(...boxes.map((box) => box.x + box.w)) - x;
-        const height = Math.max(...boxes.map((box) => box.y + box.h)) - y;
+        const box = enclosing(Array.from(items.keys(), visibleItem).filter(Boolean));
+        if (!box) return;
+        const {x, y, w: width, h: height} = box;
         const {w, h} = dims();
         zoom = clamp(Math.min(w / (width + 80), h / (height + 80)), minZoom, 1);
         left = coord(x + (width - w / zoom) / 2);
@@ -264,6 +290,7 @@
     function visibleItem(id) {
         const item = items.get(id);
         if (!item || item.deleted) return null;
+        if (gesture?.drafts?.has(id)) return gesture.drafts.get(id);
         if (gesture?.draft?.id === id) return gesture.draft;
         if (editing?.id === id) return {...item, data: editing.data};
         return item;
@@ -273,14 +300,61 @@
         return {x: item.data.x + item.data.w / 2, y: item.data.y + item.data.h / 2};
     }
 
+    function sides(item) {
+        const {x, y, w, h} = item.data;
+        const points = polygons.get(item.kind).map(([px, py]) => [x + px * w, y + py * h]);
+        return points.map(([ax, ay], i) => {
+            const [bx, by] = points[(i + 1) % points.length];
+            return [ax, ay, bx - ax, by - ay];
+        });
+    }
+
     function edgeToward(item, toward) {
         const c = center(item);
-        const dx = toward.x - c.x;
+        let dx = toward.x - c.x;
         const dy = toward.y - c.y;
         const {w, h} = item.data;
-        const scale = item.kind === "circle" ? Math.hypot(dx, dy) / (w / 2)
+        if (!dx && !dy) dx = 1;
+        if (polygons.has(item.kind)) {
+            // Ray from the center: stop at the first side of the convex figure.
+            let t = Infinity;
+            for (const [ax, ay, ex, ey] of sides(item)) {
+                const rate = ex * dy - ey * dx;
+                if (rate < 0) t = Math.min(t, (ex * (ay - c.y) - ey * (ax - c.x)) / rate);
+            }
+            return {x: c.x + dx * t, y: c.y + dy * t};
+        }
+        const scale = ovals.includes(item.kind) ? Math.hypot(dx / (w / 2), dy / (h / 2))
             : Math.max(Math.abs(dx) / (w / 2), Math.abs(dy) / (h / 2));
-        return scale ? {x: c.x + dx / scale, y: c.y + dy / scale} : {x: c.x + w / 2, y: c.y};
+        return {x: c.x + dx / scale, y: c.y + dy / scale};
+    }
+
+    function portPoint(item, port) {
+        const [dx, dy] = ports[port];
+        const c = center(item);
+        return edgeToward(item, {x: c.x + dx, y: c.y + dy});
+    }
+
+    function shapeGap(item, p) {
+        const c = center(item);
+        const {w, h} = item.data;
+        const dx = p.x - c.x, dy = p.y - c.y;
+        if (ovals.includes(item.kind)) {
+            if (Math.hypot(dx / (w / 2), dy / (h / 2)) <= 1) return 0;
+            const edge = edgeToward(item, p);
+            return Math.hypot(p.x - edge.x, p.y - edge.y);
+        }
+        if (polygons.has(item.kind)) {
+            let outside = false, closest = Infinity;
+            for (const [ax, ay, ex, ey] of sides(item)) {
+                const x = p.x - ax, y = p.y - ay;
+                outside ||= ex * y - ey * x < 0;
+                const t = clamp((x * ex + y * ey) / (ex * ex + ey * ey), 0, 1);
+                closest = Math.min(closest, Math.hypot(x - t * ex, y - t * ey));
+            }
+            return outside ? closest : 0;
+        }
+        return Math.hypot(Math.max(0, Math.abs(dx) - w / 2), Math.max(0, Math.abs(dy) - h / 2));
     }
 
     function shapeAt(p, except = null, tolerance = 0) {
@@ -289,11 +363,7 @@
         for (const stored of items.values()) {
             if (!isShape(stored) || stored.deleted || stored.id === except) continue;
             const item = visibleItem(stored.id);
-            const c = center(item);
-            const dx = Math.abs(p.x - c.x);
-            const dy = Math.abs(p.y - c.y);
-            const gap = item.kind === "circle" ? Math.max(0, Math.hypot(dx, dy) - item.data.w / 2)
-                : Math.hypot(Math.max(0, dx - item.data.w / 2), Math.max(0, dy - item.data.h / 2));
+            const gap = shapeGap(item, p);
             if (gap < distance || gap === distance && (!best || item.order > best.order)) {
                 best = item;
                 distance = gap;
@@ -308,6 +378,10 @@
 
     function withArrowEnd(data, side, anchor) {
         const next = {...data, [side]: anchor.id};
+        if (side === "source") {
+            delete next.source_port;
+            if (anchor.id && anchor.port) next.source_port = anchor.port;
+        }
         const field = side === "source" ? "start" : "end";
         if (anchor.id) delete next[field];
         else next[field] = [anchor.p.x, anchor.p.y];
@@ -317,7 +391,9 @@
     function arrowAnchor(data, side) {
         if (data[side]) {
             const shape = visibleItem(data[side]);
-            return isShape(shape) ? {shape, p: center(shape)} : null;
+            if (!isShape(shape)) return null;
+            const port = side === "source" && data.source_port;
+            return port && Object.hasOwn(ports, port) ? {p: portPoint(shape, port)} : {shape, p: center(shape)};
         }
         const [x, y] = data[side === "source" ? "start" : "end"];
         return {p: {x, y}};
@@ -375,7 +451,7 @@
             const geometry = arrowGeometry(data);
             parts.node.toggleAttribute("hidden", !geometry);
             if (!geometry) continue;
-            const selectedArrow = selected === item.id;
+            const selectedArrow = selection.has(item.id);
             positionArrow(parts, geometry.start, geometry.end,
                 selectedArrow ? "#076d35" : palette[data.color][0], selectedArrow);
         }
@@ -415,25 +491,64 @@
             "vector-effect": "non-scaling-stroke", "stroke-width": 1.5, "pointer-events": "none"}));
     }
 
+    function drawPorts(item) {
+        for (const [side, [dx, dy, angle, name]] of Object.entries(ports)) {
+            const p = portPoint(item, side);
+            const offset = 26 / zoom;
+            const port = svg("g", {"data-board-connect": side, class: "board-connect-port",
+                transform: `translate(${p.x + dx * offset} ${p.y + dy * offset}) rotate(${angle}) scale(${1 / zoom})`});
+            const title = svg("title");
+            title.textContent = "Начать стрелку " + name;
+            port.append(title, svg("circle", {r: 10}), svg("path", {d: "M-5 0h10m-4-4 4 4-4 4"}));
+            handles.append(port);
+        }
+    }
+
+    function drawFrame(box, attributes) {
+        return svg("rect", {x: box.x, y: box.y, width: box.w, height: box.h,
+            stroke: "#15803d", "stroke-width": 1.5, "vector-effect": "non-scaling-stroke", ...attributes});
+    }
+
     function paintPreview() {
         preview.replaceChildren();
         handles.replaceChildren();
         const textItem = editing && visibleItem(editing.id);
         const draft = gesture?.draft?.kind === "arrow" ? null : gesture?.draft || textItem;
-        if (obscured && obscured !== draft?.id) nodes.get(obscured)?.removeAttribute("visibility");
-        obscured = draft?.id || null;
-        if (draft) {
-            nodes.get(obscured)?.setAttribute("visibility", "hidden");
-            preview.append(drawItem(draft, true, textItem?.id === draft.id));
+        const drafts = gesture?.drafts?.values() || (draft ? [draft] : []);
+        const hidden = new Set();
+        for (const item of drafts) {
+            if (item.id) {
+                hidden.add(item.id);
+                nodes.get(item.id)?.setAttribute("visibility", "hidden");
+            }
+            preview.append(drawItem(item, true, textItem?.id === item.id));
         }
+        for (const id of obscured) if (!hidden.has(id)) nodes.get(id)?.removeAttribute("visibility");
+        obscured = hidden;
         if (inlineText) {
             inlineText.toggleAttribute("hidden", !textItem);
             if (textItem) {
                 for (const [key, val] of Object.entries(labelBox(textItem))) inlineText.setAttribute(key, val);
             }
         }
-        const item = visibleItem(selected);
-        if (item?.kind === "arrow" && tool === "select") {
+        const item = visibleItem(selectedId());
+        const canSelect = tool === "select" && !isPanning() && !arrowStart && gesture?.mode !== "arrow";
+        if (gesture?.mode === "marquee" && gesture.box) {
+            const {box, ids} = gesture;
+            for (const id of ids) {
+                const shape = visibleItem(id);
+                if (shape) preview.append(highlight(shape, {"stroke-dasharray": "4 3"}));
+            }
+            preview.append(drawFrame(box, {"data-board-marquee": "", fill: "#22c55e", "fill-opacity": .10}));
+        } else if (canSelect && selection.size > 1) {
+            const selectedShapes = Array.from(selection, visibleItem).filter(isShape);
+            const box = enclosing(selectedShapes);
+            if (box) {
+                for (const shape of selectedShapes) preview.append(highlight(shape, {"stroke-opacity": .45}));
+                preview.append(drawFrame(box, {"data-board-selection": "", fill: "none", "stroke-dasharray": "5 4"}));
+                drawGrip(box.x + box.w, box.y + box.h, "data-board-resize", "se");
+            }
+        } else if (canSelect && item?.kind === "arrow") {
             const geometry = arrowGeometry(item.data);
             if (geometry) {
                 drawGrip(geometry.start.x, geometry.start.y, "data-board-arrow-end", "source", Boolean(item.data.source));
@@ -441,7 +556,7 @@
             }
             const target = visibleItem(gesture?.snap);
             if (target) preview.append(highlight(target, {"data-board-snap": "target", "stroke-width": 2.5}));
-        } else if (item) {
+        } else if (canSelect && item) {
             preview.append(highlight(item, {"stroke-dasharray": "5 4"}));
             if (canEdit && isShape(item)) {
                 const d = item.data;
@@ -449,10 +564,11 @@
                     ["se", d.x + d.w, d.y + d.h]]) {
                     drawGrip(x, y, "data-board-resize", side);
                 }
+                if (!editing && !gesture) drawPorts(item);
             }
         }
         drawConnections();
-        if (tool === "arrow") showArrowPreview();
+        if (!isPanning() && (tool === "arrow" || arrowStart || gesture?.mode === "arrow")) showArrowPreview();
         empty.hidden = cursor === null || nodes.size > 0 || arrows.size > 0 || Boolean(draft) || closed;
     }
 
@@ -502,17 +618,17 @@
 
     function updateProperties() {
         if (!canEdit) return;
-        const item = items.get(selected);
-        if (!item || item.deleted) {
-            selected = null;
-            editing = null;
-            properties.hidden = true;
-            return;
-        }
-        properties.hidden = false;
+        for (const id of selection) if (!visibleItem(id)) selection.delete(id);
+        if (editing && !selection.has(editing.id)) editing = null;
+        const item = items.get(selectedId());
+        properties.hidden = !selection.size;
         find("edit-label").hidden = !isShape(item) || Boolean(editing);
         find("save-label").hidden = !editing;
         find("delete").hidden = Boolean(editing);
+        const deleteText = selection.size > 1 ? "Удалить выделение" : "Удалить элемент";
+        const button = find("delete");
+        button.title = `${deleteText} (Delete)`;
+        button.querySelector(".board-tool-label").textContent = deleteText;
     }
 
     function canMutate() {
@@ -522,7 +638,7 @@
     function beginLabel(id) {
         const item = items.get(id);
         if (!canMutate() || editing || gesture || !isShape(item) || item.deleted) return;
-        selected = id;
+        selection = new Set([id]);
         editing = {id, revision: item.revision, kind: item.kind, data: {...item.data}, original: item.data};
         label.value = item.data.text;
         writeNotice = null;
@@ -565,10 +681,12 @@
     }
 
     function deleteSelection() {
-        const item = items.get(selected);
-        if (!item || item.deleted || !canMutate() || editing || gesture) return false;
-        change({id: item.id, revision: item.revision, delete: true},
-            {captureImage: item.kind === "image" ? item.id : null});
+        if (!selection.size || !canMutate() || editing || gesture) return false;
+        const elements = Array.from(selection, visibleItem).filter(Boolean);
+        if (!elements.length) return false;
+        const changes = elements.map(({id, revision}) => ({id, revision, delete: true}));
+        change(changes.length === 1 ? changes[0] : changes,
+            {captureImage: elements[0].kind === "image" ? elements[0].id : null});
         return true;
     }
 
@@ -670,6 +788,8 @@
         closed = true;
         failedWrite = null;
         gesture = null;
+        selection.clear();
+        setSpace(false);
         editing = null;
         arrowStart = null;
         arrowTracking = null;
@@ -760,19 +880,19 @@
                 elements.forEach(merge);
                 historyApplied(job, elements);
                 updateProperties();
-            } else if (response.ok && data?.element) {
+            } else if (response.ok && (data?.element || data?.changes?.length)) {
                 if (data.changes) {
                     data.changes.forEach(({after}) => merge(after));
                     remember(data.changes, job);
                 } else {
                     merge(data.element);
                 }
-                if (job.select && !items.get(data.element.id)?.deleted) {
-                    selected = data.element.id;
+                if (job.select && data.element && !items.get(data.element.id)?.deleted) {
+                    selection = new Set([data.element.id]);
                     setTool("select");
                 }
                 updateProperties();
-                if (job.focusLabel && selected === data.element.id) editAfter = selected;
+                if (job.focusLabel && selectedId() === data.element?.id) editAfter = selectedId();
             } else if (response.status >= 400 && response.status < 500) {
                 if (data?.element) merge(data.element);
                 if (job.history && response.status === 409) (job.history.backwards ? undo : redo).pop();
@@ -798,11 +918,16 @@
     }
 
     function updateHint() {
-        const text = editing ? "Enter — сохранить, Shift+Enter — новая строка, Esc — отменить. Размер меняется ручками по краям."
+        const text = isPanning() ? hints.hand
+            : editing ? "Enter — сохранить, Shift+Enter — новая строка, Esc — отменить. Размер меняется ручками по краям."
             : arrowStart ? "Укажите конец стрелки. Esc — отменить."
-            : tool === "select" && items.get(selected)?.kind === "arrow"
+            : tool === "select" && selection.size > 1
+                ? `Фигур выделено: ${selection.size}. Перетащите любую фигуру или потяните за угол рамки. Delete — удалить.`
+            : tool === "select" && items.get(selectedId())?.kind === "arrow"
                 ? "Потяните за конец стрелки, чтобы привязать его к фигуре или оставить свободным."
-                : hints[tool];
+            : tool === "select" && isShape(items.get(selectedId()))
+                ? "Потяните за стрелку у края фигуры, чтобы создать связь. Двойной щелчок — подпись; Delete — удалить."
+                : hints[tool] || "Щёлкните, чтобы добавить фигуру, или потяните, чтобы задать размер.";
         if (hint.textContent !== text) hint.textContent = text;
     }
 
@@ -814,17 +939,32 @@
     function setTool(next) {
         if (editing && !finishLabel()) return;
         tool = next;
-        canvas.dataset.tool = next;
         resetArrow();
-        updateHint();
         board.querySelectorAll("[data-board-tool]").forEach((button) => {
             button.setAttribute("aria-pressed", String(button.dataset.boardTool === next));
         });
-        if (next !== "select") {
-            selected = null;
-            updateProperties();
-            paintPreview();
-        }
+        if (next !== "select") selection.clear();
+        updateProperties();
+        syncTool();
+    }
+
+    function syncTool() {
+        canvas.dataset.tool = isPanning() ? "hand" : tool;
+        updateHint();
+        paintPreview();
+    }
+
+    function setSpace(held) {
+        if (spaceHeld === held) return;
+        spaceHeld = held;
+        syncTool();
+    }
+
+    function cancelGesture() {
+        const pointer = gesture?.pointer;
+        gesture = null;
+        if (pointer !== undefined && canvas.hasPointerCapture(pointer)) canvas.releasePointerCapture(pointer);
+        syncTool();
     }
 
     function point(event) {
@@ -833,8 +973,8 @@
             y: coord(top + (event.clientY - rect.top) / zoom)};
     }
 
-    function select(id) {
-        selected = id || null;
+    function select(ids) {
+        selection = new Set(ids);
         updateProperties();
         updateHint();
         paintPreview();
@@ -844,7 +984,7 @@
         const dx = p.x - g.start.x;
         const dy = p.y - g.start.y;
         const dragged = Math.max(Math.abs(dx), Math.abs(dy)) >= 8;
-        const square = g.mode === "circle" || g.mode === "square";
+        const square = regular.includes(g.mode);
         const edge = size(Math.max(Math.abs(dx), Math.abs(dy)));
         const w = dragged ? (square ? edge : size(Math.abs(dx))) : (square ? 112 : 170);
         const h = dragged ? (square ? edge : size(Math.abs(dy))) : (square ? 112 : 108);
@@ -858,11 +998,99 @@
         const dy = p.y - g.start.y;
         let w = g.side.includes("e") ? size(d.w + dx) : d.w;
         let h = g.side.includes("s") ? size(d.h + dy) : d.h;
-        if (["circle", "square"].includes(g.source.kind)) {
+        if (regular.includes(g.source.kind)) {
             const useWidth = g.side === "e" || (g.side === "se" && Math.abs(dx) >= Math.abs(dy));
             w = h = useWidth ? w : h;
         }
         return {...g.source, data: {...d, w, h}};
+    }
+
+    function groupGesture(mode, start) {
+        const sources = Array.from(selection, visibleItem).filter(isShape);
+        return sources.length > 1 ? {mode, start, sources, box: enclosing(sources)} : null;
+    }
+
+    function transformGroup(g, p) {
+        const {sources, box} = g;
+        let dx = p.x - g.start.x, dy = p.y - g.start.y, scale = 1;
+        if (g.mode === "group-move") {
+            // Limit the whole displacement together so shapes keep their spacing.
+            dx = clamp(dx, -coordLimit - box.x, coordLimit - Math.max(...sources.map(item => item.data.x)));
+            dy = clamp(dy, -coordLimit - box.y, coordLimit - Math.max(...sources.map(item => item.data.y)));
+        } else {
+            const dimensions = sources.flatMap(item => [item.data.w, item.data.h]);
+            let upper = maxSize / Math.max(...dimensions);
+            for (const {data} of sources) {
+                if (data.x > box.x) upper = Math.min(upper, (coordLimit - box.x) / (data.x - box.x));
+                if (data.y > box.y) upper = Math.min(upper, (coordLimit - box.y) / (data.y - box.y));
+            }
+            const delta = (dx * box.w + dy * box.h) / (box.w ** 2 + box.h ** 2);
+            scale = clamp(1 + delta, minSize / Math.min(...dimensions), upper);
+            dx = dy = 0;
+        }
+        const drafts = new Map();
+        for (const item of sources) {
+            const d = item.data;
+            const x = coord(box.x + (d.x - box.x) * scale + dx);
+            const y = coord(box.y + (d.y - box.y) * scale + dy);
+            const w = size(d.w * scale), h = size(d.h * scale);
+            if (x !== d.x || y !== d.y || w !== d.w || h !== d.h) {
+                drafts.set(item.id, {...item, data: {...d, x, y, w, h}});
+            }
+        }
+        return drafts;
+    }
+
+    function selectInFrame(g, p) {
+        const {start} = g;
+        g.ids = new Set(g.base);
+        if (Math.hypot(p.x - start.x, p.y - start.y) < 4 / zoom) {
+            g.box = null;
+            return;
+        }
+        const x = Math.min(start.x, p.x), y = Math.min(start.y, p.y);
+        const w = Math.abs(p.x - start.x), h = Math.abs(p.y - start.y);
+        g.box = {x, y, w, h};
+        for (const item of items.values()) {
+            if (!item.deleted && isShape(item)) {
+                const d = item.data;
+                if (d.x >= x && d.y >= y && d.x + d.w <= x + w && d.y + d.h <= y + h) g.ids.add(item.id);
+            }
+        }
+    }
+
+    function startArrow(p, from) {
+        return {mode: "arrow", start: p, from, to: snap(p, from.id), color: color.value};
+    }
+
+    function startSelection(event, p) {
+        const item = visibleItem(selectedId());
+        const side = event.target.dataset.boardResize;
+        const arrowEnd = event.target.dataset.boardArrowEnd;
+        const port = event.target.closest("[data-board-connect]")?.dataset.boardConnect;
+        if (port && isShape(item) && Object.hasOwn(ports, port)) {
+            return startArrow(p, {id: item.id, p: portPoint(item, port), port});
+        }
+        if (arrowEnd && item?.kind === "arrow") return {mode: "arrow-end", source: item, start: p, side: arrowEnd};
+        if (side && selection.size > 1) return groupGesture("group-resize", p);
+        if (side && isShape(item)) return {mode: "resize", source: item, start: p, side};
+
+        const id = event.target.closest("[data-element-id]")?.dataset.elementId;
+        if (editing) {
+            const target = id || shapeAt(p)?.id;
+            if (finishLabel()) select(target ? [target] : []);
+            return null;
+        }
+        const target = visibleItem(id);
+        const shapes = event.shiftKey ? [...selection].filter(key => isShape(visibleItem(key))) : [];
+        if (!target) return {mode: "marquee", start: p, base: shapes};
+        if (event.shiftKey && isShape(target)) {
+            select(shapes.includes(id) ? shapes.filter(key => key !== id) : [...shapes, id]);
+            return null;
+        }
+        if (!selection.has(id)) select([id]);
+        if (selection.size > 1) return groupGesture("group-move", p);
+        return target.kind === "arrow" ? null : {mode: "move", source: target, start: p};
     }
 
     function updateGesture(event) {
@@ -875,7 +1103,11 @@
             return;
         }
         const p = point(event);
-        if (g.mode === "move") {
+        if (g.mode === "group-move" || g.mode === "group-resize") {
+            g.drafts = transformGroup(g, p);
+        } else if (g.mode === "marquee") {
+            selectInFrame(g, p);
+        } else if (g.mode === "move") {
             const d = g.source.data;
             if (!g.draft && Math.hypot(p.x - g.start.x, p.y - g.start.y) < 2 / zoom) return;
             const x = coord(d.x + p.x - g.start.x), y = coord(d.y + p.y - g.start.y);
@@ -915,35 +1147,15 @@
     canvas.addEventListener("pointerdown", (event) => {
         if (!event.isPrimary || event.button !== 0 || gesture || closed || event.target.closest("[data-board-inline-text]")) return;
         const p = point(event);
-        if (tool === "hand") {
+        if (!editing) canvas.focus({preventScroll: true});
+        if (isPanning()) {
             gesture = {mode: "hand", left, top, screenX: event.clientX, screenY: event.clientY};
         } else if (canMutate()) {
-            if (tool === "select") {
-                const side = event.target.dataset.boardResize;
-                const arrowEnd = event.target.dataset.boardArrowEnd;
-                if (arrowEnd && visibleItem(selected)?.kind === "arrow") {
-                    canvas.focus({preventScroll: true});
-                    gesture = {mode: "arrow-end", source: visibleItem(selected), start: p, side: arrowEnd};
-                } else if (side && isShape(visibleItem(selected))) {
-                    gesture = {mode: "resize", source: visibleItem(selected), start: p, side};
-                } else {
-                    if (editing) {
-                        const target = event.target.closest("[data-element-id]")?.dataset.elementId ?? shapeAt(p)?.id;
-                        if (finishLabel()) select(target);
-                        return;
-                    }
-                    canvas.focus({preventScroll: true});
-                    select(event.target.closest("[data-element-id]")?.dataset.elementId);
-                    const item = visibleItem(selected);
-                    if (!item || item.kind === "arrow") return;
-                    gesture = {mode: "move", source: item, start: p};
-                }
-            } else if (tool === "arrow") {
-                canvas.focus({preventScroll: true});
-                const from = arrowStart || snap(p);
-                gesture = {mode: "arrow", start: p, from, to: snap(p, from.id), color: color.value};
+            if (tool === "arrow" || arrowStart) {
+                gesture = startArrow(p, arrowStart || snap(p));
+            } else if (tool === "select") {
+                gesture = startSelection(event, p);
             } else {
-                canvas.focus({preventScroll: true});
                 const ink = color.value === "ink" && tool === "note" ? "yellow" : color.value;
                 gesture = {mode: tool, start: p, color: ink};
                 gesture.draft = tool === "stroke"
@@ -960,14 +1172,16 @@
     canvas.addEventListener("pointermove", (event) => {
         if (gesture) {
             updateGesture(event);
-        } else if (tool === "arrow" && canMutate()) {
+        } else if (!isPanning() && (tool === "arrow" || arrowStart) && canMutate()) {
             const p = point(event);
             arrowTracking = snap(p, arrowStart?.id);
             paintPreview();
         }
     });
+    canvas.addEventListener("pointerenter", () => { pointerOnCanvas = true; });
     canvas.addEventListener("pointerleave", () => {
-        if (tool !== "arrow" || gesture) return;
+        pointerOnCanvas = false;
+        if (!(tool === "arrow" || arrowStart) || gesture) return;
         arrowTracking = null;
         paintPreview();
     });
@@ -977,7 +1191,11 @@
         const g = gesture;
         const {draft, mode, source} = g;
         gesture = null;
-        if (mode === "arrow") {
+        if (mode === "marquee") {
+            select(g.ids);
+        } else if (g.drafts?.size) {
+            change(Array.from(g.drafts.values(), ({id, revision, kind, data}) => ({id, revision, kind, data})));
+        } else if (mode === "arrow") {
             const data = withArrowEnd(withArrowEnd({color: g.color}, "source", g.from), "target", g.to);
             const geometry = arrowGeometry(data);
             if ((g.dragged || arrowStart) && geometry && Math.hypot(geometry.end.x - geometry.start.x,
@@ -1000,18 +1218,19 @@
             change({id: source?.id || uuid(), revision: source?.revision || 0, kind: draft.kind, data: draft.data},
                 {select: newShape, focusLabel: newShape});
         }
-        paintPreview();
+        syncTool();
     });
     for (const type of ["pointercancel", "lostpointercapture"]) {
         canvas.addEventListener(type, (event) => {
             if (gesture?.pointer === event.pointerId) {
                 gesture = null;
-                paintPreview();
+                syncTool();
             }
         });
     }
     canvas.addEventListener("dblclick", (event) => {
-        if (tool !== "select" || event.target.closest("[data-board-inline-text]")) return;
+        if (tool !== "select" || isPanning() || arrowStart ||
+            event.target.closest("[data-board-inline-text], [data-board-connect]")) return;
         const item = items.get(event.target.closest("[data-element-id]")?.dataset.elementId) || shapeAt(point(event));
         if (isShape(item)) beginLabel(item.id);
     });
@@ -1021,8 +1240,11 @@
         const rect = canvas.getBoundingClientRect();
         zoomAt(event.deltaY < 0 ? 1.12 : 1 / 1.12, event.clientX - rect.left, event.clientY - rect.top);
     }, {passive: false});
-    board.querySelectorAll("[data-board-tool]").forEach((button) =>
-        button.addEventListener("click", () => { if (!gesture) setTool(button.dataset.boardTool); }));
+    board.querySelectorAll("[data-board-tool]").forEach((button) => button.addEventListener("click", (event) => {
+        if (gesture) return;
+        setTool(button.dataset.boardTool);
+        if (event.detail > 0 && !editing) canvas.focus({preventScroll: true});
+    }));
     board.querySelectorAll("[data-board-zoom]").forEach((button) => button.addEventListener("click", () => {
         if (gesture || closed) return;
         if (button.dataset.boardZoom === "fit") {
@@ -1087,12 +1309,22 @@
             event.preventDefault();
             expandInWindow(false);
         }
+        if (closed || editing || event.defaultPrevented || event.isComposing || event.code !== "Space" ||
+            event.ctrlKey || event.metaKey || event.altKey || (!pointerOnCanvas && event.target !== canvas) ||
+            event.target.closest?.("input, textarea, select, button, a, summary, [contenteditable]")) return;
+        event.preventDefault();
+        if (!gesture || gesture.mode === "hand") setSpace(true);
+    });
+    document.addEventListener("keyup", (event) => { if (event.code === "Space") setSpace(false); });
+    window.addEventListener("blur", () => {
+        setSpace(false);
+        if (gesture) cancelGesture();
     });
 
     if (canEdit) {
         undoButton?.addEventListener("click", () => replay(true));
         redoButton?.addEventListener("click", () => replay(false));
-        find("edit-label").addEventListener("click", () => beginLabel(selected));
+        find("edit-label").addEventListener("click", () => beginLabel(selectedId()));
         find("save-label").addEventListener("click", () => finishLabel());
         find("delete").addEventListener("click", () => {
             if (deleteSelection()) canvas.focus({preventScroll: true});
@@ -1102,11 +1334,9 @@
             if (event.isComposing) return;
             if (event.key === "Escape") {
                 if (editing && finishLabel(true)) event.preventDefault();
-                else if (arrowStart || ["arrow", "arrow-end"].includes(gesture?.mode)) {
-                    gesture = null;
+                else if (gesture || arrowStart) {
                     resetArrow();
-                    updateHint();
-                    paintPreview();
+                    cancelGesture();
                     event.preventDefault();
                 }
                 return;
@@ -1128,9 +1358,9 @@
             }
             if (input) return;
             if (event.key === "Delete" && !event.repeat && deleteSelection()) event.preventDefault();
-            if (event.key === "F2" && isShape(items.get(selected))) {
+            if (event.key === "F2" && isShape(items.get(selectedId()))) {
                 event.preventDefault();
-                beginLabel(selected);
+                beginLabel(selectedId());
             }
         });
         const file = find("file");
@@ -1160,6 +1390,7 @@
     document.addEventListener("visibilitychange", () => {
         clearTimeout(pollTimer);
         if (!document.hidden) poll();
+        else setSpace(false);
     });
     new ResizeObserver(placeView).observe(canvas);
     setTool(tool);

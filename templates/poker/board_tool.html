@@ -4,7 +4,7 @@
         {% elif tool == "save-label" %}data-board-save-label
         {% elif tool == "upload" %}data-board-upload
         {% elif tool == "undo" or tool == "redo" %}data-board-{{ tool }} aria-keyshortcuts="{{ keys }}" disabled
-        {% else %}data-board-tool="{{ tool }}" aria-pressed="{{ active|yesno:'true,false,false' }}"{% endif %}>
+        {% else %}data-board-tool="{{ tool }}" aria-pressed="{{ active|yesno:'true,false,false' }}"{% if keys %} aria-keyshortcuts="{{ keys }}"{% endif %}{% endif %}>
     {% include "poker/board_tool_icon.html" with tool=tool only %}
     <span class="board-tool-label">{{ label }}</span>
 </button>
