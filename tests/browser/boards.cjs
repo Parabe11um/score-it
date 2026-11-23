@@ -71,8 +71,9 @@ async function checkBoards({base, project, owner, first, second, reader}) {
     await expect(caption(first)).toBeFocused();
     assert(await caption(first).evaluate(node => !!node.closest('svg')));
     await caption(first).fill('XНачало');
-    await caption(first).press('Home');
-    await caption(first).press('Delete');
+    // Home starts the current visual line, which depends on font metrics and wrapping.
+    await caption(first).evaluate(node => node.setSelectionRange(0, 0));
+    await first.keyboard.press('Delete');
     await expect(caption(first)).toHaveValue('Начало');
     await expect(element(first, 'circle')).toHaveCount(1);
     await caption(first).press('Enter');
