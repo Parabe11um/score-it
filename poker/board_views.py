@@ -23,8 +23,10 @@ from .board_payloads import (
     MAX_OBJECTS,
     SHAPES,
     InvalidBoardPayload,
+    arrow_ends,
     coordinate,
     normalize_image,
+    read_history,
     read_mutation,
 )
 from .models import Board, BoardElement, BoardLink, Project
@@ -120,6 +122,7 @@ def _editor(request, access, *, link_form=None, issued_url=None, status=200):
         "board": board, "can_edit": access.can_edit, "guest": guest,
         "state_url": reverse("poker:" + base + "_state", args=args),
         "change_url": reverse("poker:" + base + "_change", args=args),
+        "history_url": reverse("poker:" + base + "_history", args=args),
         "upload_url": reverse("poker:" + base + "_upload", args=args),
         # Add an element ID on the client below this validated same-origin path.
         "image_base": reverse("poker:" + base + "_image", args=(*args, uuid.UUID(int=0))).rsplit("/", 2)[0] + "/",
@@ -228,7 +231,7 @@ def board_guest(request, link_id):
 def _item(row):
     return {
         "id": str(row["key"]), "order": row["pk"], "revision": row["revision"],
-        "kind": row["kind"], "data": row["data"], "deleted": row["deleted"],
+        "kind": row["kind"], "data": {} if row["deleted"] else row["data"], "deleted": row["deleted"],
     }
 
 
@@ -240,8 +243,34 @@ def _one(board, key):
     return _item(row) if row is not None else None
 
 
-def _stored(element):
-    return JsonResponse({"element": _item({field: getattr(element, field) for field in ITEM_FIELDS})})
+def _snapshot(element):
+    return _item({field: getattr(element, field) for field in ITEM_FIELDS})
+
+
+def _stored(element, before, related=()):
+    after = _snapshot(element)
+    return JsonResponse({"element": after, "changes": [{"before": before, "after": after}, *related]})
+
+
+def _attached_arrows(board, keys):
+    return board.elements.filter(kind="arrow", deleted=False).filter(
+        Q(data__source__in=keys) | Q(data__target__in=keys),
+    )
+
+
+def _live_shapes(board, keys):
+    return {str(key) for key in board.elements.filter(
+        key__in=keys, deleted=False, kind__in=SHAPES,
+    ).values_list("key", flat=True)}
+
+
+def _mark_deleted(element):
+    element.deleted = True
+    # The browser holds the picture for undo. Keep only its digest in the
+    # tombstone so a replay can restore the exact sanitized bytes.
+    picture = element.image if element.kind == "image" else None
+    element.data = {"sha256": hashlib.sha256(picture).hexdigest()} if picture else {}
+    element.image = None
 
 
 def _error(message, status=400):
@@ -279,6 +308,7 @@ def board_change(request, **scope):
     with transaction.atomic():
         board = _writable_board(access)
         element = board.elements.defer("image").filter(key=key).first()
+        before = _snapshot(element) if element is not None else None
         if element is None:
             if version or kind is None or kind == "image":
                 return _error("Элемент не найден.", 409)
@@ -288,31 +318,92 @@ def board_change(request, **scope):
         elif element.deleted or element.revision != version or (kind is not None and kind != element.kind):
             return JsonResponse({
                 "error": "Элемент обновился. Проверьте его и повторите правку.",
-                "element": _one(board, key),
+                "element": before,
             }, status=409)
 
         # The board lock keeps the endpoints valid until the arrow is saved.
-        if kind == "arrow" and board.elements.filter(
-            key__in=(data["source"], data["target"]), deleted=False, kind__in=SHAPES,
-        ).count() != 2:
-            return _error("Один из блоков недоступен. Выберите два блока на этой доске.", 409)
+        if kind == "arrow" and (ends := arrow_ends(data)) != _live_shapes(board, ends):
+            return _error("Блок недоступен. Выберите фигуру на этой доске или оставьте конец свободным.", 409)
 
         board.revision += 1
         element.revision = board.revision
+        related = []
         if kind is None:
-            element.deleted = True
-            element.data = {}
-            element.image = None
-            element.image_type = ""
+            _mark_deleted(element)
             if element.kind in SHAPES:
-                board.elements.filter(kind="arrow", deleted=False).filter(
-                    Q(data__source=str(key)) | Q(data__target=str(key)),
-                ).update(deleted=True, data={}, revision=board.revision)
+                arrows = _attached_arrows(board, [str(key)])
+                for row in arrows.values(*ITEM_FIELDS):
+                    previous = _item(row)
+                    related.append({"before": previous, "after": {**previous,
+                        "deleted": True, "data": {}, "revision": board.revision}})
+                arrows.update(deleted=True, data={}, revision=board.revision)
         else:
             element.data = data
         board.save(update_fields=("revision",))
         element.save()
-    return _stored(element)
+    return _stored(element, before, related)
+
+
+@never_cache
+@require_POST
+def board_history(request, **scope):
+    """Replay one action atomically, with an exact revision for every row."""
+    access = _resolve(request, **scope)
+    if not access.can_edit:
+        return HttpResponseForbidden()
+    try:
+        mutations, upload = read_history(request)
+    except InvalidBoardPayload as error:
+        return _error(str(error))
+    with transaction.atomic():
+        board = _writable_board(access)
+        keys = [key for key, _, _, _ in mutations]
+        elements = {row.key: row for row in board.elements.filter(key__in=keys).defer("image")}
+        for key, revision, kind, _ in mutations:
+            element = elements.get(key)
+            if element is None or element.revision != revision or (
+                element.deleted if kind is None else element.kind != kind
+            ):
+                return _error("Правка пропущена: элемент уже изменился.", 409)
+
+        retiring = {str(key) for key, _, kind, _ in mutations if kind is None and elements[key].kind in SHAPES}
+        if retiring and _attached_arrows(board, retiring).exclude(key__in=keys).exists():
+            return _error("Правка пропущена: у фигуры появились другие стрелки.", 409)
+        restored = {str(key) for key, _, kind, _ in mutations if kind in SHAPES}
+        endpoints = set().union(*(arrow_ends(data) for _, _, kind, data in mutations if kind == "arrow"))
+        allowed = (_live_shapes(board, endpoints) | restored) - retiring
+        if not endpoints <= allowed:
+            return _error("Правка пропущена: фигура для привязки недоступна.", 409)
+
+        pictures = [elements[key] for key, _, kind, _ in mutations if kind == "image" and elements[key].deleted]
+        removed_pictures = [elements[key] for key, _, kind, _ in mutations
+                            if kind is None and elements[key].kind == "image"]
+        if len(pictures) != int(upload is not None):
+            return _error("Не удалось вернуть изображение.")
+        if pictures:
+            picture = pictures[0]
+            binary = upload.read()
+            if not constant_time_compare(hashlib.sha256(binary).hexdigest(), picture.data.get("sha256", "")):
+                return _error("Не удалось вернуть изображение.")
+            active_images = board.elements.filter(kind="image", deleted=False).count() - len(removed_pictures)
+            if active_images >= MAX_BOARD_IMAGES:
+                return _error("Достигнут лимит изображений доски.", 409)
+            picture.image = binary
+
+        board.revision += 1
+        for key, _, kind, data in mutations:
+            element = elements[key]
+            element.revision = board.revision
+            if kind is None:
+                _mark_deleted(element)
+            else:
+                element.deleted = False
+                element.data = data
+        board.elements.bulk_update(elements.values(), ("revision", "deleted", "data"))
+        if pictures or removed_pictures:
+            board.elements.bulk_update(pictures + removed_pictures, ("image",))
+        board.save(update_fields=("revision",))
+        return JsonResponse({"elements": [_snapshot(elements[key]) for key in keys]})
 
 
 @never_cache
@@ -349,7 +440,7 @@ def board_upload(request, **scope):
             image=binary, image_type=content_type,
         )
         board.save(update_fields=("revision",))
-    return _stored(element)
+    return _stored(element, None)
 
 
 @never_cache

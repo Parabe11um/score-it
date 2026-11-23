@@ -22,6 +22,7 @@
     font-size: 13px; font-weight: 650; text-align: start;
 }
 .board-tools button:hover, .board-toolbar button:hover { background: var(--surface-soft); border-color: var(--control-line); }
+.board-tools button:disabled { opacity: .42; cursor: default; background: var(--surface); border-color: transparent; }
 .board-tools button[aria-pressed="true"], .board-toolbar button[aria-pressed="true"] { background: var(--primary-soft); color: var(--primary-dark); border-color: var(--accent-line); }
 .board-tool-icon { flex: 0 0 18px; color: var(--primary); }
 .board-sidebar__section { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
@@ -41,6 +42,7 @@
 .board-canvas[data-tool="select"] { cursor: default; }
 .board-canvas[data-tool="select"] [data-element-id] { cursor: move; }
 .board-canvas[data-tool="select"] [data-element-kind="arrow"] { cursor: pointer; }
+.board-canvas [data-board-arrow-end] { cursor: crosshair; }
 .board-canvas[data-tool="hand"] { cursor: grab; }
 .board-canvas[data-tool="hand"]:active { cursor: grabbing; }
 .board-canvas [data-board-resize="e"] { cursor: ew-resize; }

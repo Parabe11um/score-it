@@ -25,6 +25,7 @@ urlpatterns = [
     path("projects/<int:pk>/boards/<uuid:board_id>/", board_views.board_detail, name="board_detail"),
     path("projects/<int:pk>/boards/<uuid:board_id>/state/", board_views.board_state, name="board_state"),
     path("projects/<int:pk>/boards/<uuid:board_id>/change/", board_views.board_change, name="board_change"),
+    path("projects/<int:pk>/boards/<uuid:board_id>/history/", board_views.board_history, name="board_history"),
     path("projects/<int:pk>/boards/<uuid:board_id>/upload/", board_views.board_upload, name="board_upload"),
     path(
         "projects/<int:pk>/boards/<uuid:board_id>/images/<uuid:element_id>/",
@@ -41,6 +42,7 @@ urlpatterns = [
     path("board-access/<uuid:link_id>/", board_views.board_guest, name="board_guest"),
     path("board-access/<uuid:link_id>/state/", board_views.board_state, name="board_guest_state"),
     path("board-access/<uuid:link_id>/change/", board_views.board_change, name="board_guest_change"),
+    path("board-access/<uuid:link_id>/history/", board_views.board_history, name="board_guest_history"),
     path("board-access/<uuid:link_id>/upload/", board_views.board_upload, name="board_guest_upload"),
     path("board-access/<uuid:link_id>/images/<uuid:element_id>/", board_views.board_image, name="board_guest_image"),
     path("projects/<int:pk>/team/", team_views.project_team, name="project_team"),

@@ -34,6 +34,11 @@ def arrow(source, target):
             "data": {"source": source, "target": target, "color": "ink"}}
 
 
+def patch(item, revision=None):
+    return {"id": item["id"], "revision": item["revision"] if revision is None else revision,
+            "kind": item["kind"], "data": item["data"]}
+
+
 class BoardClient(Client):
     def __init__(self):
         super().__init__(enforce_csrf_checks=True)
@@ -140,7 +145,9 @@ class BoardTests(TestCase):
         view = self.open_guest(view_url, view_code)
         edit = self.open_guest(edit_url, edit_code)
         self.assertNotContains(view.get(view_url), 'data-board-tool="note"')
+        self.assertNotContains(view.get(view_url), 'data-board-undo ')
         self.assertEqual(view.send(view_url + "change/", note(), as_json=True).status_code, 403)
+        self.assertEqual(view.send(view_url + "history/", [], as_json=True).status_code, 403)
         self.assertEqual(view.send(view_url + "upload/", {}).status_code, 403)
         self.assertEqual(edit.get(other_url + "state/").status_code, 404)
         self.assertEqual(edit.send(other_url, {"code": edit_code}).status_code, 404)
@@ -227,6 +234,57 @@ class BoardTests(TestCase):
                 self.assertEqual(attempt.status_code, expected)
         self.assertFalse(self.board.elements.filter(kind="arrow").exists())
 
+    def test_free_and_partly_attached_arrows_can_be_rebound(self):
+        endpoint = self.path + "change/"
+        source, target = note(), note(x=460)
+        for block in (source, target):
+            self.assertEqual(self.owner_client.send(endpoint, block, as_json=True).status_code, 200)
+        free = arrow(None, None)
+        free["data"].update(start=[165, 90], end=[350, 90])
+        invalid = {**free, "data": {**free["data"], "end": [True, 90]}}
+        self.assertEqual(self.owner_client.send(endpoint, invalid, as_json=True).status_code, 400)
+        first = self.owner_client.send(endpoint, free, as_json=True).json()["element"]
+        self.assertEqual(first["data"], free["data"])
+        partial = patch(first)
+        partial["data"].update(source=source["id"])
+        partial["data"].pop("start")
+        second = self.owner_client.send(endpoint, partial, as_json=True).json()["element"]
+        self.assertEqual(second["data"], {"source": source["id"], "target": None, "end": [350, 90], "color": "ink"})
+        joined = patch(second)
+        joined["data"].update(target=target["id"])
+        joined["data"].pop("end")
+        third = self.owner_client.send(endpoint, joined, as_json=True).json()["element"]
+        reopened = self.owner_client.get(self.path + "state/").json()["elements"]
+        self.assertEqual(reopened[-1], third)
+        self.assertEqual(third["data"], arrow(source["id"], target["id"])["data"])
+
+    def test_history_restores_block_and_connections_together_and_rejects_stale_replay(self):
+        url, code = self.make_link()
+        guest, other = self.open_guest(url, code), self.open_guest(url, code)
+        change, history = url + "change/", url + "history/"
+        start, end = [guest.send(change, note(x=x), as_json=True).json()["element"] for x in (20, 400)]
+        line = other.send(change, arrow(start["id"], end["id"]), as_json=True).json()["element"]
+        remove = {"id": start["id"], "revision": start["revision"], "delete": True}
+        self.assertEqual(guest.send(history, [remove], as_json=True).status_code, 409)
+        self.assertEqual(self.board.elements.filter(deleted=False).count(), 3)
+
+        response = guest.send(change, remove, as_json=True).json()
+        changes = response["changes"]
+        self.assertEqual([item["before"] for item in changes], [start, line])
+        undo = [patch(item["before"], item["after"]["revision"]) for item in changes]
+        self.assertEqual(guest.send(history, undo, as_json=True, csrf=False).status_code, 403)
+        self.assertEqual(guest.send(self.sibling.get_absolute_url() + "history/", undo, as_json=True).status_code, 404)
+        restored = guest.send(history, undo, as_json=True).json()["elements"]
+        self.assertEqual([item["data"] for item in restored], [start["data"], line["data"]])
+        self.assertEqual(restored[0]["revision"], restored[1]["revision"])
+        self.assertEqual(self.board.elements.count(), 3)
+        redo = [{"id": item["id"], "revision": item["revision"], "delete": True} for item in restored]
+        moved = note(key=start["id"], revision=restored[0]["revision"], x=27)
+        self.assertEqual(other.send(change, moved, as_json=True).status_code, 200)
+        self.assertEqual(guest.send(history, redo, as_json=True).status_code, 409)
+        self.assertEqual(self.board.elements.get(key=start["id"]).data["x"], 27)
+        self.assertFalse(self.board.elements.get(key=line["id"]).deleted)
+
     def test_revoke_and_expiry_disable_previously_open_sessions(self):
         for expiry in (True, False):
             with self.subTest(expiry=expiry):
@@ -244,6 +302,7 @@ class BoardTests(TestCase):
                     self.assertEqual(response.status_code, 404)
                     self.assertIn("no-store", response["Cache-Control"])
                 self.assertEqual(guest.send(url + "change/", note(), as_json=True).status_code, 404)
+                self.assertEqual(guest.send(url + "history/", [], as_json=True).status_code, 404)
                 self.assertEqual(guest.send(url + "upload/", {}).status_code, 404)
 
     def test_image_is_reencoded_private_and_retry_does_not_duplicate_it(self):
@@ -270,6 +329,29 @@ class BoardTests(TestCase):
             self.assertEqual(output.size, (45, 32))
             self.assertEqual(output.getpixel((0, 0)), (255, 0, 0, 255))
         self.assertEqual(self.owner_client.get(self.path + endpoint).content, asset.content)
+
+    def test_deleted_image_can_be_restored_with_its_original_sanitized_bytes(self):
+        client = self.owner_client
+        key = str(uuid.uuid4())
+        created = client.send(self.path + "upload/", {
+            "id": key, "x": 40, "y": 50, "image": self.make_image(format="JPEG"),
+        }).json()["element"]
+        url = self.path + f"images/{key}/"
+        data = client.get(url).content
+        deleted = client.send(self.path + "change/", {
+            "id": key, "revision": created["revision"], "delete": True,
+        }, as_json=True).json()["element"]
+        self.assertIsNone(self.board.elements.get(key=key).image)
+        self.assertEqual(deleted["data"], {})
+        self.assertEqual(client.get(url).status_code, 404)
+        restore = json.dumps([patch(created, deleted["revision"])])
+        bad = SimpleUploadedFile("image.jpg", b"different bytes", "image/jpeg")
+        self.assertEqual(client.send(self.path + "history/", {"changes": restore, "image": bad}).status_code, 400)
+        image = SimpleUploadedFile("image.jpg", data, "image/jpeg")
+        restored = client.send(self.path + "history/", {"changes": restore, "image": image})
+        self.assertEqual(restored.status_code, 200)
+        self.assertEqual(client.get(url).content, data)
+        self.assertEqual(self.board.elements.count(), 1)
 
     def test_invalid_shapes_images_and_cross_origin_edits_are_rejected(self):
         endpoint = self.path + "change/"
