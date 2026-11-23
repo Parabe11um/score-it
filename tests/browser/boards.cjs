@@ -50,12 +50,17 @@ async function open(page, url) {
     await fresh(page);
 }
 
-async function checkBoards({base, project, owner, first, second, reader}) {
+async function newBoard(base, project, owner, name) {
+    await owner.bringToFront();
     await owner.goto(base + '/projects/' + project + '/overview/');
     await owner.getByRole('navigation', {name: 'Разделы проекта'}).getByRole('link', {name: 'Доски', exact: true}).click();
-    await owner.getByLabel('Название доски').fill('Схема команды');
+    await owner.getByLabel('Название доски').fill(name);
     await button(owner, 'Создать доску').click();
-    await expect(owner.getByRole('heading', {name: 'Схема команды'})).toBeVisible();
+    await expect(owner.getByRole('heading', {name})).toBeVisible();
+}
+
+async function checkBoards({base, project, owner, first, second, reader}) {
+    await newBoard(base, project, owner, 'Схема команды');
     const editUrl = await issue(owner, 'edit');
     await open(first, editUrl);
     await open(second, editUrl);
@@ -152,6 +157,11 @@ async function checkBoards({base, project, owner, first, second, reader}) {
 
     await first.locator('[data-board-file]').setInputFiles({name: 'board.png', mimeType: 'image/png', buffer: png});
     await expect(element(first, 'image').locator('image')).toHaveCount(1);
+    await canvas(first).focus();
+    await first.keyboard.press('Control+z');
+    await expect(element(first, 'image')).toHaveCount(0);
+    await button(first, 'Повторить правку').click();
+    await expect(element(first, 'image').locator('image')).toHaveCount(1);
     await button(first, 'Увеличить масштаб').click();
     await expect(first.locator('[data-board-zoom="reset"]')).toHaveText('125%');
     await button(first, 'Вся доска').click();
@@ -202,4 +212,92 @@ async function checkBoards({base, project, owner, first, second, reader}) {
     assert.equal((await reader.context().request.get(base + viewer + 'state/')).status(), 200);
 }
 
-module.exports = {checkBoards};
+async function checkBoardHistory({base, project, owner, first, second}) {
+    const arrow = element(first, 'arrow');
+    const rectangle = element(first, 'rectangle');
+    const targetGrip = first.locator('[data-board-arrow-end="target"]');
+    const undo = button(first, 'Отменить правку');
+    const redo = button(first, 'Повторить правку');
+    await newBoard(base, project, owner, 'История схемы');
+    const url = await issue(owner, 'edit');
+    await open(first, url);
+    await expect(undo).toBeDisabled();
+    await button(first, 'Прямоугольник').click();
+    await canvas(first).click({position: {x: 42, y: 80}});
+    await expect(caption(first)).toBeFocused();
+    await first.keyboard.insertText('А');
+    await first.keyboard.press('Control+z');
+    await expect(caption(first)).toHaveValue('');
+    await expect(rectangle).toHaveCount(1);
+    await caption(first).fill('Начало');
+    await caption(first).press('Enter');
+    await expect(rectangle.locator('tspan')).toContainText('Начало');
+    await first.keyboard.press('Control+z');
+    await expect(rectangle.locator('tspan')).toHaveCount(0);
+    await first.keyboard.press('Control+Shift+z');
+    await expect(rectangle.locator('tspan')).toContainText('Начало');
+
+    await button(first, 'Стрелка').click();
+    await canvas(first).scrollIntoViewIfNeeded();
+    const stage = await canvas(first).boundingBox();
+    assert(stage && stage.width > 540, 'Expected space to draw and attach an arrow');
+    await drag(first, await midpoint(rectangle.locator('rect')), {x: stage.x + 350, y: stage.y + 135});
+    await expect(arrow).toHaveCount(1);
+    assert.equal(await arrowEnd(first, 'x1'), 212);
+    assert.equal(await arrowEnd(first, 'x2'), 350);
+    await button(first, 'Квадрат').click();
+    await canvas(first).click({position: {x: 420, y: 78}});
+    await expect(caption(first)).toBeFocused();
+    await caption(first).press('Escape');
+    await arrow.locator('line').nth(1).click();
+    await drag(first, await midpoint(targetGrip), await midpoint(element(first, 'square').locator('rect')));
+    await expect.poll(() => arrowEnd(first, 'x2')).toBe(420);
+    await expect(undo).toBeEnabled();
+    await undo.click();
+    await expect.poll(() => arrowEnd(first, 'x2')).toBe(350);
+    await expect(redo).toBeEnabled();
+    await first.keyboard.press('Control+Shift+z');
+    await expect.poll(() => arrowEnd(first, 'x2')).toBe(420);
+
+    await open(second, url);
+    await expect.poll(() => arrowEnd(second, 'x2')).toBe(420);
+    await first.bringToFront();
+    await rectangle.locator('rect').click();
+    await first.keyboard.press('Delete');
+    await expect(rectangle).toHaveCount(0);
+    await expect(arrow).toHaveCount(0);
+    await first.keyboard.press('Control+z');
+    await expect(rectangle).toHaveCount(1);
+    await expect.poll(() => arrowEnd(first, 'x2')).toBe(420);
+    await first.keyboard.press('Control+z');
+    await expect.poll(() => arrowEnd(first, 'x2')).toBe(350);
+    await first.keyboard.press('Control+Shift+z');
+    await expect.poll(() => arrowEnd(first, 'x2')).toBe(420);
+
+    // A new edit clears the unused redo branch (the deletion above).
+    const start = await midpoint(rectangle.locator('rect'));
+    await drag(first, start, {x: start.x, y: start.y + 20});
+    await expect(rectangle).toHaveAttribute('transform', 'translate(42 100)');
+    await expect(redo).toBeDisabled();
+    await second.bringToFront();
+    const peerBlock = element(second, 'rectangle');
+    await expect(peerBlock).toHaveAttribute('transform', 'translate(42 100)');
+    const peerStart = await midpoint(peerBlock.locator('rect'));
+    await drag(second, peerStart, {x: peerStart.x, y: peerStart.y + 25});
+    await expect(peerBlock).toHaveAttribute('transform', 'translate(42 125)');
+    await first.bringToFront();
+    await expect(rectangle).toHaveAttribute('transform', 'translate(42 125)');
+    await first.keyboard.press('Control+z');
+    await expect(status(first)).toContainText('элемент уже изменился');
+    await expect(rectangle).toHaveAttribute('transform', 'translate(42 125)');
+
+    await button(first, 'Стрелка').click();
+    await canvas(first).click({position: {x: 60, y: 290}});
+    await canvas(first).click({position: {x: 210, y: 290}});
+    await expect(arrow).toHaveCount(2);
+    await expect(arrow.last().locator('line').nth(1)).toHaveAttribute('x2', '210');
+    await first.keyboard.press('Control+z');
+    await expect(arrow).toHaveCount(1);
+}
+
+module.exports = {checkBoards, checkBoardHistory};

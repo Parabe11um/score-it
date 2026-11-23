@@ -43,6 +43,9 @@
     const hint = find("hint");
     const empty = find("empty");
     const retry = find("retry");
+    const undoButton = find("undo");
+    const redoButton = find("redo");
+    const hasHistory = Boolean(undoButton && redoButton && board.dataset.historyUrl);
     const properties = find("properties");
     const inlineText = find("inline-text");
     const label = find("label");
@@ -55,6 +58,7 @@
 
     const ns = "http://www.w3.org/2000/svg";
     const minZoom = 0.05;
+    const historyLimit = 30;
     const isShape = (item) => ["circle", "square", "rectangle", "note"].includes(item?.kind);
     const palette = {
         ink: ["#334155", "#f1f5f9"],
@@ -67,7 +71,7 @@
         hand: "Перетаскивайте полотно. Масштаб меняется кнопками + и −.",
         select: "Перетащите блок, чтобы переместить. Двойной щелчок — подпись; Delete — удаление.",
         stroke: "Нажмите и ведите по полотну, чтобы нарисовать линию.",
-        arrow: "Перетащите стрелку между блоками или щёлкните по ним по очереди.",
+        arrow: "Перетащите стрелку или укажите начало и конец двумя щелчками. Фигуры рядом не обязательны.",
         circle: "Щёлкните, чтобы добавить круг, или потяните, чтобы задать размер.",
         square: "Щёлкните, чтобы добавить квадрат, или потяните, чтобы задать размер.",
         rectangle: "Щёлкните, чтобы добавить прямоугольник, или потяните, чтобы задать размер.",
@@ -76,6 +80,9 @@
     const items = new Map();
     const nodes = new Map();
     const arrows = new Map();
+    const undo = [];
+    const redo = [];
+    const replayVersions = new Map();
     let tool = canEdit ? "select" : "hand";
     let selected = null;
     let editing = null;
@@ -225,6 +232,13 @@
 
     function bounds(item) {
         const d = item.data;
+        if (item.kind === "arrow") {
+            const geometry = arrowGeometry(d);
+            if (!geometry) return null;
+            const {start, end} = geometry;
+            return {x: Math.min(start.x, end.x), y: Math.min(start.y, end.y),
+                w: Math.abs(end.x - start.x), h: Math.abs(end.y - start.y)};
+        }
         if (item.kind !== "stroke") return {x: d.x, y: d.y, w: d.w, h: d.h};
         const xs = d.points.map((p) => p[0]);
         const ys = d.points.map((p) => p[1]);
@@ -233,8 +247,8 @@
     }
 
     function fitBoard() {
-        const boxes = Array.from(items.values()).filter((item) => !item.deleted && item.kind !== "arrow")
-            .map((item) => bounds(visibleItem(item.id)));
+        const boxes = Array.from(items.values()).filter((item) => !item.deleted)
+            .map((item) => bounds(visibleItem(item.id))).filter(Boolean);
         if (!boxes.length) return;
         const x = Math.min(...boxes.map((box) => box.x));
         const y = Math.min(...boxes.map((box) => box.y));
@@ -288,6 +302,36 @@
         return best;
     }
 
+    function snap(p, except = null) {
+        return {p, id: shapeAt(p, except, 12 / zoom)?.id || null};
+    }
+
+    function withArrowEnd(data, side, anchor) {
+        const next = {...data, [side]: anchor.id};
+        const field = side === "source" ? "start" : "end";
+        if (anchor.id) delete next[field];
+        else next[field] = [anchor.p.x, anchor.p.y];
+        return next;
+    }
+
+    function arrowAnchor(data, side) {
+        if (data[side]) {
+            const shape = visibleItem(data[side]);
+            return isShape(shape) ? {shape, p: center(shape)} : null;
+        }
+        const [x, y] = data[side === "source" ? "start" : "end"];
+        return {p: {x, y}};
+    }
+
+    function arrowGeometry(data) {
+        const from = arrowAnchor(data, "source");
+        const to = arrowAnchor(data, "target");
+        return from && to ? {
+            start: from.shape ? edgeToward(from.shape, to.p) : from.p,
+            end: to.shape ? edgeToward(to.shape, from.p) : to.p,
+        } : null;
+    }
+
     function positionArrow(parts, start, end, color, highlighted = false) {
         const signature = [start.x, start.y, end.x, end.y, zoom, color, highlighted].join("/");
         if (parts.signature === signature) return;
@@ -327,14 +371,13 @@
 
     function drawConnections() {
         for (const {item, parts} of arrows.values()) {
-            const source = visibleItem(item.data.source);
-            const target = visibleItem(item.data.target);
-            const visible = source && target;
-            parts.node.toggleAttribute("hidden", !visible);
-            if (!visible) continue;
+            const data = visibleItem(item.id).data;
+            const geometry = arrowGeometry(data);
+            parts.node.toggleAttribute("hidden", !geometry);
+            if (!geometry) continue;
             const selectedArrow = selected === item.id;
-            positionArrow(parts, edgeToward(source, center(target)), edgeToward(target, center(source)),
-                selectedArrow ? "#076d35" : palette[item.data.color][0], selectedArrow);
+            positionArrow(parts, geometry.start, geometry.end,
+                selectedArrow ? "#076d35" : palette[data.color][0], selectedArrow);
         }
     }
 
@@ -349,25 +392,34 @@
     }
 
     function showArrowPreview() {
-        const tracking = gesture?.mode === "arrow" ? gesture : arrowTracking;
-        const source = visibleItem(gesture?.mode === "arrow" ? gesture.sourceId : arrowStart);
-        const target = visibleItem(tracking?.target);
+        const drawing = gesture?.mode === "arrow" ? gesture : null;
+        const from = drawing?.from || arrowStart;
+        const to = drawing?.to || arrowTracking;
+        const source = visibleItem(from?.id);
+        const target = visibleItem(to?.id);
         if (target) preview.append(highlight(target, {"data-board-snap": "target", "stroke-width": 2.5}));
-        if (!source) return;
-        preview.append(highlight(source, {"data-board-snap": "source"}));
-        if (!tracking?.p) return;
+        if (source) preview.append(highlight(source, {"data-board-snap": "source"}));
+        if (!from || !to) return;
+        const data = withArrowEnd(withArrowEnd({}, "source", from), "target", to);
+        const geometry = arrowGeometry(data);
+        if (!geometry) return;
         const parts = arrowParts();
-        const from = edgeToward(source, target ? center(target) : tracking.p);
-        const to = target ? edgeToward(target, center(source)) : tracking.p;
-        positionArrow(parts, from, to, "#076d35");
+        positionArrow(parts, geometry.start, geometry.end, "#076d35");
         preview.append(parts.node);
+    }
+
+    function drawGrip(x, y, name, part, attached = false) {
+        const r = 5 / zoom;
+        handles.append(svg("circle", {cx: x, cy: y, r: r * 2.4, fill: "transparent", [name]: part}));
+        handles.append(svg("circle", {cx: x, cy: y, r, fill: attached ? "#dcfce7" : "#fff", stroke: "#076d35",
+            "vector-effect": "non-scaling-stroke", "stroke-width": 1.5, "pointer-events": "none"}));
     }
 
     function paintPreview() {
         preview.replaceChildren();
         handles.replaceChildren();
         const textItem = editing && visibleItem(editing.id);
-        const draft = gesture?.draft || textItem;
+        const draft = gesture?.draft?.kind === "arrow" ? null : gesture?.draft || textItem;
         if (obscured && obscured !== draft?.id) nodes.get(obscured)?.removeAttribute("visibility");
         obscured = draft?.id || null;
         if (draft) {
@@ -381,16 +433,21 @@
             }
         }
         const item = visibleItem(selected);
-        if (item && item.kind !== "arrow") {
+        if (item?.kind === "arrow" && tool === "select") {
+            const geometry = arrowGeometry(item.data);
+            if (geometry) {
+                drawGrip(geometry.start.x, geometry.start.y, "data-board-arrow-end", "source", Boolean(item.data.source));
+                drawGrip(geometry.end.x, geometry.end.y, "data-board-arrow-end", "target", Boolean(item.data.target));
+            }
+            const target = visibleItem(gesture?.snap);
+            if (target) preview.append(highlight(target, {"data-board-snap": "target", "stroke-width": 2.5}));
+        } else if (item) {
             preview.append(highlight(item, {"stroke-dasharray": "5 4"}));
             if (canEdit && isShape(item)) {
                 const d = item.data;
-                const r = 5 / zoom;
                 for (const [side, x, y] of [["e", d.x + d.w, d.y + d.h / 2], ["s", d.x + d.w / 2, d.y + d.h],
                     ["se", d.x + d.w, d.y + d.h]]) {
-                    handles.append(svg("circle", {cx: x, cy: y, r: r * 2.4, fill: "transparent", "data-board-resize": side}));
-                    handles.append(svg("circle", {cx: x, cy: y, r, fill: "#fff", stroke: "#076d35",
-                        "vector-effect": "non-scaling-stroke", "stroke-width": 1.5, "pointer-events": "none"}));
+                    drawGrip(x, y, "data-board-resize", side);
                 }
             }
         }
@@ -510,8 +567,77 @@
     function deleteSelection() {
         const item = items.get(selected);
         if (!item || item.deleted || !canMutate() || editing || gesture) return false;
-        change({id: item.id, revision: item.revision, delete: true});
+        change({id: item.id, revision: item.revision, delete: true},
+            {captureImage: item.kind === "image" ? item.id : null});
         return true;
+    }
+
+    // Replays get a new server revision, but can still lead to the exact state
+    // expected by an older local action. A remote revision never inherits it.
+    function historyVersion(item, versions = replayVersions) {
+        if (!item) return 0;
+        const link = versions.get(item.id);
+        return link?.revision === item.revision ? link.version : item.revision;
+    }
+
+    function remember(changes, job) {
+        if (!changes?.length) return;
+        const entries = changes.map(({before, after}) => ({before, after,
+            previous: historyVersion(before, job.versions)}));
+        undo.push({entries, image: job.image});
+        if (undo.length > historyLimit) undo.shift();
+        redo.length = 0;
+    }
+
+    function historyApplied(job, elements) {
+        const {frame, backwards} = job.history;
+        (backwards ? undo : redo).pop();
+        (backwards ? redo : undo).push(frame);
+        if (job.image) frame.image = job.image;
+        for (const {after, previous} of frame.entries) {
+            const result = elements.get(after.id);
+            replayVersions.set(after.id, {revision: result.revision, version: backwards ? previous : after.revision});
+        }
+    }
+
+    function replay(backwards) {
+        if (!hasHistory || !canMutate() || editing || gesture) return;
+        const stack = backwards ? undo : redo;
+        const frame = stack.at(-1);
+        if (!frame) return;
+        const changes = [];
+        let captureImage = null;
+        let image = null;
+        for (const {before, after, previous} of frame.entries) {
+            const current = items.get(after.id);
+            if (!current || historyVersion(current) !== (backwards ? after.revision : previous)) {
+                stack.pop();
+                writeNotice = ["Правка пропущена: элемент уже изменился у другого участника.", true];
+                showStatus();
+                return;
+            }
+            const desired = backwards ? before : after;
+            const base = {id: current.id, revision: current.revision};
+            if (!desired || desired.deleted) {
+                changes.push({...base, delete: true});
+                if (current.kind === "image" && !frame.image) captureImage = current.id;
+            } else {
+                changes.push({...base, kind: desired.kind, data: desired.data});
+                if (current.kind === "image" && current.deleted) image = frame.image;
+            }
+        }
+        const json = JSON.stringify(changes);
+        const body = image ? new FormData() : json;
+        if (image) {
+            body.append("changes", json);
+            body.append("image", image);
+        }
+        resetArrow();
+        updateHint();
+        paintPreview();
+        canvas.focus({preventScroll: true});
+        send({url: board.dataset.historyUrl, body, headers: image ? {} : {"Content-Type": "application/json"},
+            captureImage, history: {frame, backwards}});
     }
 
     function guardLeave(event) {
@@ -528,6 +654,10 @@
         if (status.textContent !== message[0]) status.textContent = message[0];
         status.dataset.error = String(message[1]);
         retry.hidden = closed || !failedWrite || busy;
+        if (hasHistory) {
+            undoButton.disabled = !canMutate() || Boolean(editing) || !undo.length;
+            redoButton.disabled = !canMutate() || Boolean(editing) || !redo.length;
+        }
         const protect = !closed && (busy || Boolean(failedWrite) || Boolean(labelChanged()));
         if (protect !== leaveGuard) {
             leaveGuard = protect;
@@ -546,6 +676,9 @@
         items.clear();
         nodes.clear();
         arrows.clear();
+        undo.length = 0;
+        redo.length = 0;
+        replayVersions.clear();
         scene.replaceChildren();
         connections.replaceChildren();
         controls.hidden = true;
@@ -574,7 +707,7 @@
             data.elements.forEach(merge);
             cursor = data.revision;
             updateProperties();
-            if (arrowStart && !visibleItem(arrowStart)) resetArrow();
+            if (arrowStart?.id && !visibleItem(arrowStart.id)) resetArrow();
             updateHint();
             paintPreview();
             offline = false;
@@ -592,9 +725,22 @@
         busy = true;
         failedWrite = null;
         writeNotice = null;
+        job.versions ??= new Map(replayVersions);
         showStatus();
         let editAfter = null;
         try {
+            if (job.captureImage && !job.image) {
+                const snapshot = await fetch(board.dataset.imageBase + job.captureImage + "/", {
+                    cache: "no-store", credentials: "same-origin", signal: AbortSignal.timeout(10000),
+                });
+                if (closed) return;
+                if (snapshot.status === 404) {
+                    writeNotice = ["Изображение уже недоступно.", true];
+                    return;
+                }
+                if (!snapshot.ok) throw new Error("image");
+                job.image = await snapshot.blob();
+            }
             const response = await fetch(job.url, {
                 method: "POST", body: job.body, credentials: "same-origin",
                 headers: {"X-CSRFToken": csrf, ...job.headers}, signal: AbortSignal.timeout(15000),
@@ -608,9 +754,20 @@
             if ((response.headers.get("content-type") || "").includes("application/json")) {
                 data = await response.json();
             }
-            if (response.ok && data?.element) {
-                merge(data.element);
-                if (job.select) {
+            if (response.ok && job.history && data?.elements) {
+                const elements = new Map(data.elements.map(item => [item.id, item]));
+                if (!job.history.frame.entries.every(entry => elements.has(entry.after.id))) throw new Error("history");
+                elements.forEach(merge);
+                historyApplied(job, elements);
+                updateProperties();
+            } else if (response.ok && data?.element) {
+                if (data.changes) {
+                    data.changes.forEach(({after}) => merge(after));
+                    remember(data.changes, job);
+                } else {
+                    merge(data.element);
+                }
+                if (job.select && !items.get(data.element.id)?.deleted) {
                     selected = data.element.id;
                     setTool("select");
                 }
@@ -618,6 +775,7 @@
                 if (job.focusLabel && selected === data.element.id) editAfter = selected;
             } else if (response.status >= 400 && response.status < 500) {
                 if (data?.element) merge(data.element);
+                if (job.history && response.status === 409) (job.history.backwards ? undo : redo).pop();
                 updateProperties();
                 writeNotice = [data?.error || "Правка не принята. Проверьте данные.", true];
             } else {
@@ -628,21 +786,23 @@
         } finally {
             busy = false;
             if (editAfter) beginLabel(editAfter);
-            else {
-                paintPreview();
-                showStatus();
-            }
+            if (!closed) updateHint();
+            paintPreview();
+            showStatus();
         }
     }
 
-    function change(payload, select = false, focusLabel = false) {
+    function change(payload, options = {}) {
         return send({url: board.dataset.changeUrl, body: JSON.stringify(payload),
-            headers: {"Content-Type": "application/json"}, select, focusLabel});
+            headers: {"Content-Type": "application/json"}, ...options});
     }
 
     function updateHint() {
         const text = editing ? "Enter — сохранить, Shift+Enter — новая строка, Esc — отменить. Размер меняется ручками по краям."
-            : arrowStart ? "Выберите второй блок. Esc — отменить связь." : hints[tool];
+            : arrowStart ? "Укажите конец стрелки. Esc — отменить."
+            : tool === "select" && items.get(selected)?.kind === "arrow"
+                ? "Потяните за конец стрелки, чтобы привязать его к фигуре или оставить свободным."
+                : hints[tool];
         if (hint.textContent !== text) hint.textContent = text;
     }
 
@@ -676,6 +836,7 @@
     function select(id) {
         selected = id || null;
         updateProperties();
+        updateHint();
         paintPreview();
     }
 
@@ -717,13 +878,26 @@
         if (g.mode === "move") {
             const d = g.source.data;
             if (!g.draft && Math.hypot(p.x - g.start.x, p.y - g.start.y) < 2 / zoom) return;
-            g.draft = {...g.source, data: {...d, x: coord(d.x + p.x - g.start.x), y: coord(d.y + p.y - g.start.y)}};
+            const x = coord(d.x + p.x - g.start.x), y = coord(d.y + p.y - g.start.y);
+            g.draft = x === d.x && y === d.y ? null : {...g.source, data: {...d, x, y}};
         } else if (g.mode === "resize") {
             const resized = resizeShape(g, p);
             g.draft = (resized.data.w !== g.source.data.w || resized.data.h !== g.source.data.h) ? resized : null;
         } else if (g.mode === "arrow") {
-            g.p = p;
-            g.target = shapeAt(p, g.sourceId, 12 / zoom)?.id;
+            g.to = snap(p, g.from.id);
+            g.dragged ||= Math.hypot(p.x - g.start.x, p.y - g.start.y) >= 6 / zoom;
+        } else if (g.mode === "arrow-end") {
+            if (!g.draft && Math.hypot(p.x - g.start.x, p.y - g.start.y) < 2 / zoom) return;
+            const d = g.source.data;
+            const endpoint = snap(p, d[g.side === "source" ? "target" : "source"]);
+            const field = g.side === "source" ? "start" : "end";
+            g.snap = endpoint.id;
+            const same = endpoint.id === d[g.side] && (endpoint.id ||
+                (p.x === d[field][0] && p.y === d[field][1]));
+            const data = withArrowEnd(d, g.side, endpoint);
+            const geometry = arrowGeometry(data);
+            g.draft = !same && geometry && Math.hypot(geometry.end.x - geometry.start.x,
+                geometry.end.y - geometry.start.y) >= 0.1 ? {...g.source, data} : null;
         } else if (g.mode === "stroke") {
             const points = g.draft.data.points;
             const next = [coord(p.x - g.start.x), coord(p.y - g.start.y)];
@@ -746,7 +920,11 @@
         } else if (canMutate()) {
             if (tool === "select") {
                 const side = event.target.dataset.boardResize;
-                if (side && isShape(visibleItem(selected))) {
+                const arrowEnd = event.target.dataset.boardArrowEnd;
+                if (arrowEnd && visibleItem(selected)?.kind === "arrow") {
+                    canvas.focus({preventScroll: true});
+                    gesture = {mode: "arrow-end", source: visibleItem(selected), start: p, side: arrowEnd};
+                } else if (side && isShape(visibleItem(selected))) {
                     gesture = {mode: "resize", source: visibleItem(selected), start: p, side};
                 } else {
                     if (editing) {
@@ -761,10 +939,9 @@
                     gesture = {mode: "move", source: item, start: p};
                 }
             } else if (tool === "arrow") {
-                const sourceId = arrowStart || shapeAt(p, null, 12 / zoom)?.id;
-                if (!sourceId) return;
                 canvas.focus({preventScroll: true});
-                gesture = {mode: "arrow", sourceId, p, target: shapeAt(p, sourceId, 12 / zoom)?.id, color: color.value};
+                const from = arrowStart || snap(p);
+                gesture = {mode: "arrow", start: p, from, to: snap(p, from.id), color: color.value};
             } else {
                 canvas.focus({preventScroll: true});
                 const ink = color.value === "ink" && tool === "note" ? "yellow" : color.value;
@@ -785,7 +962,7 @@
             updateGesture(event);
         } else if (tool === "arrow" && canMutate()) {
             const p = point(event);
-            arrowTracking = {p, target: shapeAt(p, arrowStart, 12 / zoom)?.id};
+            arrowTracking = snap(p, arrowStart?.id);
             paintPreview();
         }
     });
@@ -801,12 +978,15 @@
         const {draft, mode, source} = g;
         gesture = null;
         if (mode === "arrow") {
-            if (g.target && visibleItem(g.sourceId) && visibleItem(g.target)) {
+            const data = withArrowEnd(withArrowEnd({color: g.color}, "source", g.from), "target", g.to);
+            const geometry = arrowGeometry(data);
+            if ((g.dragged || arrowStart) && geometry && Math.hypot(geometry.end.x - geometry.start.x,
+                geometry.end.y - geometry.start.y) >= 0.1 && (g.to.id ||
+                Math.hypot(g.to.p.x - g.from.p.x, g.to.p.y - g.from.p.y) >= 6 / zoom)) {
                 resetArrow();
-                change({id: uuid(), revision: 0, kind: "arrow",
-                    data: {source: g.sourceId, target: g.target, color: g.color}}, true);
-            } else if (visibleItem(g.sourceId)) {
-                arrowStart = g.sourceId;
+                change({id: uuid(), revision: 0, kind: "arrow", data}, {select: true});
+            } else if (!g.from.id || visibleItem(g.from.id)) {
+                arrowStart = g.from;
                 arrowTracking = null;
             }
             updateHint();
@@ -818,7 +998,7 @@
             if (draft.kind === "stroke" && draft.data.points.length === 1) draft.data.points.push([0.1, 0]);
             const newShape = !source && isShape(draft);
             change({id: source?.id || uuid(), revision: source?.revision || 0, kind: draft.kind, data: draft.data},
-                newShape, newShape);
+                {select: newShape, focusLabel: newShape});
         }
         paintPreview();
     });
@@ -910,6 +1090,8 @@
     });
 
     if (canEdit) {
+        undoButton?.addEventListener("click", () => replay(true));
+        redoButton?.addEventListener("click", () => replay(false));
         find("edit-label").addEventListener("click", () => beginLabel(selected));
         find("save-label").addEventListener("click", () => finishLabel());
         find("delete").addEventListener("click", () => {
@@ -920,13 +1102,20 @@
             if (event.isComposing) return;
             if (event.key === "Escape") {
                 if (editing && finishLabel(true)) event.preventDefault();
-                else if (arrowStart || gesture?.mode === "arrow") {
+                else if (arrowStart || ["arrow", "arrow-end"].includes(gesture?.mode)) {
                     gesture = null;
                     resetArrow();
                     updateHint();
                     paintPreview();
                     event.preventDefault();
                 }
+                return;
+            }
+            const input = event.target.closest("input, select, textarea, [contenteditable]");
+            if (hasHistory && !input && (event.ctrlKey || event.metaKey) && !event.altKey &&
+                (event.code === "KeyZ" || event.key.toLowerCase() === "z")) {
+                event.preventDefault();
+                if (!event.repeat) replay(!event.shiftKey);
                 return;
             }
             if (event.ctrlKey || event.metaKey || event.altKey) return;
@@ -937,7 +1126,7 @@
                 }
                 return;
             }
-            if (event.target.closest("input, select, textarea, [contenteditable]")) return;
+            if (input) return;
             if (event.key === "Delete" && !event.repeat && deleteSelection()) event.preventDefault();
             if (event.key === "F2" && isShape(items.get(selected))) {
                 event.preventDefault();

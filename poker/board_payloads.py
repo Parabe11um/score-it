@@ -8,12 +8,13 @@ import uuid
 from PIL import Image, ImageOps
 
 
-MAX_OBJECTS = 500  # Includes deletion records, so a deleted key stays deleted.
+MAX_OBJECTS = 500  # Includes deletion records; history reuses the same keys.
 MAX_POINTS = 256
 MAX_COORDINATE = 100_000
 MAX_DIMENSION = 4_000
 MAX_TEXT = 240
 MAX_MUTATION_BYTES = 24 * 1024
+MAX_HISTORY_BYTES = 192 * 1024  # One deleted block may have up to 499 arrows.
 MAX_IMAGE_BYTES = 2 * 1024 * 1024
 MAX_BOARD_IMAGES = 10
 MAX_IMAGE_EDGE = 2048
@@ -35,20 +36,44 @@ def coordinate(value):
     return number(value, -MAX_COORDINATE, MAX_COORDINATE)
 
 
+def arrow_ends(data):
+    return {data[side] for side in ("source", "target") if data[side] is not None}
+
+
+def arrow_data(data):
+    fields = {"source", "target", "color"}
+    result = {}
+    if not fields <= data.keys() or data["color"] not in PALETTE:
+        raise InvalidBoardPayload("Некорректные поля стрелки.")
+    for side, point in (("source", "start"), ("target", "end")):
+        value = data[side]
+        if value is None:
+            fields.add(point)
+            coordinates = data.get(point)
+            if not isinstance(coordinates, list) or len(coordinates) != 2:
+                raise InvalidBoardPayload("Укажите координаты свободного конца стрелки.")
+            result[point] = [coordinate(value) for value in coordinates]
+        else:
+            try:
+                value = str(uuid.UUID(value))
+            except (AttributeError, TypeError, ValueError) as exc:
+                raise InvalidBoardPayload("Некорректная привязка стрелки.") from exc
+        result[side] = value
+    if data.keys() != fields:
+        raise InvalidBoardPayload("Некорректные поля стрелки.")
+    if result["source"] is not None and result["source"] == result["target"]:
+        raise InvalidBoardPayload("Стрелка должна соединять разные блоки.")
+    if "start" in result and result["start"] == result.get("end"):
+        raise InvalidBoardPayload("Начало и конец стрелки должны различаться.")
+    return {**result, "color": data["color"]}
+
+
 def element_data(kind, data):
     if not isinstance(data, dict) or kind not in ("arrow", "stroke", *SHAPES, "image"):
         raise InvalidBoardPayload("Неизвестный элемент доски.")
 
     if kind == "arrow":
-        if data.keys() != {"source", "target", "color"} or data["color"] not in PALETTE:
-            raise InvalidBoardPayload("Некорректные поля стрелки.")
-        try:
-            source, target = (str(uuid.UUID(data[key])) for key in ("source", "target"))
-        except (AttributeError, TypeError, ValueError) as exc:
-            raise InvalidBoardPayload("Выберите два блока на доске.") from exc
-        if source == target:
-            raise InvalidBoardPayload("Стрелка должна соединять разные блоки.")
-        return {"source": source, "target": target, "color": data["color"]}
+        return arrow_data(data)
 
     fields = {"x", "y"}
     if kind == "stroke":
@@ -90,14 +115,17 @@ def element_data(kind, data):
     return result
 
 
-def read_mutation(request):
-    if request.content_type != "application/json":
-        raise InvalidBoardPayload("Ожидается изменение в формате JSON.")
-    raw = request.read(MAX_MUTATION_BYTES + 1)
-    if len(raw) > MAX_MUTATION_BYTES:
+def _json(raw, limit):
+    if len(raw) > limit:
         raise InvalidBoardPayload("Изменение слишком большое.")
     try:
-        change = json.loads(raw)
+        return json.loads(raw)
+    except (ValueError, RecursionError) as exc:
+        raise InvalidBoardPayload("Изменение не удалось прочитать.") from exc
+
+
+def _mutation(change):
+    try:
         if not isinstance(change, dict):
             raise ValueError
         key = uuid.UUID(change["id"])
@@ -112,6 +140,32 @@ def read_mutation(request):
         raise InvalidBoardPayload("Некорректное изменение.")
     kind = change["kind"]
     return key, revision, kind, element_data(kind, change["data"])
+
+
+def read_mutation(request):
+    if request.content_type != "application/json":
+        raise InvalidBoardPayload("Ожидается изменение в формате JSON.")
+    return _mutation(_json(request.read(MAX_MUTATION_BYTES + 1), MAX_MUTATION_BYTES))
+
+
+def read_history(request):
+    if request.content_type == "application/json":
+        raw = request.read(MAX_HISTORY_BYTES + 1)
+        upload = None
+    elif request.content_type == "multipart/form-data":
+        raw = request.POST.get("changes", "").encode("utf-8")
+        upload = request.FILES.get("image")
+    else:
+        raise InvalidBoardPayload("Не удалось прочитать отмену или повтор.")
+    changes = _json(raw, MAX_HISTORY_BYTES)
+    if not isinstance(changes, list) or not 1 <= len(changes) <= MAX_OBJECTS:
+        raise InvalidBoardPayload("Некорректный набор изменений.")
+    mutations = [_mutation(change) for change in changes]
+    if len({key for key, _, _, _ in mutations}) != len(mutations) or any(not rev for _, rev, _, _ in mutations):
+        raise InvalidBoardPayload("Некорректные версии элементов.")
+    if upload is not None and not 0 < upload.size <= MAX_IMAGE_BYTES:
+        raise InvalidBoardPayload("Изображение должно быть не больше 2 МБ.")
+    return mutations, upload
 
 
 def normalize_image(upload):

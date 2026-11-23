@@ -1,6 +1,7 @@
 <section class="card board-editor" data-board data-board-edit="{{ can_edit|yesno:'true,false' }}"
          data-board-guest="{{ guest|yesno:'true,false' }}" data-state-url="{{ state_url }}" data-change-url="{{ change_url }}"
-         data-upload-url="{{ upload_url }}" data-image-base="{{ image_base }}" aria-label="Редактор доски">
+         data-history-url="{{ history_url }}" data-upload-url="{{ upload_url }}" data-image-base="{{ image_base }}"
+         aria-label="Редактор доски">
     {% if can_edit %}{% csrf_token %}{% endif %}
     <div class="board-workspace">
         <aside class="board-sidebar" data-board-controls aria-label="Инструменты доски">
@@ -25,6 +26,10 @@
                 {% endif %}
             </div>
             {% if can_edit %}
+                <div class="board-tools board-sidebar__section" role="group" aria-label="История правок">
+                    {% include "poker/board_tool.html" with tool="undo" label="Отменить правку" shortcut="Ctrl+Z" keys="Control+Z Meta+Z" only %}
+                    {% include "poker/board_tool.html" with tool="redo" label="Повторить правку" shortcut="Ctrl+Shift+Z" keys="Control+Shift+Z Meta+Shift+Z" only %}
+                </div>
                 <div class="board-sidebar__section">
                     <label class="board-color" for="board-color">Цвет</label>
                     <select id="board-color" data-board-color>

@@ -1,8 +1,9 @@
-<button type="button" title="{{ label }}{% if tool == 'delete' %} (Delete){% elif tool == 'edit-label' %} (F2){% endif %}"
+<button type="button" title="{{ label }}{% if shortcut %} ({{ shortcut }}){% elif tool == 'delete' %} (Delete){% elif tool == 'edit-label' %} (F2){% endif %}"
         {% if tool == "delete" %}data-board-delete aria-keyshortcuts="Delete"
         {% elif tool == "edit-label" %}data-board-edit-label aria-keyshortcuts="F2"
         {% elif tool == "save-label" %}data-board-save-label
         {% elif tool == "upload" %}data-board-upload
+        {% elif tool == "undo" or tool == "redo" %}data-board-{{ tool }} aria-keyshortcuts="{{ keys }}" disabled
         {% else %}data-board-tool="{{ tool }}" aria-pressed="{{ active|yesno:'true,false,false' }}"{% endif %}>
     {% include "poker/board_tool_icon.html" with tool=tool only %}
     <span class="board-tool-label">{{ label }}</span>
