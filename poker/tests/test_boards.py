@@ -29,6 +29,11 @@ def note(text="Заметка", *, key=None, revision=0, **offsets):
     }
 
 
+def arrow(source, target):
+    return {"id": str(uuid.uuid4()), "revision": 0, "kind": "arrow",
+            "data": {"source": source, "target": target, "color": "ink"}}
+
+
 class BoardClient(Client):
     def __init__(self):
         super().__init__(enforce_csrf_checks=True)
@@ -173,6 +178,54 @@ class BoardTests(TestCase):
         self.assertEqual(first.send(change, a, as_json=True).status_code, 409)
         reopened = self.open_guest(url, code)
         self.assertEqual([e["id"] for e in reopened.get(url + "state/").json()["elements"]], [b["id"]])
+
+    def test_arrow_follows_live_blocks_and_deletion_removes_only_attached_arrows(self):
+        url, code = self.make_link()
+        guest = self.open_guest(url, code)
+        observer = self.open_guest(url, code)
+        change = url + "change/"
+        source, target, other = note(), note(x=270), note(x=520)
+        for block in (source, target, other):
+            self.assertEqual(guest.send(change, block, as_json=True).status_code, 200)
+        attached, independent = arrow(source["id"], target["id"]), arrow(target["id"], other["id"])
+        for connection in (attached, independent):
+            self.assertEqual(guest.send(change, connection, as_json=True).status_code, 200)
+
+        snapshot = observer.get(url + "state/").json()
+        source_revision = next(item["revision"] for item in snapshot["elements"] if item["id"] == source["id"])
+        # A move and resize only changes the block. Arrow geometry comes from the live endpoints.
+        moved = note(key=source["id"], revision=source_revision, x=50, w=235, h=145)
+        edited = guest.send(change, moved, as_json=True).json()["element"]
+        delta = observer.get(url + "state/", {"after": snapshot["revision"]}).json()
+        self.assertEqual(delta["elements"], [edited])
+        self.assertEqual(self.board.elements.get(key=attached["id"]).data, attached["data"])
+
+        delete = {"id": source["id"], "revision": edited["revision"], "delete": True}
+        response = guest.send(change, delete, as_json=True)
+        self.assertEqual(response.status_code, 200)
+        delta = observer.get(url + "state/", {"after": edited["revision"]}).json()
+        self.assertEqual(
+            [(item["id"], item["deleted"], item["revision"]) for item in delta["elements"]],
+            [(source["id"], True, delta["revision"]), (attached["id"], True, delta["revision"])],
+        )
+        self.assertFalse(self.board.elements.get(key=independent["id"]).deleted)
+        self.assertEqual(guest.send(change, arrow(source["id"], target["id"]), as_json=True).status_code, 409)
+
+    def test_arrow_endpoints_must_be_distinct_shapes_on_the_same_board(self):
+        source, elsewhere = note(), note()
+        endpoint = self.path + "change/"
+        self.assertEqual(self.owner_client.send(endpoint, source, as_json=True).status_code, 200)
+        self.assertEqual(self.owner_client.send(self.sibling.get_absolute_url() + "change/",
+                                               elsewhere, as_json=True).status_code, 200)
+        stroke = {"id": str(uuid.uuid4()), "revision": 0, "kind": "stroke",
+                  "data": {"x": 0, "y": 0, "color": "ink", "points": [[0, 0], [10, 10]]}}
+        self.assertEqual(self.owner_client.send(endpoint, stroke, as_json=True).status_code, 200)
+        for target, expected in ((source["id"], 400), ("not-a-uuid", 400),
+                                 (elsewhere["id"], 409), (stroke["id"], 409)):
+            with self.subTest(expected=expected, target=target):
+                attempt = self.owner_client.send(endpoint, arrow(source["id"], target), as_json=True)
+                self.assertEqual(attempt.status_code, expected)
+        self.assertFalse(self.board.elements.filter(kind="arrow").exists())
 
     def test_revoke_and_expiry_disable_previously_open_sessions(self):
         for expiry in (True, False):

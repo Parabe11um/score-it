@@ -36,8 +36,19 @@ def coordinate(value):
 
 
 def element_data(kind, data):
-    if not isinstance(data, dict) or kind not in ("stroke", *SHAPES, "image"):
+    if not isinstance(data, dict) or kind not in ("arrow", "stroke", *SHAPES, "image"):
         raise InvalidBoardPayload("Неизвестный элемент доски.")
+
+    if kind == "arrow":
+        if data.keys() != {"source", "target", "color"} or data["color"] not in PALETTE:
+            raise InvalidBoardPayload("Некорректные поля стрелки.")
+        try:
+            source, target = (str(uuid.UUID(data[key])) for key in ("source", "target"))
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise InvalidBoardPayload("Выберите два блока на доске.") from exc
+        if source == target:
+            raise InvalidBoardPayload("Стрелка должна соединять разные блоки.")
+        return {"source": source, "target": target, "color": data["color"]}
 
     fields = {"x", "y"}
     if kind == "stroke":

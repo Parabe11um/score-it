@@ -34,14 +34,17 @@
     const find = (name) => board.querySelector("[data-board-" + name + "]");
     const canvas = find("canvas");
     const backdrop = find("backdrop");
+    const connections = find("connections");
     const scene = find("elements");
     const preview = find("preview");
+    const handles = find("handles");
     const controls = find("controls");
     const status = find("status");
     const hint = find("hint");
     const empty = find("empty");
     const retry = find("retry");
     const properties = find("properties");
+    const inlineText = find("inline-text");
     const label = find("label");
     const color = find("color");
     const csrf = board.querySelector("[name=csrfmiddlewaretoken]")?.value;
@@ -52,7 +55,7 @@
 
     const ns = "http://www.w3.org/2000/svg";
     const minZoom = 0.05;
-    const shapeKinds = new Set(["circle", "square", "rectangle", "note"]);
+    const isShape = (item) => ["circle", "square", "rectangle", "note"].includes(item?.kind);
     const palette = {
         ink: ["#334155", "#f1f5f9"],
         mint: ["#076d35", "#dcfce7"],
@@ -62,8 +65,9 @@
     };
     const hints = {
         hand: "Перетаскивайте полотно. Масштаб меняется кнопками + и −.",
-        select: "Нажмите на элемент, чтобы выбрать его, или перетащите, чтобы переместить.",
+        select: "Перетащите блок, чтобы переместить. Двойной щелчок — подпись; Delete — удаление.",
         stroke: "Нажмите и ведите по полотну, чтобы нарисовать линию.",
+        arrow: "Перетащите стрелку между блоками или щёлкните по ним по очереди.",
         circle: "Щёлкните, чтобы добавить круг, или потяните, чтобы задать размер.",
         square: "Щёлкните, чтобы добавить квадрат, или потяните, чтобы задать размер.",
         rectangle: "Щёлкните, чтобы добавить прямоугольник, или потяните, чтобы задать размер.",
@@ -71,9 +75,13 @@
     };
     const items = new Map();
     const nodes = new Map();
+    const arrows = new Map();
     let tool = canEdit ? "select" : "hand";
     let selected = null;
-    let selectionRevision = null;
+    let editing = null;
+    let obscured = null;
+    let arrowStart = null;
+    let arrowTracking = null;
     let gesture = null;
     let cursor = null;
     let polling = false;
@@ -120,6 +128,7 @@
         grid.setAttribute("width", w / zoom);
         grid.setAttribute("height", h / zoom);
         board.querySelector('[data-board-zoom="reset"]').textContent = Math.round(zoom * 100) + "%";
+        paintPreview();
     }
     function zoomAt(factor, x, y) {
         const next = clamp(zoom * factor, minZoom, 3);
@@ -155,7 +164,15 @@
         return lines;
     }
 
-    function drawItem(item, ghost = false) {
+    function labelBox(item) {
+        const {x, y, w, h} = item.data;
+        const ratio = item.kind === "circle" ? 0.69 : 1;
+        const width = Math.max(1, w * ratio - 10);
+        const height = Math.max(1, h * ratio - 8);
+        return {x: x + (w - width) / 2, y: y + (h - height) / 2, width, height};
+    }
+
+    function drawItem(item, ghost = false, withoutLabel = false) {
         const {kind, data: d, id} = item;
         const g = svg("g", {transform: "translate(" + d.x + " " + d.y + ")"});
         if (!ghost) {
@@ -185,14 +202,12 @@
         } else {
             g.append(svg("rect", {width: d.w, height: d.h, rx: kind === "note" ? 5 : 2, fill, stroke, "stroke-width": 2}));
         }
-        if (d.text) {
+        if (d.text && !withoutLabel) {
             const title = svg("title");
             title.textContent = d.text;
             g.append(title);
-            const ratio = kind === "circle" ? 0.68 : 1;
-            const w = Math.max(1, d.w * ratio - 12);
-            const h = Math.max(1, d.h * ratio - 8);
-            const area = svg("svg", {x: (d.w - w) / 2, y: (d.h - h) / 2, width: w, height: h,
+            const {x, y, width: w, height: h} = labelBox(item);
+            const area = svg("svg", {x: x - d.x, y: y - d.y, width: w, height: h,
                 overflow: "hidden", "pointer-events": "none"});
             const text = svg("text", {"text-anchor": "middle", "dominant-baseline": "middle",
                 fill: "#212a34", "font-size": 14, "font-weight": kind === "note" ? 500 : 650});
@@ -218,7 +233,8 @@
     }
 
     function fitBoard() {
-        const boxes = Array.from(items.values()).filter((item) => !item.deleted).map(bounds);
+        const boxes = Array.from(items.values()).filter((item) => !item.deleted && item.kind !== "arrow")
+            .map((item) => bounds(visibleItem(item.id)));
         if (!boxes.length) return;
         const x = Math.min(...boxes.map((box) => box.x));
         const y = Math.min(...boxes.map((box) => box.y));
@@ -231,18 +247,156 @@
         placeView();
     }
 
+    function visibleItem(id) {
+        const item = items.get(id);
+        if (!item || item.deleted) return null;
+        if (gesture?.draft?.id === id) return gesture.draft;
+        if (editing?.id === id) return {...item, data: editing.data};
+        return item;
+    }
+
+    function center(item) {
+        return {x: item.data.x + item.data.w / 2, y: item.data.y + item.data.h / 2};
+    }
+
+    function edgeToward(item, toward) {
+        const c = center(item);
+        const dx = toward.x - c.x;
+        const dy = toward.y - c.y;
+        const {w, h} = item.data;
+        const scale = item.kind === "circle" ? Math.hypot(dx, dy) / (w / 2)
+            : Math.max(Math.abs(dx) / (w / 2), Math.abs(dy) / (h / 2));
+        return scale ? {x: c.x + dx / scale, y: c.y + dy / scale} : {x: c.x + w / 2, y: c.y};
+    }
+
+    function shapeAt(p, except = null, tolerance = 0) {
+        let best = null;
+        let distance = tolerance;
+        for (const stored of items.values()) {
+            if (!isShape(stored) || stored.deleted || stored.id === except) continue;
+            const item = visibleItem(stored.id);
+            const c = center(item);
+            const dx = Math.abs(p.x - c.x);
+            const dy = Math.abs(p.y - c.y);
+            const gap = item.kind === "circle" ? Math.max(0, Math.hypot(dx, dy) - item.data.w / 2)
+                : Math.hypot(Math.max(0, dx - item.data.w / 2), Math.max(0, dy - item.data.h / 2));
+            if (gap < distance || gap === distance && (!best || item.order > best.order)) {
+                best = item;
+                distance = gap;
+            }
+        }
+        return best;
+    }
+
+    function positionArrow(parts, start, end, color, highlighted = false) {
+        const signature = [start.x, start.y, end.x, end.y, zoom, color, highlighted].join("/");
+        if (parts.signature === signature) return;
+        parts.signature = signature;
+        const dx = end.x - start.x;
+        const dy = end.y - start.y;
+        const length = Math.hypot(dx, dy) || 1;
+        const size = Math.min(length * .6, 11 / zoom);
+        const ux = dx / length;
+        const uy = dy / length;
+        const x = end.x - ux * size;
+        const y = end.y - uy * size;
+        const tip = [end.x, end.y, x + uy * size * .45, y - ux * size * .45,
+            x - uy * size * .45, y + ux * size * .45];
+        for (const line of [parts.line, parts.hit].filter(Boolean)) {
+            line.setAttribute("x1", start.x);
+            line.setAttribute("y1", start.y);
+            line.setAttribute("x2", end.x);
+            line.setAttribute("y2", end.y);
+        }
+        parts.line.setAttribute("stroke", color);
+        parts.line.setAttribute("stroke-width", highlighted ? 3.2 : 2);
+        parts.head.setAttribute("fill", color);
+        parts.head.setAttribute("points", tip.join(" "));
+    }
+
+    function arrowParts(id) {
+        const node = svg("g", id ? {"data-element-id": id, "data-element-kind": "arrow"} : {});
+        const hit = id && svg("line", {stroke: "transparent", "stroke-width": 14,
+            "vector-effect": "non-scaling-stroke", "pointer-events": "stroke"});
+        const line = svg("line", {"vector-effect": "non-scaling-stroke", "stroke-linecap": "round"});
+        const head = svg("polygon");
+        if (hit) node.append(hit);
+        node.append(line, head);
+        return {node, hit, line, head};
+    }
+
+    function drawConnections() {
+        for (const {item, parts} of arrows.values()) {
+            const source = visibleItem(item.data.source);
+            const target = visibleItem(item.data.target);
+            const visible = source && target;
+            parts.node.toggleAttribute("hidden", !visible);
+            if (!visible) continue;
+            const selectedArrow = selected === item.id;
+            positionArrow(parts, edgeToward(source, center(target)), edgeToward(target, center(source)),
+                selectedArrow ? "#076d35" : palette[item.data.color][0], selectedArrow);
+        }
+    }
+
+    function highlight(item, attributes) {
+        const {x, y, w, h} = bounds(item);
+        const pad = 4 / zoom;
+        const props = {fill: "none", stroke: "#076d35", "stroke-width": 1.5,
+            "vector-effect": "non-scaling-stroke", ...attributes};
+        return item.kind === "circle"
+            ? svg("circle", {cx: x + w / 2, cy: y + h / 2, r: w / 2 + pad, ...props})
+            : svg("rect", {x: x - pad, y: y - pad, width: w + 2 * pad, height: h + 2 * pad, ...props});
+    }
+
+    function showArrowPreview() {
+        const tracking = gesture?.mode === "arrow" ? gesture : arrowTracking;
+        const source = visibleItem(gesture?.mode === "arrow" ? gesture.sourceId : arrowStart);
+        const target = visibleItem(tracking?.target);
+        if (target) preview.append(highlight(target, {"data-board-snap": "target", "stroke-width": 2.5}));
+        if (!source) return;
+        preview.append(highlight(source, {"data-board-snap": "source"}));
+        if (!tracking?.p) return;
+        const parts = arrowParts();
+        const from = edgeToward(source, target ? center(target) : tracking.p);
+        const to = target ? edgeToward(target, center(source)) : tracking.p;
+        positionArrow(parts, from, to, "#076d35");
+        preview.append(parts.node);
+    }
+
     function paintPreview() {
         preview.replaceChildren();
-        const draft = gesture?.draft;
-        if (draft) preview.append(drawItem(draft, true));
-        const item = (gesture?.mode === "move" ? draft : items.get(selected));
-        if (item && !item.deleted) {
-            const {x, y, w, h} = bounds(item);
-            preview.append(svg("rect", {x: x - 4, y: y - 4, width: w + 8, height: h + 8,
-                fill: "none", stroke: "#076d35", "stroke-dasharray": "5 4",
-                "stroke-width": 1.5, "vector-effect": "non-scaling-stroke"}));
+        handles.replaceChildren();
+        const textItem = editing && visibleItem(editing.id);
+        const draft = gesture?.draft || textItem;
+        if (obscured && obscured !== draft?.id) nodes.get(obscured)?.removeAttribute("visibility");
+        obscured = draft?.id || null;
+        if (draft) {
+            nodes.get(obscured)?.setAttribute("visibility", "hidden");
+            preview.append(drawItem(draft, true, textItem?.id === draft.id));
         }
-        empty.hidden = cursor === null || nodes.size > 0 || Boolean(draft) || closed;
+        if (inlineText) {
+            inlineText.toggleAttribute("hidden", !textItem);
+            if (textItem) {
+                for (const [key, val] of Object.entries(labelBox(textItem))) inlineText.setAttribute(key, val);
+            }
+        }
+        const item = visibleItem(selected);
+        if (item && item.kind !== "arrow") {
+            preview.append(highlight(item, {"stroke-dasharray": "5 4"}));
+            if (canEdit && isShape(item)) {
+                const d = item.data;
+                const r = 5 / zoom;
+                for (const [side, x, y] of [["e", d.x + d.w, d.y + d.h / 2], ["s", d.x + d.w / 2, d.y + d.h],
+                    ["se", d.x + d.w, d.y + d.h]]) {
+                    handles.append(svg("circle", {cx: x, cy: y, r: r * 2.4, fill: "transparent", "data-board-resize": side}));
+                    handles.append(svg("circle", {cx: x, cy: y, r, fill: "#fff", stroke: "#076d35",
+                        "vector-effect": "non-scaling-stroke", "stroke-width": 1.5, "pointer-events": "none"}));
+                }
+            }
+        }
+        drawConnections();
+        if (tool === "arrow") showArrowPreview();
+        empty.hidden = cursor === null || nodes.size > 0 || arrows.size > 0 || Boolean(draft) || closed;
     }
 
     function merge(item) {
@@ -250,6 +404,20 @@
         const existing = nodes.get(item.id);
         const prev = items.get(item.id);
         items.set(item.id, item);
+        if (item.kind === "arrow") {
+            const entry = arrows.get(item.id);
+            if (item.deleted) {
+                entry?.parts.node.remove();
+                arrows.delete(item.id);
+            } else if (entry) {
+                entry.item = item;
+            } else {
+                const parts = arrowParts(item.id);
+                connections.append(parts.node);
+                arrows.set(item.id, {item, parts});
+            }
+            return;
+        }
         if (item.deleted) {
             existing?.remove();
             nodes.delete(item.id);
@@ -275,23 +443,75 @@
         nodes.set(item.id, node);
     }
 
-    function updateProperties(force = false) {
+    function updateProperties() {
         if (!canEdit) return;
         const item = items.get(selected);
         if (!item || item.deleted) {
             selected = null;
-            selectionRevision = null;
+            editing = null;
             properties.hidden = true;
             return;
         }
-        const shape = shapeKinds.has(item.kind);
         properties.hidden = false;
-        find("label-fields").hidden = !shape;
-        find("save-label").hidden = !shape;
-        if (force || document.activeElement !== label && selectionRevision !== item.revision) {
-            label.value = item.data.text || "";
-            selectionRevision = item.revision;
+        find("edit-label").hidden = !isShape(item) || Boolean(editing);
+        find("save-label").hidden = !editing;
+        find("delete").hidden = Boolean(editing);
+    }
+
+    function canMutate() {
+        return canEdit && cursor !== null && !closed && !busy && !failedWrite;
+    }
+
+    function beginLabel(id) {
+        const item = items.get(id);
+        if (!canMutate() || editing || gesture || !isShape(item) || item.deleted) return;
+        selected = id;
+        editing = {id, revision: item.revision, kind: item.kind, data: {...item.data}, original: item.data};
+        label.value = item.data.text;
+        writeNotice = null;
+        updateHint();
+        updateProperties();
+        paintPreview();
+        showStatus();
+        label.focus({preventScroll: true});
+        label.setSelectionRange(label.value.length, label.value.length);
+    }
+
+    function labelChanged() {
+        return editing && (label.value !== editing.original.text ||
+            editing.data.w !== editing.original.w || editing.data.h !== editing.original.h);
+    }
+
+    function finishLabel(cancel = false) {
+        if (!editing) return true;
+        if (gesture || !canMutate()) return false;
+        if (!cancel && (label.value.split("\n").length > 6 || /[\x00-\x09\x0b-\x1f]/.test(label.value))) {
+            writeNotice = ["Подпись может содержать до шести строк обычного текста.", true];
+            showStatus();
+            label.focus({preventScroll: true});
+            return false;
         }
+        const edit = editing;
+        const save = !cancel && labelChanged();
+        editing = null;
+        writeNotice = null;
+        updateHint();
+        updateProperties();
+        paintPreview();
+        canvas.focus({preventScroll: true});
+        if (save) {
+            change({id: edit.id, revision: edit.revision, kind: edit.kind, data: {...edit.data, text: label.value}});
+        } else {
+            showStatus();
+        }
+        return true;
+    }
+
+    function deleteSelection() {
+        const item = items.get(selected);
+        if (!item || item.deleted || !canMutate() || editing || gesture) return false;
+        change({id: item.id, revision: item.revision, delete: true});
+        return true;
     }
 
     function guardLeave(event) {
@@ -308,7 +528,7 @@
         if (status.textContent !== message[0]) status.textContent = message[0];
         status.dataset.error = String(message[1]);
         retry.hidden = closed || !failedWrite || busy;
-        const protect = !closed && (busy || Boolean(failedWrite));
+        const protect = !closed && (busy || Boolean(failedWrite) || Boolean(labelChanged()));
         if (protect !== leaveGuard) {
             leaveGuard = protect;
             if (protect) window.addEventListener("beforeunload", guardLeave);
@@ -320,10 +540,16 @@
         closed = true;
         failedWrite = null;
         gesture = null;
+        editing = null;
+        arrowStart = null;
+        arrowTracking = null;
         items.clear();
         nodes.clear();
+        arrows.clear();
         scene.replaceChildren();
+        connections.replaceChildren();
         controls.hidden = true;
+        find("view").hidden = true;
         hint.hidden = true;
         if (properties) properties.hidden = true;
         paintPreview();
@@ -348,6 +574,8 @@
             data.elements.forEach(merge);
             cursor = data.revision;
             updateProperties();
+            if (arrowStart && !visibleItem(arrowStart)) resetArrow();
+            updateHint();
             paintPreview();
             offline = false;
         } catch {
@@ -359,12 +587,13 @@
         }
     }
 
-    async function send(job) {
-        if (!canEdit || cursor === null || closed || busy) return;
+    async function send(job, retrying = false) {
+        if (!canEdit || cursor === null || closed || busy || failedWrite && !retrying) return;
         busy = true;
         failedWrite = null;
         writeNotice = null;
         showStatus();
+        let editAfter = null;
         try {
             const response = await fetch(job.url, {
                 method: "POST", body: job.body, credentials: "same-origin",
@@ -385,11 +614,11 @@
                     selected = data.element.id;
                     setTool("select");
                 }
-                updateProperties(true);
-                if (job.focusLabel && selected && !label?.parentElement.hidden) label.focus();
+                updateProperties();
+                if (job.focusLabel && selected === data.element.id) editAfter = selected;
             } else if (response.status >= 400 && response.status < 500) {
                 if (data?.element) merge(data.element);
-                updateProperties(true);
+                updateProperties();
                 writeNotice = [data?.error || "Правка не принята. Проверьте данные.", true];
             } else {
                 throw new Error("write");
@@ -398,20 +627,36 @@
             if (!closed) failedWrite = job;
         } finally {
             busy = false;
-            paintPreview();
-            showStatus();
+            if (editAfter) beginLabel(editAfter);
+            else {
+                paintPreview();
+                showStatus();
+            }
         }
     }
 
-    function change(payload, select = false) {
+    function change(payload, select = false, focusLabel = false) {
         return send({url: board.dataset.changeUrl, body: JSON.stringify(payload),
-            headers: {"Content-Type": "application/json"}, select, focusLabel: select && payload.kind === "note"});
+            headers: {"Content-Type": "application/json"}, select, focusLabel});
+    }
+
+    function updateHint() {
+        const text = editing ? "Enter — сохранить, Shift+Enter — новая строка, Esc — отменить. Размер меняется ручками по краям."
+            : arrowStart ? "Выберите второй блок. Esc — отменить связь." : hints[tool];
+        if (hint.textContent !== text) hint.textContent = text;
+    }
+
+    function resetArrow() {
+        arrowStart = null;
+        arrowTracking = null;
     }
 
     function setTool(next) {
+        if (editing && !finishLabel()) return;
         tool = next;
         canvas.dataset.tool = next;
-        hint.textContent = hints[next];
+        resetArrow();
+        updateHint();
         board.querySelectorAll("[data-board-tool]").forEach((button) => {
             button.setAttribute("aria-pressed", String(button.dataset.boardTool === next));
         });
@@ -429,9 +674,8 @@
     }
 
     function select(id) {
-        const old = selected;
         selected = id || null;
-        updateProperties(old !== selected);
+        updateProperties();
         paintPreview();
     }
 
@@ -445,6 +689,19 @@
         const h = dragged ? (square ? edge : size(Math.abs(dy))) : (square ? 112 : 108);
         return {kind: g.mode, data: {x: coord(g.start.x - (dragged && dx < 0 ? w : 0)),
             y: coord(g.start.y - (dragged && dy < 0 ? h : 0)), w, h, color: g.color, text: ""}};
+    }
+
+    function resizeShape(g, p) {
+        const d = g.source.data;
+        const dx = p.x - g.start.x;
+        const dy = p.y - g.start.y;
+        let w = g.side.includes("e") ? size(d.w + dx) : d.w;
+        let h = g.side.includes("s") ? size(d.h + dy) : d.h;
+        if (["circle", "square"].includes(g.source.kind)) {
+            const useWidth = g.side === "e" || (g.side === "se" && Math.abs(dx) >= Math.abs(dy));
+            w = h = useWidth ? w : h;
+        }
+        return {...g.source, data: {...d, w, h}};
     }
 
     function updateGesture(event) {
@@ -461,6 +718,12 @@
             const d = g.source.data;
             if (!g.draft && Math.hypot(p.x - g.start.x, p.y - g.start.y) < 2 / zoom) return;
             g.draft = {...g.source, data: {...d, x: coord(d.x + p.x - g.start.x), y: coord(d.y + p.y - g.start.y)}};
+        } else if (g.mode === "resize") {
+            const resized = resizeShape(g, p);
+            g.draft = (resized.data.w !== g.source.data.w || resized.data.h !== g.source.data.h) ? resized : null;
+        } else if (g.mode === "arrow") {
+            g.p = p;
+            g.target = shapeAt(p, g.sourceId, 12 / zoom)?.id;
         } else if (g.mode === "stroke") {
             const points = g.draft.data.points;
             const next = [coord(p.x - g.start.x), coord(p.y - g.start.y)];
@@ -476,16 +739,34 @@
     }
 
     canvas.addEventListener("pointerdown", (event) => {
-        if (!event.isPrimary || event.button !== 0 || gesture || closed) return;
+        if (!event.isPrimary || event.button !== 0 || gesture || closed || event.target.closest("[data-board-inline-text]")) return;
         const p = point(event);
         if (tool === "hand") {
             gesture = {mode: "hand", left, top, screenX: event.clientX, screenY: event.clientY};
-        } else if (canEdit && cursor !== null && !busy && !failedWrite) {
+        } else if (canMutate()) {
             if (tool === "select") {
-                select(event.target.closest("[data-element-id]")?.dataset.elementId);
-                if (!selected) return;
-                gesture = {mode: "move", source: items.get(selected), start: p};
+                const side = event.target.dataset.boardResize;
+                if (side && isShape(visibleItem(selected))) {
+                    gesture = {mode: "resize", source: visibleItem(selected), start: p, side};
+                } else {
+                    if (editing) {
+                        const target = event.target.closest("[data-element-id]")?.dataset.elementId ?? shapeAt(p)?.id;
+                        if (finishLabel()) select(target);
+                        return;
+                    }
+                    canvas.focus({preventScroll: true});
+                    select(event.target.closest("[data-element-id]")?.dataset.elementId);
+                    const item = visibleItem(selected);
+                    if (!item || item.kind === "arrow") return;
+                    gesture = {mode: "move", source: item, start: p};
+                }
+            } else if (tool === "arrow") {
+                const sourceId = arrowStart || shapeAt(p, null, 12 / zoom)?.id;
+                if (!sourceId) return;
+                canvas.focus({preventScroll: true});
+                gesture = {mode: "arrow", sourceId, p, target: shapeAt(p, sourceId, 12 / zoom)?.id, color: color.value};
             } else {
+                canvas.focus({preventScroll: true});
                 const ink = color.value === "ink" && tool === "note" ? "yellow" : color.value;
                 gesture = {mode: tool, start: p, color: ink};
                 gesture.draft = tool === "stroke"
@@ -499,25 +780,61 @@
             paintPreview();
         }
     });
-    canvas.addEventListener("pointermove", updateGesture);
+    canvas.addEventListener("pointermove", (event) => {
+        if (gesture) {
+            updateGesture(event);
+        } else if (tool === "arrow" && canMutate()) {
+            const p = point(event);
+            arrowTracking = {p, target: shapeAt(p, arrowStart, 12 / zoom)?.id};
+            paintPreview();
+        }
+    });
+    canvas.addEventListener("pointerleave", () => {
+        if (tool !== "arrow" || gesture) return;
+        arrowTracking = null;
+        paintPreview();
+    });
     canvas.addEventListener("pointerup", (event) => {
         if (!gesture || gesture.pointer !== event.pointerId) return;
         updateGesture(event);
-        const {draft, mode, source} = gesture;
+        const g = gesture;
+        const {draft, mode, source} = g;
         gesture = null;
-        if (draft) {
+        if (mode === "arrow") {
+            if (g.target && visibleItem(g.sourceId) && visibleItem(g.target)) {
+                resetArrow();
+                change({id: uuid(), revision: 0, kind: "arrow",
+                    data: {source: g.sourceId, target: g.target, color: g.color}}, true);
+            } else if (visibleItem(g.sourceId)) {
+                arrowStart = g.sourceId;
+                arrowTracking = null;
+            }
+            updateHint();
+        } else if (draft && mode === "resize" && editing?.id === source.id) {
+            editing.data = draft.data;
+            label.focus({preventScroll: true});
+            showStatus();
+        } else if (draft) {
             if (draft.kind === "stroke" && draft.data.points.length === 1) draft.data.points.push([0.1, 0]);
+            const newShape = !source && isShape(draft);
             change({id: source?.id || uuid(), revision: source?.revision || 0, kind: draft.kind, data: draft.data},
-                mode !== "move" && draft.kind !== "stroke");
+                newShape, newShape);
         }
         paintPreview();
     });
     for (const type of ["pointercancel", "lostpointercapture"]) {
-        canvas.addEventListener(type, () => {
-            gesture = null;
-            paintPreview();
+        canvas.addEventListener(type, (event) => {
+            if (gesture?.pointer === event.pointerId) {
+                gesture = null;
+                paintPreview();
+            }
         });
     }
+    canvas.addEventListener("dblclick", (event) => {
+        if (tool !== "select" || event.target.closest("[data-board-inline-text]")) return;
+        const item = items.get(event.target.closest("[data-element-id]")?.dataset.elementId) || shapeAt(point(event));
+        if (isShape(item)) beginLabel(item.id);
+    });
     canvas.addEventListener("wheel", (event) => {
         if (gesture || closed || !event.ctrlKey && !event.metaKey) return;
         event.preventDefault();
@@ -525,7 +842,7 @@
         zoomAt(event.deltaY < 0 ? 1.12 : 1 / 1.12, event.clientX - rect.left, event.clientY - rect.top);
     }, {passive: false});
     board.querySelectorAll("[data-board-tool]").forEach((button) =>
-        button.addEventListener("click", () => setTool(button.dataset.boardTool)));
+        button.addEventListener("click", () => { if (!gesture) setTool(button.dataset.boardTool); }));
     board.querySelectorAll("[data-board-zoom]").forEach((button) => button.addEventListener("click", () => {
         if (gesture || closed) return;
         if (button.dataset.boardZoom === "fit") {
@@ -539,27 +856,102 @@
         }
     }));
 
-    if (canEdit) {
-        properties.addEventListener("submit", (event) => {
+    const fullscreen = find("fullscreen");
+    const fullscreenLabel = fullscreen.querySelector(".board-tool-label");
+    const background = [];
+    function showFullscreenState() {
+        const expanded = document.fullscreenElement === board || board.classList.contains("board-editor--expanded");
+        const text = expanded ? "Свернуть доску" : "На весь экран";
+        fullscreen.setAttribute("aria-pressed", String(expanded));
+        fullscreen.title = text;
+        fullscreenLabel.textContent = text;
+        placeView();
+    }
+
+    function expandInWindow(expanded) {
+        board.classList.toggle("board-editor--expanded", expanded);
+        document.body.classList.toggle("board-expanded", expanded);
+        if (expanded) {
+            for (let node = board; node !== document.body; node = node.parentElement) {
+                for (const sibling of node.parentElement.children) {
+                    if (sibling !== node && sibling instanceof HTMLElement && !sibling.inert) {
+                        sibling.inert = true;
+                        background.push(sibling);
+                    }
+                }
+            }
+        } else {
+            while (background.length) background.pop().inert = false;
+        }
+        showFullscreenState();
+        fullscreen.focus({preventScroll: true});
+    }
+
+    fullscreen.addEventListener("click", async () => {
+        if (gesture) return;
+        if (document.fullscreenElement === board) {
+            await document.exitFullscreen();
+        } else if (board.classList.contains("board-editor--expanded")) {
+            expandInWindow(false);
+        } else {
+            try {
+                await board.requestFullscreen();
+            } catch {
+                expandInWindow(true);
+            }
+        }
+    });
+    document.addEventListener("fullscreenchange", showFullscreenState);
+    document.addEventListener("keydown", (event) => {
+        if (!event.defaultPrevented && event.key === "Escape" && board.classList.contains("board-editor--expanded")) {
             event.preventDefault();
-            const item = items.get(selected);
-            if (!item || item.deleted || !shapeKinds.has(item.kind) || busy || failedWrite) return;
-            change({id: item.id, revision: selectionRevision, kind: item.kind,
-                data: {...item.data, text: label.value}});
-        });
+            expandInWindow(false);
+        }
+    });
+
+    if (canEdit) {
+        find("edit-label").addEventListener("click", () => beginLabel(selected));
+        find("save-label").addEventListener("click", () => finishLabel());
         find("delete").addEventListener("click", () => {
-            const item = items.get(selected);
-            if (!item || item.deleted || busy || failedWrite) return;
-            change({id: item.id, revision: item.revision, delete: true});
+            if (deleteSelection()) canvas.focus({preventScroll: true});
+        });
+        label.addEventListener("input", showStatus);
+        board.addEventListener("keydown", (event) => {
+            if (event.isComposing) return;
+            if (event.key === "Escape") {
+                if (editing && finishLabel(true)) event.preventDefault();
+                else if (arrowStart || gesture?.mode === "arrow") {
+                    gesture = null;
+                    resetArrow();
+                    updateHint();
+                    paintPreview();
+                    event.preventDefault();
+                }
+                return;
+            }
+            if (event.ctrlKey || event.metaKey || event.altKey) return;
+            if (event.target === label) {
+                if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault();
+                    finishLabel();
+                }
+                return;
+            }
+            if (event.target.closest("input, select, textarea, [contenteditable]")) return;
+            if (event.key === "Delete" && !event.repeat && deleteSelection()) event.preventDefault();
+            if (event.key === "F2" && isShape(items.get(selected))) {
+                event.preventDefault();
+                beginLabel(selected);
+            }
         });
         const file = find("file");
         find("upload").addEventListener("click", () => {
-            if (!busy && !failedWrite && cursor !== null) file.click();
+            if (finishLabel() && canMutate()) file.click();
         });
         file.addEventListener("change", () => {
             const image = file.files[0];
             file.value = "";
-            if (!image || busy || failedWrite) return;
+            if (!image || !canMutate() || editing) return;
             if (image.size > 2 * 1024 * 1024) {
                 writeNotice = ["Выберите PNG или JPG до 2 МБ.", true];
                 showStatus();
@@ -575,7 +967,7 @@
         });
     }
 
-    retry.addEventListener("click", () => { if (failedWrite) send(failedWrite); });
+    retry.addEventListener("click", () => { if (failedWrite) send(failedWrite, true); });
     document.addEventListener("visibilitychange", () => {
         clearTimeout(pollTimer);
         if (!document.hidden) poll();
