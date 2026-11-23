@@ -27,7 +27,7 @@ from .board_payloads import (
     coordinate,
     normalize_image,
     read_history,
-    read_mutation,
+    read_changes,
 )
 from .models import Board, BoardElement, BoardLink, Project
 
@@ -247,11 +247,6 @@ def _snapshot(element):
     return _item({field: getattr(element, field) for field in ITEM_FIELDS})
 
 
-def _stored(element, before, related=()):
-    after = _snapshot(element)
-    return JsonResponse({"element": after, "changes": [{"before": before, "after": after}, *related]})
-
-
 def _attached_arrows(board, keys):
     return board.elements.filter(kind="arrow", deleted=False).filter(
         Q(data__source__in=keys) | Q(data__target__in=keys),
@@ -302,46 +297,59 @@ def board_change(request, **scope):
     if not access.can_edit:
         return HttpResponseForbidden()
     try:
-        key, version, kind, data = read_mutation(request)
+        mutations, grouped = read_changes(request)
     except InvalidBoardPayload as error:
         return _error(str(error))
     with transaction.atomic():
         board = _writable_board(access)
-        element = board.elements.defer("image").filter(key=key).first()
-        before = _snapshot(element) if element is not None else None
-        if element is None:
-            if version or kind is None or kind == "image":
-                return _error("Элемент не найден.", 409)
-            if board.elements.count() >= MAX_OBJECTS:
-                return _error("Достигнут лимит элементов доски.", 409)
-            element = BoardElement(board=board, key=key, kind=kind)
-        elif element.deleted or element.revision != version or (kind is not None and kind != element.kind):
-            return JsonResponse({
-                "error": "Элемент обновился. Проверьте его и повторите правку.",
-                "element": before,
-            }, status=409)
-
-        # The board lock keeps the endpoints valid until the arrow is saved.
-        if kind == "arrow" and (ends := arrow_ends(data)) != _live_shapes(board, ends):
-            return _error("Блок недоступен. Выберите фигуру на этой доске или оставьте конец свободным.", 409)
+        keys = [key for key, _, _, _ in mutations]
+        existing = {row.key: row for row in board.elements.filter(key__in=keys).defer("image")}
+        updates = []
+        retiring = []
+        for key, version, kind, data in mutations:
+            element = existing.get(key)
+            before = _snapshot(element) if element is not None else None
+            if element is None:
+                if version or grouped or kind in (None, "image"):
+                    return _error("Элемент не найден.", 409)
+                if board.elements.count() >= MAX_OBJECTS:
+                    return _error("Достигнут лимит элементов доски.", 409)
+                element = BoardElement(board=board, key=key, kind=kind)
+            elif element.deleted or element.revision != version or (kind is not None and kind != element.kind):
+                return JsonResponse({
+                    "error": "Элемент обновился. Проверьте его и повторите правку.",
+                    "element": before,
+                }, status=409)
+            if grouped and element.kind not in SHAPES:
+                return _error("Групповая правка доступна только для фигур и стикеров.")
+            # The board lock keeps the endpoints valid until the arrow is saved.
+            if kind == "arrow" and (ends := arrow_ends(data)) != _live_shapes(board, ends):
+                return _error("Блок недоступен. Выберите фигуру на этой доске или оставьте конец свободным.", 409)
+            if kind is None and element.kind in SHAPES:
+                retiring.append(str(key))
+            updates.append((element, before, data))
 
         board.revision += 1
-        element.revision = board.revision
-        related = []
-        if kind is None:
-            _mark_deleted(element)
-            if element.kind in SHAPES:
-                arrows = _attached_arrows(board, [str(key)])
-                for row in arrows.values(*ITEM_FIELDS):
-                    previous = _item(row)
-                    related.append({"before": previous, "after": {**previous,
-                        "deleted": True, "data": {}, "revision": board.revision}})
-                arrows.update(deleted=True, data={}, revision=board.revision)
+        for element, _, data in updates:
+            element.revision = board.revision
+            if data is None:
+                _mark_deleted(element)
+            else:
+                element.data = data
+        if grouped:
+            board.elements.bulk_update([element for element, _, _ in updates], ("revision", "deleted", "data"))
         else:
-            element.data = data
+            updates[0][0].save()
+        changes = [{"before": before, "after": _snapshot(element)} for element, before, _ in updates]
+        if retiring:
+            arrows = _attached_arrows(board, retiring)
+            for row in arrows.values(*ITEM_FIELDS):
+                before = _item(row)
+                changes.append({"before": before, "after": {**before,
+                    "deleted": True, "data": {}, "revision": board.revision}})
+            arrows.update(deleted=True, data={}, revision=board.revision)
         board.save(update_fields=("revision",))
-        element.save()
-    return _stored(element, before, related)
+    return JsonResponse({"changes": changes} if grouped else {"element": changes[0]["after"], "changes": changes})
 
 
 @never_cache
@@ -440,7 +448,8 @@ def board_upload(request, **scope):
             image=binary, image_type=content_type,
         )
         board.save(update_fields=("revision",))
-    return _stored(element, None)
+    after = _snapshot(element)
+    return JsonResponse({"element": after, "changes": [{"before": None, "after": after}]})
 
 
 @never_cache

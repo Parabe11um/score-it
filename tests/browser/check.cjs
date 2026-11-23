@@ -3,7 +3,7 @@
 const fs = require('node:fs');
 const assert = require('node:assert/strict');
 const {chromium, expect} = require('@playwright/test');
-const {checkBoards, checkBoardHistory} = require('./boards.cjs');
+const {checkBoards, checkBoardHistory, checkBoardGroupTools} = require('./boards.cjs');
 
 const input = JSON.parse(fs.readFileSync(0, 'utf8'));
 const {fixture, base_url: base} = input;
@@ -286,6 +286,8 @@ async function main() {
             checkBoards({base, project: fixture.project, owner, first, second, reader: anonymous}));
         await check('board_history_and_free_arrow_attachment', () =>
             checkBoardHistory({base, project: fixture.project, owner, first, second}));
+        await check('board_space_pan_quick_connections_and_group_edits', () =>
+            checkBoardGroupTools({base, project: fixture.project, owner, first, second}));
         await check('native_logout_removes_organizer_access', async () => {
             await nativePost(owner, '/logout/', () => owner.getByRole('button', {name: 'Выйти', exact: true}).click());
             await expect(owner).toHaveURL(base + '/login/');

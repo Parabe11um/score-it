@@ -14,12 +14,13 @@ MAX_COORDINATE = 100_000
 MAX_DIMENSION = 4_000
 MAX_TEXT = 240
 MAX_MUTATION_BYTES = 24 * 1024
-MAX_HISTORY_BYTES = 192 * 1024  # One deleted block may have up to 499 arrows.
+MAX_CHANGE_SET_BYTES = 768 * 1024  # Up to 500 shapes, including their UTF-8 labels.
 MAX_IMAGE_BYTES = 2 * 1024 * 1024
 MAX_BOARD_IMAGES = 10
 MAX_IMAGE_EDGE = 2048
 PALETTE = ("ink", "mint", "blue", "yellow", "pink")
-SHAPES = ("circle", "square", "rectangle", "note")
+SHAPES = ("circle", "square", "rectangle", "note", "ellipse", "diamond", "triangle", "hexagon", "data")
+PORTS = ("n", "e", "s", "w")
 
 
 class InvalidBoardPayload(ValueError):
@@ -59,6 +60,11 @@ def arrow_data(data):
             except (AttributeError, TypeError, ValueError) as exc:
                 raise InvalidBoardPayload("Некорректная привязка стрелки.") from exc
         result[side] = value
+    if "source_port" in data:
+        if result["source"] is None or data["source_port"] not in PORTS:
+            raise InvalidBoardPayload("Некорректная сторона привязки стрелки.")
+        fields.add("source_port")
+        result["source_port"] = data["source_port"]
     if data.keys() != fields:
         raise InvalidBoardPayload("Некорректные поля стрелки.")
     if result["source"] is not None and result["source"] == result["target"]:
@@ -142,27 +148,34 @@ def _mutation(change):
     return key, revision, kind, element_data(kind, change["data"])
 
 
-def read_mutation(request):
+def _mutation_set(changes):
+    if not isinstance(changes, list) or not 1 <= len(changes) <= MAX_OBJECTS:
+        raise InvalidBoardPayload("Некорректный набор изменений.")
+    mutations = [_mutation(change) for change in changes]
+    if len({key for key, _, _, _ in mutations}) != len(mutations) or any(not rev for _, rev, _, _ in mutations):
+        raise InvalidBoardPayload("Некорректные версии элементов.")
+    return mutations
+
+
+def read_changes(request):
     if request.content_type != "application/json":
         raise InvalidBoardPayload("Ожидается изменение в формате JSON.")
-    return _mutation(_json(request.read(MAX_MUTATION_BYTES + 1), MAX_MUTATION_BYTES))
+    raw = request.read(MAX_CHANGE_SET_BYTES + 1)
+    if raw.lstrip().startswith(b"["):
+        return _mutation_set(_json(raw, MAX_CHANGE_SET_BYTES)), True
+    return [_mutation(_json(raw, MAX_MUTATION_BYTES))], False
 
 
 def read_history(request):
     if request.content_type == "application/json":
-        raw = request.read(MAX_HISTORY_BYTES + 1)
+        raw = request.read(MAX_CHANGE_SET_BYTES + 1)
         upload = None
     elif request.content_type == "multipart/form-data":
         raw = request.POST.get("changes", "").encode("utf-8")
         upload = request.FILES.get("image")
     else:
         raise InvalidBoardPayload("Не удалось прочитать отмену или повтор.")
-    changes = _json(raw, MAX_HISTORY_BYTES)
-    if not isinstance(changes, list) or not 1 <= len(changes) <= MAX_OBJECTS:
-        raise InvalidBoardPayload("Некорректный набор изменений.")
-    mutations = [_mutation(change) for change in changes]
-    if len({key for key, _, _, _ in mutations}) != len(mutations) or any(not rev for _, rev, _, _ in mutations):
-        raise InvalidBoardPayload("Некорректные версии элементов.")
+    mutations = _mutation_set(_json(raw, MAX_CHANGE_SET_BYTES))
     if upload is not None and not 0 < upload.size <= MAX_IMAGE_BYTES:
         raise InvalidBoardPayload("Изображение должно быть не больше 2 МБ.")
     return mutations, upload

@@ -10,7 +10,7 @@
                     {% include "poker/board_tool.html" with tool="select" label="Выбрать" active=True only %}
                 {% endif %}
                 {% if can_edit %}
-                    {% include "poker/board_tool.html" with tool="hand" label="Рука" only %}
+                    {% include "poker/board_tool.html" with tool="hand" label="Рука" shortcut="Пробел" keys="Space" only %}
                 {% else %}
                     {% include "poker/board_tool.html" with tool="hand" label="Рука" active=True only %}
                 {% endif %}
@@ -20,6 +20,19 @@
                     {% include "poker/board_tool.html" with tool="circle" label="Круг" only %}
                     {% include "poker/board_tool.html" with tool="square" label="Квадрат" only %}
                     {% include "poker/board_tool.html" with tool="rectangle" label="Прямоугольник" only %}
+                    <details class="board-more-shapes">
+                        <summary>
+                            {% include "poker/board_tool_icon.html" with tool="shapes" only %}
+                            <span class="board-tool-label">Другие фигуры</span>
+                        </summary>
+                        <div class="board-tools" role="group" aria-label="Другие фигуры">
+                            {% include "poker/board_tool.html" with tool="ellipse" label="Овал" only %}
+                            {% include "poker/board_tool.html" with tool="diamond" label="Ромб" only %}
+                            {% include "poker/board_tool.html" with tool="triangle" label="Треугольник" only %}
+                            {% include "poker/board_tool.html" with tool="hexagon" label="Шестиугольник" only %}
+                            {% include "poker/board_tool.html" with tool="data" label="Параллелограмм" only %}
+                        </div>
+                    </details>
                     {% include "poker/board_tool.html" with tool="note" label="Стикер" only %}
                     {% include "poker/board_tool.html" with tool="upload" label="Изображение" only %}
                     <input type="file" data-board-file accept="image/png,image/jpeg" hidden>
@@ -40,7 +53,7 @@
                         <option value="pink">Розовый</option>
                     </select>
                 </div>
-                <div class="board-tools board-sidebar__section" role="group" aria-label="Выбранный элемент" data-board-properties hidden>
+                <div class="board-tools board-sidebar__section" role="group" aria-label="Выделение" data-board-properties hidden>
                     {% include "poker/board_tool.html" with tool="edit-label" label="Подпись" only %}
                     {% include "poker/board_tool.html" with tool="save-label" label="Готово" only %}
                     {% include "poker/board_tool.html" with tool="delete" label="Удалить элемент" only %}
