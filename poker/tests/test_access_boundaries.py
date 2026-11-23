@@ -22,7 +22,7 @@ from poker.models import (
 @override_settings(DEBUG=False, SECURE_PROXY_SSL_HEADER=("HTTP_X_FORWARDED_PROTO", "https"))
 class AccessBoundaryTests(TestCase):
     workspace_indices = ("user_settings", "voting_list", "sprint_list", "team_list")
-    board_api = {"board_state", "board_image", "board_change", "board_upload"}
+    board_api = {"board_state", "board_image", "board_change", "board_history", "board_upload"}
 
     @classmethod
     def setUpTestData(cls):
@@ -101,7 +101,7 @@ class AccessBoundaryTests(TestCase):
                                             'sprint_transfer_tasks', 'sprint_add_tasks')]
         writes += [(name, [s, item['resource'].pk]) for name in ('sprint_resource_update', 'sprint_resource_remove')]
         writes += [('sprint_remove_task', [s, item['task'].pk])]
-        writes += [(name, [p, b]) for name in ("board_change", "board_upload", "board_link_create")]
+        writes += [(name, [p, b]) for name in ("board_change", "board_history", "board_upload", "board_link_create")]
         writes += [("project_boards", [p]), ("board_link_revoke", [p, b, uuid.UUID(int=0)])]
         return reads, writes
 
@@ -128,7 +128,7 @@ class AccessBoundaryTests(TestCase):
                              *self.workspace_indices,
                              # Separate capability-based checks in test_boards.py.
                              'board_guest', 'board_guest_state', 'board_guest_image',
-                             'board_guest_change', 'board_guest_upload'}
+                             'board_guest_change', 'board_guest_history', 'board_guest_upload'}
         self.assertEqual({p.name for p in urlpatterns} - non_object_routes, {name for name, _ in reads + writes})
 
     def test_workspace_indices_require_an_organizer_login(self):
